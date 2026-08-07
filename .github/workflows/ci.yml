@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: linkiq
+          POSTGRES_PASSWORD: linkiq_ci
+          POSTGRES_DB: linkiq_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://linkiq:linkiq_ci@localhost:5432/linkiq_ci?schema=public
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Lint (web)
+        run: npm run lint --workspace=apps/web
+
+      - name: Typecheck (web)
+        run: npm run typecheck --workspace=apps/web
+
+      - name: Prisma generate
+        run: npm run prisma:generate --workspace=apps/api
+
+      - name: Typecheck (api)
+        run: npm run typecheck --workspace=apps/api
+
+      - name: Build (web)
+        run: npm run build --workspace=apps/web
+
+      - name: Build (api)
+        run: npm run build --workspace=apps/api
