@@ -9,15 +9,16 @@ echo "==> Copying environment files (skipping any that already exist)"
 [ -f .env ] || cp .env.example .env
 [ -f apps/web/.env ] || cp apps/web/.env.example apps/web/.env
 [ -f apps/api/.env ] || cp apps/api/.env.example apps/api/.env
+[ -f apps/docs/.env ] || cp apps/docs/.env.example apps/docs/.env
 
 echo "==> Installing dependencies"
 npm install
 
 echo "==> Starting Postgres + Redis via Docker Compose"
-docker compose up -d postgres redis
+docker compose --env-file .env --project-directory . -f docker/docker-compose.dev.yml up -d postgres redis
 
 echo "==> Waiting for Postgres to become healthy"
-until docker compose ps postgres | grep -q "healthy"; do
+until docker compose -f docker/docker-compose.dev.yml ps postgres | grep -q "healthy"; do
   sleep 2
 done
 
@@ -31,8 +32,9 @@ cat <<'MSG'
 
 Setup complete.
 
-  API:   npm run dev:api   (http://localhost:4000/api/v1)
-  Web:   npm run dev:web   (http://localhost:3000)
+  API:   npm run dev:api    (http://localhost:4000/api/v1)
+  Web:   npm run dev:web    (http://localhost:3000)
+  Docs:  npm run dev:docs   (http://localhost:3001)
 
   Demo user:  demo@linkiq.com  / Demo@12345
   Demo admin: admin@linkiq.com / Admin@12345

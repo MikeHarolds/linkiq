@@ -1,0 +1,92 @@
+name: linkiq-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: linkiq-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-linkiq}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-linkiq_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-linkiq}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - linkiq_postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-linkiq}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - linkiq-dev-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: linkiq-redis-dev
+    restart: unless-stopped
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - linkiq_redis_dev_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - linkiq-dev-network
+
+  api:
+    image: node:20-alpine
+    container_name: linkiq-api-dev
+    working_dir: /workspace
+    command: sh -c "npm install && npm run dev:api"
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ../apps/api/.env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-linkiq}:${POSTGRES_PASSWORD:-linkiq_dev_password}@postgres:5432/${POSTGRES_DB:-linkiq}?schema=public
+      REDIS_HOST: redis
+    volumes:
+      - ../:/workspace
+      - linkiq_api_node_modules:/workspace/node_modules
+    ports:
+      - '${API_PORT:-4000}:4000'
+    networks:
+      - linkiq-dev-network
+
+  web:
+    image: node:20-alpine
+    container_name: linkiq-web-dev
+    working_dir: /workspace
+    command: sh -c "npm install && npm run dev:web"
+    restart: unless-stopped
+    depends_on:
+      - api
+    env_file:
+      - ../apps/web/.env
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-4000}/api/v1
+    volumes:
+      - ../:/workspace
+      - linkiq_web_node_modules:/workspace/node_modules
+    ports:
+      - '${WEB_PORT:-3000}:3000'
+    networks:
+      - linkiq-dev-network
+
+networks:
+  linkiq-dev-network:
+    driver: bridge
+
+volumes:
+  linkiq_postgres_dev_data:
+  linkiq_redis_dev_data:
+  linkiq_api_node_modules:
+  linkiq_web_node_modules:

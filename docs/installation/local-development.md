@@ -17,41 +17,40 @@ cd linkiq
 npm install
 ```
 
-This installs dependencies for all workspaces (`apps/web`, `apps/api`,
-`packages/shared-types`) in one pass via npm workspaces.
+This installs dependencies for every workspace (`apps/web`, `apps/api`,
+`apps/docs`, `packages/ui`, `packages/config`, `packages/types`,
+`packages/utils`) in one pass via npm workspaces, and sets up Husky git
+hooks via the `prepare` script.
 
 ## 2. Configure environment variables
 
-Copy each `.env.example` to `.env` and adjust values as needed:
+Copy each `.env.example` to `.env`:
 
 ```bash
 cp .env.example .env
 cp apps/web/.env.example apps/web/.env
 cp apps/api/.env.example apps/api/.env
+cp apps/docs/.env.example apps/docs/.env
 ```
 
-| File | Purpose |
-|------|---------|
-| `.env` | Values consumed by `docker-compose.yml` (Postgres/Redis credentials, ports) |
-| `apps/api/.env` | NestJS backend (`DATABASE_URL`, JWT secrets, Redis, throttling) |
-| `apps/web/.env` | Next.js frontend (`NEXT_PUBLIC_API_URL`) |
+| File             | Purpose                                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `.env`           | Values consumed by `docker/docker-compose.dev.yml` and `docker/docker-compose.prod.yml` (Postgres/Redis credentials, ports) |
+| `apps/api/.env`  | NestJS backend (`DATABASE_URL`, JWT secrets, Redis, logging, throttling)                                                    |
+| `apps/web/.env`  | Next.js frontend (`NEXT_PUBLIC_API_URL`)                                                                                    |
+| `apps/docs/.env` | Documentation site                                                                                                          |
 
-For local development, the default values in the `.env.example` files work
-out of the box — just make sure `apps/api/.env`'s `DATABASE_URL` matches the
-Postgres credentials in the root `.env`.
+Default values in every `.env.example` work out of the box for local
+development — just make sure `apps/api/.env`'s `DATABASE_URL` credentials
+match the root `.env`'s `POSTGRES_*` values.
 
 ## 3. Start infrastructure (Postgres + Redis)
 
-```bash
-npm run docker:up
-```
-
-This starts only what's defined in `docker-compose.yml`. For local dev you
-typically want just the databases running in Docker, with the frontend and
-backend running natively for fast reloads:
+Using the provided dev Compose file (only starts the databases, not the apps
+— run the apps natively for the fastest reload loop):
 
 ```bash
-docker compose up -d postgres redis
+docker compose --env-file .env --project-directory . -f docker/docker-compose.dev.yml up -d postgres redis
 ```
 
 ## 4. Run Prisma migrations and seed data
@@ -71,27 +70,37 @@ This creates:
 In separate terminals:
 
 ```bash
-npm run dev:api   # NestJS on http://localhost:4000/api/v1
-npm run dev:web   # Next.js on http://localhost:3000
+npm run dev:api    # NestJS on http://localhost:4000/api/v1
+npm run dev:web    # Next.js on http://localhost:3000
+npm run dev:docs   # Docs site on http://localhost:3001
 ```
 
-Check the API health endpoint:
+Check the API:
 
 ```bash
 curl http://localhost:4000/api/v1/health
 ```
 
+Swagger UI is available at `http://localhost:4000/api/v1/docs`.
+
 ## Full Docker workflow (optional)
 
-To run everything — Postgres, Redis, API, and Web — in containers:
+To run everything — Postgres, Redis, API, and Web, with bind-mounted source
+and hot reload — in containers:
 
 ```bash
-npm run docker:up
+npm run docker:up      # docker compose -f docker/docker-compose.dev.yml up -d --build
+npm run docker:down
 ```
 
-Then run migrations/seed against the containerized database (the
-`DATABASE_URL` in `apps/api/.env` should point at `localhost:5432` when run
-from the host, or `postgres:5432` if run from inside the `api` container).
+This is equivalent to `docker compose --env-file .env --project-directory . -f docker/docker-compose.dev.yml up -d --build`.
+It mounts the repo into the `api` and `web` containers and runs `npm install
+&& npm run dev:*` inside each, so file changes on your host are picked up
+immediately.
+
+For a production-like build (multi-stage images, no bind mounts, standalone
+Next.js output), see
+[`docs/deployment/production-deployment.md`](../deployment/production-deployment.md).
 
 ## Development workflow
 
@@ -99,17 +108,25 @@ from the host, or `postgres:5432` if run from inside the `api` container).
   (controller → service → Prisma). Business logic stays in services, not
   controllers.
 - Frontend follows the Next.js App Router convention under
-  `apps/web/src/app`, with shared UI in `apps/web/src/components`.
-- Shared types (DTOs used by both frontend and backend) live in
-  `packages/shared-types`.
-- Run `npm run lint` before committing.
+  `apps/web/src/app`, using route groups (`(marketing)`, `(auth)`,
+  `(dashboard)`) for layout separation.
+- Shared UI components live in `packages/ui`; shared utilities in
+  `packages/utils`; shared types/DTOs in `packages/types`. Since these ship
+  TypeScript source directly (no build step) and are consumed via Next's
+  `transpilePackages`, changes are picked up immediately in dev — no
+  rebuild/republish step.
+- Run `npm run lint`, `npm run typecheck`, and `npm run build` before
+  pushing (see [`docs/development-workflow.md`](../development-workflow.md)
+  for the full workflow, commit conventions, and pre-commit hooks).
 
 ## Troubleshooting
 
-| Symptom | Fix |
-|---------|-----|
-| `Prisma Client did not initialize` | Run `npm run prisma:generate --workspace=apps/api` |
-| API can't reach Postgres | Confirm `docker compose ps` shows `postgres` healthy, and `DATABASE_URL` host/port match |
-| Port already in use | Change `PORT` / `WEB_PORT` / `API_PORT` in the relevant `.env` file |
-| `EADDRINUSE` on Redis | Another local Redis instance is running; stop it or change `REDIS_PORT` |
-| Seed fails with unique constraint errors | Seed is idempotent (`upsert`); if it still fails, reset with `npx prisma migrate reset --workspace=apps/api` (drops and reseeds) |
+| Symptom                                              | Fix                                                                                                                                   |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `Prisma Client did not initialize`                   | Run `npm run db:generate`                                                                                                             |
+| API can't reach Postgres                             | Confirm the `postgres` container is healthy (`docker compose -f docker/docker-compose.dev.yml ps`) and `DATABASE_URL` host/port match |
+| Port already in use                                  | Change `PORT` / `WEB_PORT` / `API_PORT` in the relevant `.env` file                                                                   |
+| `EADDRINUSE` on Redis                                | Another local Redis instance is running; stop it or change `REDIS_PORT`                                                               |
+| Seed fails with unique constraint errors             | Seed is idempotent (`upsert`); if it still fails, reset with `npx prisma migrate reset --workspace=apps/api` (drops and reseeds)      |
+| ESLint can't resolve `@linkiq/config/eslint/*`       | Run `npm install` again at the repo root — this is a workspace symlink issue, not a config bug                                        |
+| Next.js can't resolve `@linkiq/ui` / `@linkiq/utils` | Confirm they're listed in that app's `next.config.js` `transpilePackages` array                                                       |

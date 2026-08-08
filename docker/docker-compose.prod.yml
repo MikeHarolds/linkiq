@@ -1,0 +1,78 @@
+name: linkiq-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: linkiq-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - linkiq_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - linkiq-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: linkiq-redis
+    restart: unless-stopped
+    command: ['redis-server', '--requirepass', '${REDIS_PASSWORD}']
+    volumes:
+      - linkiq_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD}', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - linkiq-network
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    image: linkiq-api:latest
+    container_name: linkiq-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ../apps/api/.env.production
+    ports:
+      - '${API_PORT:-4000}:4000'
+    networks:
+      - linkiq-network
+
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+    image: linkiq-web:latest
+    container_name: linkiq-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    env_file:
+      - ../apps/web/.env.production
+    ports:
+      - '${WEB_PORT:-3000}:3000'
+    networks:
+      - linkiq-network
+
+networks:
+  linkiq-network:
+    driver: bridge
+
+volumes:
+  linkiq_postgres_data:
+  linkiq_redis_data:

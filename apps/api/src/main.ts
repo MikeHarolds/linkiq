@@ -1,13 +1,16 @@
-import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
+import { Logger } from 'nestjs-pino';
+
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, {
-    logger: ['error', 'warn', 'log'],
-  });
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+
+  app.useLogger(app.get(Logger));
 
   const configPrefix = process.env.API_PREFIX ?? 'api/v1';
   app.setGlobalPrefix(configPrefix);
@@ -30,10 +33,21 @@ async function bootstrap(): Promise<void> {
 
   app.useGlobalFilters(new HttpExceptionFilter());
 
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('LinkIQ API')
+    .setDescription(
+      'Public and internal REST API for the LinkIQ link management platform.',
+    )
+    .setVersion('0.1.0')
+    .addBearerAuth()
+    .build();
+  const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup(`${configPrefix}/docs`, app, swaggerDocument, {
+    swaggerOptions: { persistAuthorization: true },
+  });
+
   const port = process.env.PORT ?? 4000;
   await app.listen(port);
-  // eslint-disable-next-line no-console
-  console.log(`LinkIQ API running on http://localhost:${port}/${configPrefix}`);
 }
 
 bootstrap();

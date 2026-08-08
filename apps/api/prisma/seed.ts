@@ -108,9 +108,21 @@ async function seedAdminUser() {
 
 async function seedFeatureFlags() {
   const flags = [
-    { key: 'ai_insights', description: 'AI-powered link and campaign insights', enabled: true },
-    { key: 'custom_domains', description: 'Bring-your-own branded short domains', enabled: true },
-    { key: 'webhooks', description: 'Outbound webhooks for link events', enabled: false },
+    {
+      key: 'ai_insights',
+      description: 'AI-powered link and campaign insights',
+      enabled: true,
+    },
+    {
+      key: 'custom_domains',
+      description: 'Bring-your-own branded short domains',
+      enabled: true,
+    },
+    {
+      key: 'webhooks',
+      description: 'Outbound webhooks for link events',
+      enabled: false,
+    },
   ];
 
   for (const flag of flags) {

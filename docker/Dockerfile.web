@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1
+# LinkIQ Web — production image (Next.js, standalone output)
+
+# ---- Base ----
+FROM node:20-alpine AS base
+WORKDIR /app
+RUN apk add --no-cache libc6-compat
+
+# ---- Dependencies ----
+# apps/web depends on workspace packages (@linkiq/ui, utils, types, config),
+# so their package.json files must be present for npm workspace resolution.
+FROM base AS deps
+COPY package.json package-lock.json ./
+COPY apps/web/package.json apps/web/package.json
+COPY packages/ui/package.json packages/ui/package.json
+COPY packages/utils/package.json packages/utils/package.json
+COPY packages/types/package.json packages/types/package.json
+COPY packages/config/package.json packages/config/package.json
+RUN npm ci --workspace=apps/web --include-workspace-root
+
+# ---- Build ----
+FROM base AS build
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
+COPY package.json package-lock.json ./
+COPY apps/web apps/web
+COPY packages packages
+WORKDIR /app/apps/web
+RUN npm run build
+
+# ---- Runtime ----
+FROM node:20-alpine AS runtime
+WORKDIR /app
+RUN addgroup -S linkiq && adduser -S linkiq -G linkiq
+ENV NODE_ENV=production
+COPY --from=build /app/apps/web/public ./public
+COPY --from=build --chown=linkiq:linkiq /app/apps/web/.next/standalone ./
+COPY --from=build --chown=linkiq:linkiq /app/apps/web/.next/static ./apps/web/.next/static
+USER linkiq
+EXPOSE 3000
+CMD ["node", "apps/web/server.js"]

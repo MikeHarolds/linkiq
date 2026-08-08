@@ -10,15 +10,48 @@
   "scripts": {
     "dev:web": "npm run dev --workspace=apps/web",
     "dev:api": "npm run start:dev --workspace=apps/api",
+    "dev:docs": "npm run dev --workspace=apps/docs",
     "build:web": "npm run build --workspace=apps/web",
     "build:api": "npm run build --workspace=apps/api",
-    "lint": "npm run lint --workspace=apps/web && npm run lint --workspace=apps/api",
+    "build:docs": "npm run build --workspace=apps/docs",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\" --ignore-path .gitignore --ignore-path .prettierignore",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\" --ignore-path .gitignore --ignore-path .prettierignore",
+    "db:generate": "npm run prisma:generate --workspace=apps/api",
     "db:migrate": "npm run prisma:migrate --workspace=apps/api",
+    "db:deploy": "npm run prisma:deploy --workspace=apps/api",
     "db:seed": "npm run prisma:seed --workspace=apps/api",
-    "docker:up": "docker compose up -d --build",
-    "docker:down": "docker compose down"
+    "db:studio": "npm run prisma:studio --workspace=apps/api",
+    "docker:up": "docker compose --env-file .env --project-directory . -f docker/docker-compose.dev.yml up -d --build",
+    "docker:down": "docker compose --env-file .env --project-directory . -f docker/docker-compose.dev.yml down",
+    "docker:prod:up": "docker compose --env-file .env --project-directory . -f docker/docker-compose.prod.yml up -d --build",
+    "docker:prod:down": "docker compose --env-file .env --project-directory . -f docker/docker-compose.prod.yml down",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.5.0",
+    "@commitlint/config-conventional": "^19.5.0",
+    "husky": "^9.1.6",
+    "lint-staged": "^15.2.10",
+    "prettier": "^3.3.3",
+    "prettier-plugin-tailwindcss": "^0.6.8"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "*.{js,jsx}": [
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
   }
 }

@@ -33,8 +33,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const message =
       typeof exceptionResponse === 'string'
         ? exceptionResponse
-        : (exceptionResponse as { message?: string | string[] }).message ??
-          'Unexpected error';
+        : ((exceptionResponse as { message?: string | string[] }).message ??
+          'Unexpected error');
 
     if (!isHttpException) {
       this.logger.error(exception);

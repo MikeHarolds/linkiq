@@ -1,0 +1,39 @@
+# syntax=docker/dockerfile:1
+# LinkIQ API — production image (NestJS)
+
+# ---- Base ----
+FROM node:20-alpine AS base
+WORKDIR /app
+RUN apk add --no-cache libc6-compat openssl
+
+# ---- Dependencies ----
+# apps/api has no workspace:* dependencies on other packages today, but we
+# still install from the workspace root so the lockfile stays authoritative.
+FROM base AS deps
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+RUN npm ci --workspace=apps/api --include-workspace-root
+
+# ---- Build ----
+FROM base AS build
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
+COPY package.json package-lock.json ./
+COPY apps/api apps/api
+WORKDIR /app/apps/api
+RUN npx prisma generate
+RUN npm run build
+
+# ---- Runtime ----
+FROM node:20-alpine AS runtime
+WORKDIR /app
+RUN apk add --no-cache openssl && \
+    addgroup -S linkiq && adduser -S linkiq -G linkiq
+ENV NODE_ENV=production
+COPY --from=build /app/apps/api/dist ./dist
+COPY --from=build /app/apps/api/node_modules ./node_modules
+COPY --from=build /app/apps/api/prisma ./prisma
+COPY --from=build /app/apps/api/package.json ./package.json
+USER linkiq
+EXPOSE 4000
+CMD ["node", "dist/main.js"]
