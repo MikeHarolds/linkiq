@@ -29,6 +29,18 @@ enum WorkspaceRole {
   VIEWER
 }
 
+/// Stored lifecycle states for a Link. Deliberately does NOT include an
+/// EXPIRED value — expiry is derived from `expiresAt` at read time instead
+/// of being a stored state. Storing EXPIRED would require a background job
+/// to flip status the instant `expiresAt` passes, and any lag in that job
+/// would let an expired link keep redirecting. Deriving it means expiry is
+/// always correct without needing a scheduler in the loop.
+enum LinkStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
 // ---------------------------------------------------------------------------
 // Identity & Multi-tenancy
 // ---------------------------------------------------------------------------
@@ -48,10 +60,11 @@ model User {
   updatedAt DateTime @updatedAt
 
   memberships         WorkspaceMember[]
-  ownedOrgs           Organization[]      @relation("OrganizationOwner")
+  ownedOrgs           Organization[]       @relation("OrganizationOwner")
   auditLogs           AuditLog[]
   refreshTokens       RefreshToken[]
   passwordResetTokens PasswordResetToken[]
+  createdLinks        Link[]               @relation("LinkCreator")
 
   @@index([email])
   @@map("users")
@@ -85,6 +98,7 @@ model Workspace {
 
   members   WorkspaceMember[]
   auditLogs AuditLog[]
+  links     Link[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
@@ -148,6 +162,73 @@ model PasswordResetToken {
 
   @@index([userId])
   @@map("password_reset_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Link Management
+// ---------------------------------------------------------------------------
+
+/// A shortened link. `shortCode` is globally unique (not per-workspace) —
+/// the public redirect route is GET /{shortCode} with no workspace
+/// disambiguation in the URL, so the code must resolve unambiguously across
+/// the whole platform, the same way real-world shorteners work.
+model Link {
+  id             String     @id @default(uuid()) @db.Uuid
+  workspaceId    String     @db.Uuid
+  workspace      Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdById    String?    @db.Uuid
+  createdBy      User?      @relation("LinkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  destinationUrl String
+  shortCode      String     @unique
+  title          String?
+  description    String?
+  status         LinkStatus @default(ACTIVE)
+  /// Denormalized fast-path flag for the redirect hot path: true iff
+  /// status = ACTIVE. Kept in sync by the application on every status
+  /// transition. Lets the redirect query and its supporting index avoid an
+  /// enum comparison — a plain boolean partial index is the cheapest
+  /// possible filter for the single highest-volume query in the system.
+  isActive  Boolean   @default(true)
+  expiresAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  clickEvents ClickEvent[]
+
+  @@index([workspaceId])
+  @@index([createdById])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([createdAt])
+  // Composite index for the redirect hot path: WHERE shortCode = ? AND
+  // "deletedAt" IS NULL is the exact predicate the redirect resolver uses.
+  @@index([shortCode, deletedAt])
+  @@map("links")
+}
+
+/// Foundation for the future analytics engine (Sprint 3+). Written
+/// asynchronously via a BullMQ job enqueued from the redirect path — never
+/// written synchronously inline with a redirect response, so a slow
+/// analytics write can never slow down a redirect.
+model ClickEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  linkId      String   @db.Uuid
+  link        Link     @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  /// Denormalized from the link at write time so workspace-scoped click
+  /// queries (once analytics exists) don't need to join through Link.
+  workspaceId String   @db.Uuid
+  occurredAt  DateTime @default(now())
+  ipAddress   String?
+  userAgent   String?
+  referer     String?
+  createdAt   DateTime @default(now())
+
+  @@index([linkId])
+  @@index([workspaceId])
+  @@index([occurredAt])
+  @@map("click_events")
 }
 
 // ---------------------------------------------------------------------------

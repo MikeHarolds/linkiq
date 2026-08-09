@@ -10,6 +10,7 @@ import redisConfig from './config/redis.config';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
+import { LinksModule } from './modules/links/links.module';
 import { LoggingModule } from './modules/logging/logging.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { QueueModule } from './modules/queue/queue.module';
@@ -42,7 +43,8 @@ const disableRateLimitForTests =
     AuthModule,
     UsersModule,
     WorkspacesModule,
-    // Links, Campaigns, QrCodes, Domains, Analytics, Billing, Webhooks, and
+    LinksModule,
+    // Campaigns, QrCodes, Domains, Analytics, Billing, Webhooks, and
     // Admin modules are added in subsequent milestones.
   ],
   providers: [

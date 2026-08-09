@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
+import type { Redis } from 'ioredis';
 import request from 'supertest';
 
 import type { PrismaService } from '../src/modules/prisma/prisma.service';
@@ -19,21 +20,23 @@ function getSetCookie(res: request.Response): string {
 describe('Auth (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
+  let redis: Redis;
   let server: Parameters<typeof request>[0];
 
   beforeAll(async () => {
     const testApp = await createTestApp();
     app = testApp.app;
     prisma = testApp.prisma;
+    redis = testApp.redis;
     server = app.getHttpServer();
   });
 
   beforeEach(async () => {
-    await resetDatabase(prisma);
+    await resetDatabase(prisma, redis);
   });
 
   afterAll(async () => {
-    await resetDatabase(prisma);
+    await resetDatabase(prisma, redis);
     await app.close();
   });
 

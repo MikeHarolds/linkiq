@@ -1,19 +1,29 @@
 /**
  * LinkIQ — Database Seed Script
  *
- * Foundation milestone scope:
- *   - Creates the demo user and demo admin accounts
- *   - Creates a starter organization + workspace for the demo user
- *   - Seeds a small set of platform feature flags
+ * Creates:
+ *   - The demo user and demo admin accounts
+ *   - A starter organization + workspace for the demo user
+ *   - A small set of platform feature flags
+ *   - 11 realistic demo links for the demo user, spanning every lifecycle
+ *     state (active, active-with-future-expiry, paused, active-but-
+ *     past-expiry, archived) — no fake click counts (analytics doesn't
+ *     exist yet; see Sprint 2 spec)
  *
  * NOT yet implemented (arrives with the relevant feature milestone):
- *   - Short links, QR codes, campaigns, analytics events, AI insights,
- *     tags, notifications, activity history, custom domains
+ *   - QR codes, campaigns, analytics events, AI insights, tags,
+ *     notifications, activity history, custom domains
  *
  * Run with: npm run prisma:seed --workspace=apps/api
  */
 
-import { PrismaClient, GlobalRole, WorkspaceRole } from '@prisma/client';
+import {
+  GlobalRole,
+  LinkStatus,
+  PrismaClient,
+  WorkspaceRole,
+} from '@prisma/client';
+import type { Workspace, User } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -85,6 +95,128 @@ async function seedDemoUser() {
   return { user, organization, workspace };
 }
 
+async function seedDemoLinks(workspace: Workspace, user: User) {
+  const now = Date.now();
+  const days = (n: number) => new Date(now + n * 24 * 60 * 60 * 1000);
+
+  const links: Array<{
+    shortCode: string;
+    destinationUrl: string;
+    title: string;
+    description?: string;
+    status: LinkStatus;
+    isActive: boolean;
+    expiresAt?: Date;
+  }> = [
+    {
+      shortCode: 'demo-launch',
+      destinationUrl: 'https://linkiq.example/blog/product-launch-2026',
+      title: 'Product Launch Announcement',
+      description: 'Blog post announcing the Q1 product launch.',
+      status: LinkStatus.ACTIVE,
+      isActive: true,
+    },
+    {
+      shortCode: 'demo-docs',
+      destinationUrl: 'https://docs.linkiq.example/getting-started',
+      title: 'Getting Started Docs',
+      description: 'Shared in onboarding emails.',
+      status: LinkStatus.ACTIVE,
+      isActive: true,
+    },
+    {
+      shortCode: 'demo-webinar',
+      destinationUrl:
+        'https://linkiq.example/events/spring-webinar-registration',
+      title: 'Spring Webinar Registration',
+      status: LinkStatus.ACTIVE,
+      isActive: true,
+      expiresAt: days(14),
+    },
+    {
+      shortCode: 'demo-pricing',
+      destinationUrl: 'https://linkiq.example/pricing',
+      title: 'Pricing Page',
+      description: 'Used in the header nav short link for print materials.',
+      status: LinkStatus.ACTIVE,
+      isActive: true,
+    },
+    {
+      shortCode: 'demo-changelog',
+      destinationUrl: 'https://linkiq.example/changelog',
+      title: 'Product Changelog',
+      status: LinkStatus.ACTIVE,
+      isActive: true,
+    },
+    // Paused: temporarily disabled, history preserved.
+    {
+      shortCode: 'demo-promo-winter',
+      destinationUrl: 'https://linkiq.example/promo/winter-sale',
+      title: 'Winter Sale Promo (paused)',
+      description: 'Paused after the promotion period ended early.',
+      status: LinkStatus.PAUSED,
+      isActive: false,
+    },
+    {
+      shortCode: 'demo-survey',
+      destinationUrl: 'https://linkiq.example/survey/customer-feedback-2025',
+      title: 'Customer Feedback Survey (paused)',
+      status: LinkStatus.PAUSED,
+      isActive: false,
+    },
+    // Expired: ACTIVE status, but expiresAt already passed — the redirect
+    // engine derives "expired" from this, not from a stored status.
+    {
+      shortCode: 'demo-conf-2025',
+      destinationUrl: 'https://linkiq.example/events/conf-2025-agenda',
+      title: 'LinkIQ Conf 2025 Agenda',
+      description: 'Event ended; link expired automatically.',
+      status: LinkStatus.ACTIVE,
+      isActive: true,
+      expiresAt: days(-30),
+    },
+    {
+      shortCode: 'demo-flash-sale',
+      destinationUrl: 'https://linkiq.example/promo/24hr-flash-sale',
+      title: '24-Hour Flash Sale',
+      status: LinkStatus.ACTIVE,
+      isActive: true,
+      expiresAt: days(-2),
+    },
+    // Archived: retained for history, cannot redirect.
+    {
+      shortCode: 'demo-old-landing',
+      destinationUrl: 'https://linkiq.example/legacy/2024-landing-page',
+      title: '2024 Landing Page (archived)',
+      description: 'Superseded by the current landing page.',
+      status: LinkStatus.ARCHIVED,
+      isActive: false,
+    },
+    {
+      shortCode: 'demo-beta-signup',
+      destinationUrl: 'https://linkiq.example/beta/signup-closed',
+      title: 'Beta Signup (archived)',
+      description: 'Beta program has concluded.',
+      status: LinkStatus.ARCHIVED,
+      isActive: false,
+    },
+  ];
+
+  for (const link of links) {
+    await prisma.link.upsert({
+      where: { shortCode: link.shortCode },
+      update: {},
+      create: {
+        workspaceId: workspace.id,
+        createdById: user.id,
+        ...link,
+      },
+    });
+  }
+
+  console.log(`Seeded ${links.length} demo links`);
+}
+
 async function seedAdminUser() {
   const email = process.env.DEMO_ADMIN_EMAIL ?? 'admin@linkiq.com';
   const password = process.env.DEMO_ADMIN_PASSWORD ?? 'Admin@12345';
@@ -139,13 +271,15 @@ async function seedFeatureFlags() {
 async function main() {
   console.log('Seeding LinkIQ database...\n');
 
-  await seedDemoUser();
+  const { user, workspace } = await seedDemoUser();
   await seedAdminUser();
   await seedFeatureFlags();
+  await seedDemoLinks(workspace, user);
 
-  // TODO (future milestones): seed short links, QR codes, campaigns,
-  // analytics events, AI insights, tags, notifications, activity history,
-  // and custom domains for the demo account once those modules exist.
+  // TODO (future milestones): seed QR codes, campaigns, click analytics
+  // events, AI insights, tags, notifications, activity history, and
+  // custom domains for the demo account once those modules exist.
+  // Deliberately NOT generating fake click counts here — see Sprint 2 spec.
 
   console.log('\nSeed complete.');
 }

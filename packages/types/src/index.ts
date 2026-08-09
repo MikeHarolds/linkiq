@@ -57,5 +57,44 @@ export interface ApiErrorResponse {
   timestamp: string;
 }
 
-// Link, Campaign, QrCode, Analytics, and Billing DTOs are added
+export type LinkStatus = 'ACTIVE' | 'PAUSED' | 'ARCHIVED';
+
+export interface LinkDto {
+  id: string;
+  workspaceId: string;
+  createdById: string | null;
+  destinationUrl: string;
+  shortCode: string;
+  title: string | null;
+  description: string | null;
+  status: LinkStatus;
+  isActive: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+export interface PaginationMeta {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+}
+
+export interface PaginatedLinksDto {
+  items: LinkDto[];
+  pagination: PaginationMeta;
+}
+
+export interface LinkStatsDto {
+  totalLinks: number;
+  activeLinks: number;
+  pausedLinks: number;
+  expiredLinks: number;
+  archivedLinks: number;
+  recentLinks: LinkDto[];
+}
+
+// Campaign, QrCode, Analytics, and Billing DTOs are added
 // as their respective backend modules are implemented.

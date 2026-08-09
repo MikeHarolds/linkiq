@@ -7,11 +7,24 @@ import { Logger } from 'nestjs-pino';
 
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { registerRedirectRoute } from './modules/links/redirect-route';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
   app.useLogger(app.get(Logger));
+
+  // Registered FIRST, before any of Nest's own routing middleware is
+  // mounted (that happens during app.init()/app.listen() below). Express
+  // checks middleware/routes in registration order, and Nest's router
+  // responds to an unmatched path with its own 404 rather than yielding
+  // to anything registered afterward — so this MUST come before
+  // setGlobalPrefix and before Nest's controllers are wired up, or it's
+  // never reached (verified empirically: registering it after app.init()
+  // resulted in Nest's own "Cannot GET /whatever" 404 every time). The
+  // route pattern itself (a single path segment, /:shortCode) can't
+  // collide with any /api/v1/* route since those have more segments.
+  registerRedirectRoute(app);
 
   // API_PREFIX already carries the version segment (e.g. "api/v1"), so we
   // deliberately do NOT also call app.enableVersioning(URI) — combining
