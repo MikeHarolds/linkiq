@@ -1,6 +1,7 @@
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 
@@ -17,6 +18,7 @@ async function bootstrap(): Promise<void> {
   app.enableVersioning({ type: VersioningType.URI });
 
   app.use(helmet());
+  app.use(cookieParser());
   app.enableCors({
     origin: process.env.CORS_ORIGIN?.split(',') ?? '*',
     credentials: true,

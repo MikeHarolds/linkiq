@@ -1,3 +1,5 @@
+'use client';
+
 import {
   Avatar,
   AvatarFallback,
@@ -10,8 +12,19 @@ import {
   DropdownMenuTrigger,
   Separator,
 } from '@linkiq/ui';
+import {
+  Check,
+  ChevronsUpDown,
+  LogOut,
+  Settings,
+  User as UserIcon,
+} from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
+import * as React from 'react';
+
+import { useAuth } from '@/providers/auth-provider';
 
 const NAV_ITEMS = [
   { label: 'Overview', href: '/dashboard' },
@@ -21,12 +34,50 @@ const NAV_ITEMS = [
   { label: 'Settings', href: '/dashboard/settings' },
 ] as const;
 
+function initials(firstName: string, lastName: string): string {
+  return `${firstName[0] ?? ''}${lastName[0] ?? ''}`.toUpperCase();
+}
+
 /**
- * Shell for authenticated app routes: fixed sidebar + top bar.
- * Navigation items are placeholders; the routes they point to are
- * implemented in their respective feature milestones.
+ * Shell for authenticated app routes: fixed sidebar + top bar. Client-side
+ * enforces the "must be authenticated" boundary (redirects to /login once
+ * the initial silent-refresh resolves and there's no user) — this is a UX
+ * convenience layered on top of the real enforcement, which is every
+ * protected API endpoint rejecting unauthenticated requests server-side.
  */
 export default function DashboardLayout({ children }: { children: ReactNode }) {
+  const router = useRouter();
+  const {
+    user,
+    workspaces,
+    currentWorkspaceId,
+    switchWorkspace,
+    logout,
+    isLoading,
+    isAuthenticated,
+  } = useAuth();
+
+  React.useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      router.replace('/login');
+    }
+  }, [isLoading, isAuthenticated, router]);
+
+  const currentWorkspace = workspaces.find((w) => w.id === currentWorkspaceId);
+
+  async function handleLogout() {
+    await logout();
+    router.push('/login');
+  }
+
+  if (isLoading || !user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
+        Loading…
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen">
       <aside className="hidden w-60 flex-col border-r bg-muted/20 md:flex">
@@ -36,7 +87,42 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </Link>
         </div>
         <Separator />
-        <nav className="flex flex-1 flex-col gap-1 p-4">
+
+        {workspaces.length > 0 && (
+          <div className="p-3">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="w-full justify-between font-normal"
+                >
+                  <span className="truncate">
+                    {currentWorkspace?.name ?? 'Select workspace'}
+                  </span>
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {workspaces.map((workspace) => (
+                  <DropdownMenuItem
+                    key={workspace.id}
+                    onClick={() => switchWorkspace(workspace.id)}
+                    className="justify-between"
+                  >
+                    <span className="truncate">{workspace.name}</span>
+                    {workspace.id === currentWorkspaceId && (
+                      <Check className="h-4 w-4 shrink-0" />
+                    )}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
+
+        <nav className="flex flex-1 flex-col gap-1 p-4 pt-0">
           {NAV_ITEMS.map((item) => (
             <Link
               key={item.href}
@@ -58,17 +144,44 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 className="relative h-9 w-9 rounded-full p-0"
               >
                 <Avatar>
-                  <AvatarFallback>DU</AvatarFallback>
+                  <AvatarFallback>
+                    {initials(user.firstName, user.lastName)}
+                  </AvatarFallback>
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>My Account</DropdownMenuLabel>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="font-normal">
+                <div className="flex flex-col space-y-1">
+                  <p className="text-sm font-medium leading-none">
+                    {user.firstName} {user.lastName}
+                  </p>
+                  <p className="text-xs leading-none text-muted-foreground">
+                    {user.email}
+                  </p>
+                </div>
+              </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem disabled>Profile</DropdownMenuItem>
-              <DropdownMenuItem disabled>Settings</DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/dashboard/settings" className="cursor-pointer">
+                  <UserIcon className="mr-2 h-4 w-4" />
+                  Profile
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/dashboard/settings" className="cursor-pointer">
+                  <Settings className="mr-2 h-4 w-4" />
+                  Settings
+                </Link>
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem disabled>Log out</DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={handleLogout}
+                className="cursor-pointer"
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                Log out
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </header>

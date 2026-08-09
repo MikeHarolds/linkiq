@@ -14,6 +14,39 @@ export interface UserDto {
   lastName: string;
   avatarUrl?: string | null;
   globalRole: GlobalRole;
+  emailVerified: boolean;
+  createdAt: string;
+}
+
+export interface WorkspaceSummaryDto {
+  id: string;
+  name: string;
+  slug: string;
+  role: WorkspaceRole;
+}
+
+export interface AuthResponseDto {
+  accessToken: string;
+  user: UserDto;
+  workspaces: WorkspaceSummaryDto[];
+}
+
+export interface MeResponseDto {
+  user: UserDto;
+  workspaces: WorkspaceSummaryDto[];
+}
+
+export interface WorkspaceMemberDto {
+  id: string;
+  role: WorkspaceRole;
+  createdAt: string;
+  user: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    avatarUrl?: string | null;
+  };
 }
 
 export interface ApiErrorResponse {

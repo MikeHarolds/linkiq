@@ -47,20 +47,22 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships  WorkspaceMember[]
-  ownedOrgs    Organization[]    @relation("OrganizationOwner")
-  auditLogs    AuditLog[]
+  memberships         WorkspaceMember[]
+  ownedOrgs           Organization[]      @relation("OrganizationOwner")
+  auditLogs           AuditLog[]
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
 
   @@index([email])
   @@map("users")
 }
 
 model Organization {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String
-  slug      String   @unique
-  ownerId   String   @db.Uuid
-  owner     User     @relation("OrganizationOwner", fields: [ownerId], references: [id])
+  id      String @id @default(uuid()) @db.Uuid
+  name    String
+  slug    String @unique
+  ownerId String @db.Uuid
+  owner   User   @relation("OrganizationOwner", fields: [ownerId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -81,7 +83,8 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members WorkspaceMember[]
+  members   WorkspaceMember[]
+  auditLogs AuditLog[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
@@ -105,21 +108,68 @@ model WorkspaceMember {
 }
 
 // ---------------------------------------------------------------------------
+// Authentication sessions & password recovery
+// ---------------------------------------------------------------------------
+
+/// One row per issued refresh token (i.e. per active session). The raw
+/// token is never stored — only a SHA-256 hash — so a database leak alone
+/// can't be used to forge sessions. Rotated on every /auth/refresh call;
+/// revoked (not deleted) on logout so a re-used stolen token is detectable.
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  tokenHash  String    @unique
+  userAgent  String?
+  ipAddress  String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  replacedBy String?   @db.Uuid
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+/// One row per requested password reset. The raw token is only ever sent
+/// to the user (via the dev-mode log/email stub); only its hash is stored.
+/// `usedAt` is set on successful reset so the same token can't be replayed.
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// ---------------------------------------------------------------------------
 // Platform / Admin
 // ---------------------------------------------------------------------------
 
 model AuditLog {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String?  @db.Uuid
-  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  action    String
-  entity    String
-  entityId  String?
-  metadata  Json?
-  ipAddress String?
-  createdAt DateTime @default(now())
+  id          String     @id @default(uuid()) @db.Uuid
+  userId      String?    @db.Uuid
+  user        User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  workspaceId String?    @db.Uuid
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  action      String
+  entity      String
+  entityId    String?
+  metadata    Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime   @default(now())
 
   @@index([userId])
+  @@index([workspaceId])
   @@index([entity, entityId])
   @@map("audit_logs")
 }

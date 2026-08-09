@@ -1,3 +1,6 @@
+'use client';
+
+import { zodResolver } from '@hookform/resolvers/zod';
 import {
   Button,
   Card,
@@ -5,12 +8,56 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
   Input,
-  Label,
 } from '@linkiq/ui';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import * as React from 'react';
+import { useForm } from 'react-hook-form';
+import { toast } from 'sonner';
 
-export default function LoginPage() {
+import { loginSchema, type LoginFormValues } from '@/lib/validations/auth';
+import { ApiError, useAuth } from '@/providers/auth-provider';
+
+function LoginForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { login } = useAuth();
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+
+  const form = useForm<LoginFormValues>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: '', password: '' },
+  });
+
+  React.useEffect(() => {
+    if (searchParams.get('reset') === 'success') {
+      toast.success('Password reset. Please log in with your new password.');
+    }
+  }, [searchParams]);
+
+  async function onSubmit(values: LoginFormValues) {
+    setIsSubmitting(true);
+    try {
+      await login(values);
+      router.push('/dashboard');
+    } catch (error) {
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : 'Something went wrong. Please try again.';
+      toast.error(message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -19,19 +66,59 @@ export default function LoginPage() {
           Log in to your LinkIQ account to continue.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
-          <Input id="email" type="email" placeholder="you@company.com" />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="password">Password</Label>
-          <Input id="password" type="password" placeholder="••••••••" />
-        </div>
-        <Button className="w-full" disabled>
-          Log in
-        </Button>
-        <p className="text-center text-sm text-muted-foreground">
+      <CardContent>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <FormField
+              control={form.control}
+              name="email"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Email</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="email"
+                      placeholder="you@company.com"
+                      autoComplete="email"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="password"
+              render={({ field }) => (
+                <FormItem>
+                  <div className="flex items-center justify-between">
+                    <FormLabel>Password</FormLabel>
+                    <Link
+                      href="/forgot-password"
+                      className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                    >
+                      Forgot password?
+                    </Link>
+                  </div>
+                  <FormControl>
+                    <Input
+                      type="password"
+                      placeholder="••••••••"
+                      autoComplete="current-password"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <Button type="submit" className="w-full" disabled={isSubmitting}>
+              {isSubmitting ? 'Logging in…' : 'Log in'}
+            </Button>
+          </form>
+        </Form>
+        <p className="mt-4 text-center text-sm text-muted-foreground">
           Don&apos;t have an account?{' '}
           <Link
             href="/register"
@@ -42,5 +129,13 @@ export default function LoginPage() {
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <LoginForm />
+    </React.Suspense>
   );
 }
