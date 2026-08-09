@@ -320,8 +320,11 @@ describe('Auth (e2e)', () => {
         .send({ email: 'jane@example.com' })
         .expect(200);
 
+      const jane = await prisma.user.findUniqueOrThrow({
+        where: { email: 'jane@example.com' },
+      });
       const resetToken = await prisma.passwordResetToken.findFirstOrThrow({
-        where: { user: { email: 'jane@example.com' } },
+        where: { userId: jane.id },
       });
       // The e2e test can't read the raw token (only its hash is stored, by
       // design), so it exercises resetPassword directly via the service to

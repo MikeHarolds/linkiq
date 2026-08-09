@@ -36,7 +36,7 @@ import type { AuthenticatedUser } from './types/authenticated-user.type';
 import { setRefreshCookie, clearRefreshCookie } from './utils/refresh-cookie';
 
 @ApiTags('auth')
-@Controller({ path: 'auth', version: '1' })
+@Controller('auth')
 export class AuthController {
   constructor(
     private readonly authService: AuthService,

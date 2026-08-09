@@ -1,4 +1,4 @@
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
@@ -13,9 +13,14 @@ async function bootstrap(): Promise<void> {
 
   app.useLogger(app.get(Logger));
 
+  // API_PREFIX already carries the version segment (e.g. "api/v1"), so we
+  // deliberately do NOT also call app.enableVersioning(URI) — combining
+  // both previously produced a hidden double-versioned path
+  // (/api/v1/v1/...) that the real server actually listened on while
+  // every doc, env example, and Docker config referenced /api/v1/...
+  // instead. One source of truth for the version segment: this prefix.
   const configPrefix = process.env.API_PREFIX ?? 'api/v1';
   app.setGlobalPrefix(configPrefix);
-  app.enableVersioning({ type: VersioningType.URI });
 
   app.use(helmet());
   app.use(cookieParser());

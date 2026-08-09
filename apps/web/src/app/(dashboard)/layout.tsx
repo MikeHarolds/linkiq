@@ -16,6 +16,7 @@ import {
   Check,
   ChevronsUpDown,
   LogOut,
+  Menu,
   Settings,
   User as UserIcon,
 } from 'lucide-react';
@@ -38,12 +39,67 @@ function initials(firstName: string, lastName: string): string {
   return `${firstName[0] ?? ''}${lastName[0] ?? ''}`.toUpperCase();
 }
 
+interface WorkspaceSwitcherProps {
+  workspaces: { id: string; name: string }[];
+  currentWorkspaceId: string | null;
+  currentWorkspaceName: string | undefined;
+  onSwitch: (id: string) => void;
+  className?: string;
+}
+
+function WorkspaceSwitcher({
+  workspaces,
+  currentWorkspaceId,
+  currentWorkspaceName,
+  onSwitch,
+  className,
+}: WorkspaceSwitcherProps) {
+  if (workspaces.length === 0) return null;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          className={`justify-between font-normal ${className ?? ''}`}
+        >
+          <span className="truncate">
+            {currentWorkspaceName ?? 'Select workspace'}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {workspaces.map((workspace) => (
+          <DropdownMenuItem
+            key={workspace.id}
+            onClick={() => onSwitch(workspace.id)}
+            className="justify-between"
+          >
+            <span className="truncate">{workspace.name}</span>
+            {workspace.id === currentWorkspaceId && (
+              <Check className="h-4 w-4 shrink-0" />
+            )}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 /**
- * Shell for authenticated app routes: fixed sidebar + top bar. Client-side
- * enforces the "must be authenticated" boundary (redirects to /login once
- * the initial silent-refresh resolves and there's no user) — this is a UX
- * convenience layered on top of the real enforcement, which is every
- * protected API endpoint rejecting unauthenticated requests server-side.
+ * Shell for authenticated app routes: fixed sidebar (desktop) + top bar.
+ * Client-side enforces the "must be authenticated" boundary (redirects to
+ * /login once the initial silent-refresh resolves and there's no user) —
+ * this is a UX convenience layered on top of the real enforcement, which
+ * is every protected API endpoint rejecting unauthenticated requests
+ * server-side.
+ *
+ * Below the `md` breakpoint the sidebar is replaced by a menu button in
+ * the top bar (same nav items + workspace switcher, in a dropdown) — the
+ * desktop sidebar is simply hidden on small screens, not duplicated.
  */
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
@@ -72,7 +128,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   if (isLoading || !user) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex min-h-screen items-center justify-center text-sm text-muted-foreground"
+      >
         Loading…
       </div>
     );
@@ -80,6 +140,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
+      {/* Desktop sidebar */}
       <aside className="hidden w-60 flex-col border-r bg-muted/20 md:flex">
         <div className="flex h-16 items-center px-6">
           <Link href="/" className="text-lg font-semibold tracking-tight">
@@ -88,46 +149,22 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </div>
         <Separator />
 
-        {workspaces.length > 0 && (
-          <div className="p-3">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  className="w-full justify-between font-normal"
-                >
-                  <span className="truncate">
-                    {currentWorkspace?.name ?? 'Select workspace'}
-                  </span>
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-56">
-                <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {workspaces.map((workspace) => (
-                  <DropdownMenuItem
-                    key={workspace.id}
-                    onClick={() => switchWorkspace(workspace.id)}
-                    className="justify-between"
-                  >
-                    <span className="truncate">{workspace.name}</span>
-                    {workspace.id === currentWorkspaceId && (
-                      <Check className="h-4 w-4 shrink-0" />
-                    )}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        )}
+        <div className="p-3">
+          <WorkspaceSwitcher
+            workspaces={workspaces}
+            currentWorkspaceId={currentWorkspaceId}
+            currentWorkspaceName={currentWorkspace?.name}
+            onSwitch={switchWorkspace}
+            className="w-full"
+          />
+        </div>
 
-        <nav className="flex flex-1 flex-col gap-1 p-4 pt-0">
+        <nav aria-label="Main" className="flex flex-1 flex-col gap-1 p-4 pt-0">
           {NAV_ITEMS.map((item) => (
             <Link
               key={item.href}
               href={item.href}
-              className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {item.label}
             </Link>
@@ -136,12 +173,45 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="flex flex-1 flex-col">
-        <header className="flex h-16 items-center justify-end gap-4 border-b px-6">
+        <header className="flex h-16 items-center justify-between gap-4 border-b px-4 md:justify-end md:px-6">
+          {/* Mobile menu — everything the desktop sidebar offers, collapsed
+              into one trigger so small screens keep full navigation access. */}
+          <div className="flex items-center gap-2 md:hidden">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Open navigation menu"
+                >
+                  <Menu className="h-5 w-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuLabel>Navigate</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {NAV_ITEMS.map((item) => (
+                  <DropdownMenuItem key={item.href} asChild>
+                    <Link href={item.href}>{item.label}</Link>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <WorkspaceSwitcher
+              workspaces={workspaces}
+              currentWorkspaceId={currentWorkspaceId}
+              currentWorkspaceName={currentWorkspace?.name}
+              onSwitch={switchWorkspace}
+              className="max-w-[10rem]"
+            />
+          </div>
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
                 className="relative h-9 w-9 rounded-full p-0"
+                aria-label="Open account menu"
               >
                 <Avatar>
                   <AvatarFallback>
@@ -186,7 +256,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </DropdownMenu>
         </header>
 
-        <main className="flex-1 p-6">{children}</main>
+        <main className="flex-1 p-4 md:p-6">{children}</main>
       </div>
     </div>
   );

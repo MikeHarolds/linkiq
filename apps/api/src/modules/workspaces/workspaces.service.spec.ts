@@ -130,7 +130,10 @@ describe('WorkspacesService', () => {
       await service.inviteMember(
         'ws-1',
         'inviter-1',
-        { email: 'new@example.com', role: ADMIN },
+        {
+          email: 'new@example.com',
+          role: ADMIN as Exclude<WorkspaceRole, 'OWNER'>,
+        },
         CTX,
       );
 

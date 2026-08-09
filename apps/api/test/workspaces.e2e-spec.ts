@@ -222,10 +222,13 @@ describe('Workspaces (e2e)', () => {
         .set('Authorization', `Bearer ${owner.accessToken}`)
         .send({ email: 'owner-b@example.com', role: 'ADMIN' });
 
+      const ownerB = await prisma.user.findUniqueOrThrow({
+        where: { email: 'owner-b@example.com' },
+      });
       const newMember = await prisma.workspaceMember.findFirstOrThrow({
         where: {
           workspaceId: owner.workspaceId,
-          user: { email: 'owner-b@example.com' },
+          userId: ownerB.id,
         },
       });
 
@@ -258,26 +261,34 @@ describe('Workspaces (e2e)', () => {
       const owner = await registerUser('audit-owner@example.com');
       await registerUser('audit-invitee@example.com');
 
+      const createRes = await request(server)
+        .post('/api/v1/workspaces')
+        .set('Authorization', `Bearer ${owner.accessToken}`)
+        .send({ name: 'Audit Test Workspace' })
+        .expect(201);
+      const auditedWorkspaceId = createRes.body.id as string;
+
       await request(server)
-        .post(`/api/v1/workspaces/${owner.workspaceId}/members/invite`)
+        .post(`/api/v1/workspaces/${auditedWorkspaceId}/members/invite`)
         .set('Authorization', `Bearer ${owner.accessToken}`)
         .send({ email: 'audit-invitee@example.com' })
         .expect(201);
 
       const createdLogs = await prisma.auditLog.findMany({
-        where: { action: 'workspace.created', userId: owner.userId },
+        where: { action: 'workspace.created', workspaceId: auditedWorkspaceId },
       });
       const inviteLogs = await prisma.auditLog.findMany({
         where: {
           action: 'workspace.member_invited',
-          workspaceId: owner.workspaceId,
+          workspaceId: auditedWorkspaceId,
         },
       });
 
       expect(createdLogs.length).toBeGreaterThanOrEqual(1);
       expect(inviteLogs).toHaveLength(1);
+      const [inviteLog] = inviteLogs;
       // Audit metadata must never contain secrets.
-      expect(JSON.stringify(inviteLogs[0].metadata)).not.toMatch(/password/i);
+      expect(JSON.stringify(inviteLog?.metadata)).not.toMatch(/password/i);
     });
   });
 });

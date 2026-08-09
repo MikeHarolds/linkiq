@@ -12,6 +12,15 @@ import { PrismaService } from '../src/modules/prisma/prisma.service';
  * for e2e tests, mirroring main.ts's bootstrap exactly so the tested
  * behaviour matches production. Requires DATABASE_URL to point at a
  * disposable test database — see README in this directory.
+ *
+ * Rate limiting is disabled for this bootstrap via DISABLE_RATE_LIMIT_FOR_TESTS
+ * (set in test/jest.e2e.setup.ts, which Jest guarantees runs before this
+ * module — and therefore AppModule — is ever imported). This suite exercises
+ * business logic (registration, login, RBAC, ...) and legitimately fires far
+ * more requests per minute against auth endpoints than the real per-endpoint
+ * limits allow (see auth.controller.ts's @Throttle(...) decorators). Rate
+ * limiting itself is verified separately, with the real guard fully active,
+ * in test/rate-limit.e2e-spec.ts (its own Jest config, no env override).
  */
 export async function createTestApp(): Promise<{
   app: INestApplication;
@@ -38,15 +47,14 @@ export async function createTestApp(): Promise<{
   return { app, prisma };
 }
 
-/** Deletes all rows from tables touched by the auth/workspace e2e suites. */
+/** Deletes all rows from tables touched by the auth/workspace e2e suites,
+ * in FK-dependency order (children before parents). */
 export async function resetDatabase(prisma: PrismaService): Promise<void> {
-  await prisma.$transaction([
-    prisma.auditLog.deleteMany(),
-    prisma.passwordResetToken.deleteMany(),
-    prisma.refreshToken.deleteMany(),
-    prisma.workspaceMember.deleteMany(),
-    prisma.workspace.deleteMany(),
-    prisma.organization.deleteMany(),
-    prisma.user.deleteMany(),
-  ]);
+  await prisma.auditLog.deleteMany();
+  await prisma.passwordResetToken.deleteMany();
+  await prisma.refreshToken.deleteMany();
+  await prisma.workspaceMember.deleteMany();
+  await prisma.workspace.deleteMany();
+  await prisma.organization.deleteMany();
+  await prisma.user.deleteMany();
 }

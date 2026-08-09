@@ -36,7 +36,7 @@ import { WorkspacesService } from './workspaces.service';
 
 @ApiTags('workspaces')
 @ApiBearerAuth()
-@Controller({ path: 'workspaces', version: '1' })
+@Controller('workspaces')
 export class WorkspacesController {
   constructor(private readonly workspacesService: WorkspacesService) {}
 

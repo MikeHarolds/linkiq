@@ -40,3 +40,4 @@ coverage/
 # Misc
 .turbo/
 *.tsbuildinfo
+prisma-shim.local.js
