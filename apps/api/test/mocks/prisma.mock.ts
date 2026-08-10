@@ -51,7 +51,19 @@ export function createMockPrismaService() {
     },
     clickEvent: {
       create: jest.fn(),
+      findUnique: jest.fn(),
+      findMany: jest.fn(),
+      count: jest.fn(),
     },
+    linkDailyStat: {
+      create: jest.fn(),
+      findUnique: jest.fn(),
+      findMany: jest.fn(),
+      update: jest.fn(),
+      upsert: jest.fn(),
+    },
+    $queryRawUnsafe: jest.fn(),
+    $queryRaw: jest.fn(),
     // Executes the callback with `this` (the mock itself) standing in for
     // the transactional client — sufficient for unit tests since none of
     // our transaction callbacks rely on genuine isolation semantics.

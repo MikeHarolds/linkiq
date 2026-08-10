@@ -41,3 +41,4 @@ coverage/
 .turbo/
 *.tsbuildinfo
 prisma-shim.local.js
+*.rdb

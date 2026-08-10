@@ -16,6 +16,7 @@ export interface RedirectRequestMeta {
   ipAddress?: string;
   userAgent?: string;
   referer?: string;
+  queryString?: string;
 }
 
 /**
@@ -82,6 +83,7 @@ export class RedirectService {
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
       referer: meta.referer,
+      queryString: meta.queryString,
     });
 
     return outcome;

@@ -4,7 +4,6 @@ import { Module } from '@nestjs/common';
 import { LinkCacheService } from './link-cache.service';
 import { LinksController } from './links.controller';
 import { LinksService } from './links.service';
-import { ClickEventProcessor } from './queue/click-event.processor';
 import { ClickEventProducer } from './queue/click-event.producer';
 import { CLICK_EVENT_QUEUE } from './queue/click-event.types';
 import { RedirectService } from './redirect.service';
@@ -24,10 +23,12 @@ import { RedirectService } from './redirect.service';
  * it via `app.get(RedirectService)` and wires the raw route after the
  * module tree is built.
  *
- * The click event queue is registered here (not in the shared
- * QueueModule) because it's specific to this feature — QueueModule only
- * establishes the shared BullMQ<->Redis connection every feature module
- * builds its own queues on top of.
+ * The click event queue is registered here on the PRODUCER side only
+ * (ClickEventProducer, used by RedirectService to enqueue clicks) — the
+ * CONSUMER side (ClickEventProcessor, which enriches and persists them)
+ * lives in AnalyticsModule, which registers the same queue name
+ * independently. See analytics.module.ts's docs for why that split is
+ * the standard BullMQ+Nest pattern rather than a workaround.
  */
 @Module({
   imports: [BullModule.registerQueue({ name: CLICK_EVENT_QUEUE })],
@@ -37,7 +38,6 @@ import { RedirectService } from './redirect.service';
     LinkCacheService,
     RedirectService,
     ClickEventProducer,
-    ClickEventProcessor,
   ],
   exports: [LinksService, RedirectService],
 })

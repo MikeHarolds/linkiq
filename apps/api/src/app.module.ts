@@ -3,10 +3,12 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
+import analyticsConfig from './config/analytics.config';
 import appConfig from './config/app.config';
 import authConfig from './config/auth.config';
 import databaseConfig from './config/database.config';
 import redisConfig from './config/redis.config';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
@@ -25,7 +27,13 @@ const disableRateLimitForTests =
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, redisConfig, authConfig],
+      load: [
+        appConfig,
+        databaseConfig,
+        redisConfig,
+        authConfig,
+        analyticsConfig,
+      ],
       envFilePath: ['.env'],
     }),
     LoggingModule,
@@ -44,8 +52,9 @@ const disableRateLimitForTests =
     UsersModule,
     WorkspacesModule,
     LinksModule,
-    // Campaigns, QrCodes, Domains, Analytics, Billing, Webhooks, and
-    // Admin modules are added in subsequent milestones.
+    AnalyticsModule,
+    // Campaigns, QrCodes, Domains, Billing, Webhooks, and Admin modules
+    // are added in subsequent milestones.
   ],
   providers: [
     // ThrottlerModule.forRoot() alone only registers configuration — it does

@@ -45,6 +45,12 @@ export function getLinkStats(workspaceId: string): Promise<LinkStatsDto> {
   });
 }
 
+export function getLink(workspaceId: string, linkId: string): Promise<LinkDto> {
+  return api.get<LinkDto>(`/links/${linkId}`, {
+    headers: workspaceHeaders(workspaceId),
+  });
+}
+
 export interface CreateLinkPayload {
   destinationUrl: string;
   slug?: string;

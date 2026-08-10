@@ -2,7 +2,7 @@
   "moduleFileExtensions": ["js", "json", "ts"],
   "rootDir": ".",
   "testEnvironment": "node",
-  "testRegex": "(auth|workspaces|links|redirect)\\.e2e-spec\\.ts$",
+  "testRegex": "(auth|workspaces|links|redirect|analytics)\\.e2e-spec\\.ts$",
   "setupFiles": ["<rootDir>/jest.e2e.setup.ts"],
   "transform": {
     "^.+\\.(t|j)s$": [

@@ -38,6 +38,7 @@ export function registerRedirectRoute(app: INestApplication): void {
       ipAddress: resolveClientIp(req),
       userAgent: req.headers['user-agent'],
       referer: req.headers['referer'],
+      queryString: req.url.includes('?') ? req.url.split('?')[1] : undefined,
     });
 
     res.setHeader('Cache-Control', 'no-store');

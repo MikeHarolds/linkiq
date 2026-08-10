@@ -20,6 +20,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Archive,
+  BarChart3,
   Check,
   Copy,
   ExternalLink,
@@ -29,6 +30,7 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react';
+import Link from 'next/link';
 import * as React from 'react';
 import { toast } from 'sonner';
 
@@ -347,6 +349,14 @@ export default function LinksPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            <DropdownMenuItem asChild>
+                              <Link
+                                href={`/dashboard/links/${link.id}/analytics`}
+                              >
+                                <BarChart3 className="mr-2 h-4 w-4" />
+                                Analytics
+                              </Link>
+                            </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => setEditingLink(link)}
                             >

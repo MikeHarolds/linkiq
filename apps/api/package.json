@@ -47,7 +47,10 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "uuid": "^10.0.0",
-    "cookie-parser": "^1.4.7"
+    "cookie-parser": "^1.4.7",
+    "ua-parser-js": "^2.0.10",
+    "isbot": "^5.2.1",
+    "geoip-country": "^5.0.202608080003"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.5",

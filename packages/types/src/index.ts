@@ -96,5 +96,62 @@ export interface LinkStatsDto {
   recentLinks: LinkDto[];
 }
 
-// Campaign, QrCode, Analytics, and Billing DTOs are added
-// as their respective backend modules are implemented.
+export type AnalyticsRange =
+  'today' | 'yesterday' | '7d' | '30d' | '90d' | 'custom';
+
+export interface AnalyticsQueryParams {
+  linkId?: string;
+  range?: AnalyticsRange;
+  from?: string;
+  to?: string;
+  timezone?: string;
+  includeBots?: boolean;
+}
+
+export interface AnalyticsOverviewDto {
+  totalClicks: number;
+  humanClicks: number;
+  botClicks: number;
+  uniqueVisitors: number;
+}
+
+export interface AnalyticsTimeseriesPointDto {
+  bucket: string;
+  clicks: number;
+}
+
+export interface TopLinkDto {
+  linkId: string;
+  shortCode: string;
+  title: string | null;
+  clicks: number;
+}
+
+export interface ReferrerDto {
+  domain: string;
+  category: string;
+  clicks: number;
+}
+
+export interface CountryStatDto {
+  country: string;
+  clicks: number;
+}
+
+export interface RegionStatDto {
+  region: string;
+  clicks: number;
+}
+
+export interface GeographyDto {
+  countries: CountryStatDto[];
+  regions: RegionStatDto[];
+}
+
+export interface BreakdownItemDto {
+  value: string;
+  clicks: number;
+}
+
+// Campaign, QrCode, and Billing DTOs are added as their respective backend
+// modules are implemented.
