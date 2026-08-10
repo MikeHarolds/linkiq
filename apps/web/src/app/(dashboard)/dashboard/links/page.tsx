@@ -293,9 +293,12 @@ export default function LinksPage() {
                   <TableRow key={link.id}>
                     <TableCell>
                       <div className="flex items-center gap-1.5">
-                        <code className="text-sm font-medium">
-                          {link.shortCode}
-                        </code>
+                        <Link
+                          href={`/dashboard/links/${link.id}`}
+                          className="text-sm font-medium hover:underline"
+                        >
+                          <code>{link.shortCode}</code>
+                        </Link>
                         <Button
                           variant="ghost"
                           size="icon"

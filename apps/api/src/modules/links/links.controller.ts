@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -114,7 +115,7 @@ export class LinksController {
   })
   async findOne(
     @CurrentWorkspace() workspace: WorkspaceMember,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.linksService.findByIdOrThrow(workspace.workspaceId, id);
   }
@@ -128,7 +129,7 @@ export class LinksController {
     @CurrentUser() user: AuthenticatedUser,
     @CurrentWorkspace() workspace: WorkspaceMember,
     @Ctx() ctx: RequestContext,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateLinkDto,
   ) {
     return this.linksService.update(
@@ -150,7 +151,7 @@ export class LinksController {
     @CurrentUser() user: AuthenticatedUser,
     @CurrentWorkspace() workspace: WorkspaceMember,
     @Ctx() ctx: RequestContext,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
     await this.linksService.softDelete(workspace.workspaceId, id, user.id, ctx);
   }
@@ -168,7 +169,7 @@ export class LinksController {
     @CurrentUser() user: AuthenticatedUser,
     @CurrentWorkspace() workspace: WorkspaceMember,
     @Ctx() ctx: RequestContext,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.linksService.transitionStatus(
       workspace.workspaceId,
@@ -192,7 +193,7 @@ export class LinksController {
     @CurrentUser() user: AuthenticatedUser,
     @CurrentWorkspace() workspace: WorkspaceMember,
     @Ctx() ctx: RequestContext,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.linksService.transitionStatus(
       workspace.workspaceId,
@@ -216,7 +217,7 @@ export class LinksController {
     @CurrentUser() user: AuthenticatedUser,
     @CurrentWorkspace() workspace: WorkspaceMember,
     @Ctx() ctx: RequestContext,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.linksService.transitionStatus(
       workspace.workspaceId,

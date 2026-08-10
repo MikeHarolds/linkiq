@@ -62,6 +62,13 @@ export function createMockPrismaService() {
       update: jest.fn(),
       upsert: jest.fn(),
     },
+    qrCode: {
+      create: jest.fn(),
+      findUnique: jest.fn(),
+      findMany: jest.fn(),
+      update: jest.fn(),
+      count: jest.fn(),
+    },
     $queryRawUnsafe: jest.fn(),
     $queryRaw: jest.fn(),
     // Executes the callback with `this` (the mock itself) standing in for

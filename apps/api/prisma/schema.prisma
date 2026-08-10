@@ -65,6 +65,7 @@ model User {
   refreshTokens       RefreshToken[]
   passwordResetTokens PasswordResetToken[]
   createdLinks        Link[]               @relation("LinkCreator")
+  createdQrCodes      QrCode[]             @relation("QrCodeCreator")
 
   @@index([email])
   @@map("users")
@@ -99,6 +100,7 @@ model Workspace {
   members   WorkspaceMember[]
   auditLogs AuditLog[]
   links     Link[]
+  qrCodes   QrCode[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
@@ -197,6 +199,7 @@ model Link {
 
   clickEvents ClickEvent[]
   dailyStats  LinkDailyStat[]
+  qrCodes     QrCode[]
 
   @@index([workspaceId])
   @@index([createdById])
@@ -293,6 +296,72 @@ model LinkDailyStat {
   @@unique([linkId, date])
   @@index([workspaceId, date])
   @@map("link_daily_stats")
+}
+
+// ---------------------------------------------------------------------------
+// QR Codes
+// ---------------------------------------------------------------------------
+
+enum QrFormat {
+  PNG
+  SVG
+}
+
+enum QrErrorCorrectionLevel {
+  L
+  M
+  Q
+  H
+}
+
+/// A QR code always encodes the LinkIQ short URL (e.g.
+/// https://linkiq.example/abc123) — never the link's destinationUrl
+/// directly. This is deliberate: the destination can change at any time
+/// (LinksService.update) without invalidating or needing to regenerate
+/// any QR code that points at it, since the short URL itself never
+/// changes. See docs/architecture/qr-codes.md for the full rationale,
+/// including how QR-originated traffic is distinguished from other
+/// traffic using the existing UTM-capture mechanism rather than a new
+/// tracking pipeline.
+///
+/// No image bytes are stored here — PNG/SVG output is generated
+/// on-demand from this configuration (see QrCodeGeneratorService), which
+/// is what "format" below really means: the default render format for
+/// this record, not evidence that a file exists somewhere. Generation is
+/// fast and fully deterministic from these columns, so there is nothing
+/// to keep in sync if a color or size is edited.
+model QrCode {
+  id          String @id @default(uuid()) @db.Uuid
+  workspaceId String @db.Uuid
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  linkId      String @db.Uuid
+  link        Link   @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  name  String
+  format QrFormat @default(PNG)
+
+  /// Pixel width/height of the (square) output image. SVG output uses
+  /// this as its viewBox dimension too, for consistent preview sizing
+  /// regardless of format.
+  size                  Int                    @default(512)
+  foregroundColor       String                 @default("#000000")
+  backgroundColor       String                 @default("#FFFFFF")
+  errorCorrectionLevel  QrErrorCorrectionLevel @default(M)
+  /// Quiet-zone width in "modules" (QR code units), matching the
+  /// `qrcode` library's own margin option — not pixels.
+  margin Int @default(4)
+
+  createdById String? @db.Uuid
+  createdBy   User?   @relation("QrCodeCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([workspaceId])
+  @@index([linkId])
+  @@index([createdById])
+  @@map("qr_codes")
 }
 
 // ---------------------------------------------------------------------------

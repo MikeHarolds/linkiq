@@ -5,14 +5,15 @@
  *   - The demo user and demo admin accounts
  *   - A starter organization + workspace for the demo user
  *   - A small set of platform feature flags
- *   - 11 realistic demo links for the demo user, spanning every lifecycle
- *     state (active, active-with-future-expiry, paused, active-but-
- *     past-expiry, archived) — no fake click counts (analytics doesn't
- *     exist yet; see Sprint 2 spec)
+ *   - 11 realistic demo links spanning every lifecycle state
+ *   - ~30 days of realistic historical click events across those links
+ *   - 6 demo QR codes across a mix of links, showing default config,
+ *     custom brand colors, large/small sizes, and both PNG and SVG —
+ *     internal demo data, not fabricated production traffic
  *
  * NOT yet implemented (arrives with the relevant feature milestone):
- *   - QR codes, campaigns, analytics events, AI insights, tags,
- *     notifications, activity history, custom domains
+ *   - Campaigns, AI insights, tags, notifications, activity history,
+ *     custom domains
  *
  * Run with: npm run prisma:seed --workspace=apps/api
  */
@@ -21,6 +22,8 @@ import {
   GlobalRole,
   LinkStatus,
   PrismaClient,
+  QrErrorCorrectionLevel,
+  QrFormat,
   WorkspaceRole,
 } from '@prisma/client';
 import type { Workspace, User, Link } from '@prisma/client';
@@ -559,6 +562,113 @@ async function seedDemoClickEvents(workspace: Workspace, links: Link[]) {
   );
 }
 
+function findLink(links: Link[], shortCode: string): Link {
+  const link = links.find((l) => l.shortCode === shortCode);
+  if (!link) {
+    throw new Error(
+      `seedDemoQrCodes: expected a seeded link with shortCode "${shortCode}"`,
+    );
+  }
+  return link;
+}
+
+async function seedDemoQrCodes(
+  workspace: Workspace,
+  user: User,
+  links: Link[],
+) {
+  const existing = await prisma.qrCode.count({
+    where: { workspaceId: workspace.id },
+  });
+  if (existing > 0) {
+    console.log('Demo QR codes already seeded — skipping (idempotent)');
+    return;
+  }
+
+  const qrCodes: Array<{
+    linkShortCode: string;
+    name: string;
+    format: QrFormat;
+    size?: number;
+    foregroundColor?: string;
+    backgroundColor?: string;
+    errorCorrectionLevel?: QrErrorCorrectionLevel;
+    margin?: number;
+  }> = [
+    // Default QR — every option left at its schema default.
+    {
+      linkShortCode: 'demo-launch',
+      name: 'Product Launch — Default',
+      format: QrFormat.PNG,
+    },
+    // Custom brand colors.
+    {
+      linkShortCode: 'demo-launch',
+      name: 'Product Launch — Brand Colors',
+      format: QrFormat.PNG,
+      foregroundColor: '#1d4ed8',
+      backgroundColor: '#eff6ff',
+      errorCorrectionLevel: QrErrorCorrectionLevel.H,
+    },
+    // Larger size, for print materials.
+    {
+      linkShortCode: 'demo-pricing',
+      name: 'Pricing Page — Print Poster (Large)',
+      format: QrFormat.PNG,
+      size: 1024,
+      margin: 6,
+    },
+    // Small size, for a business card or similar.
+    {
+      linkShortCode: 'demo-pricing',
+      name: 'Pricing Page — Business Card (Small)',
+      format: QrFormat.PNG,
+      size: 160,
+      margin: 1,
+    },
+    // SVG example — scalable, for design tools / vector print workflows.
+    {
+      linkShortCode: 'demo-webinar',
+      name: 'Spring Webinar — SVG for Print Vendor',
+      format: QrFormat.SVG,
+      foregroundColor: '#111827',
+      backgroundColor: '#f9fafb',
+    },
+    // Another custom-color example on a different link, high error
+    // correction (common for QR codes that may get partially obscured,
+    // e.g. a logo overlay in a design tool — LinkIQ doesn't composite a
+    // logo itself, but H correction leaves headroom for one added later).
+    {
+      linkShortCode: 'demo-docs',
+      name: 'Docs — Onboarding Email',
+      format: QrFormat.PNG,
+      foregroundColor: '#065f46',
+      backgroundColor: '#ffffff',
+      errorCorrectionLevel: QrErrorCorrectionLevel.H,
+    },
+  ];
+
+  for (const qr of qrCodes) {
+    const link = findLink(links, qr.linkShortCode);
+    await prisma.qrCode.create({
+      data: {
+        workspaceId: workspace.id,
+        linkId: link.id,
+        createdById: user.id,
+        name: qr.name,
+        format: qr.format,
+        size: qr.size,
+        foregroundColor: qr.foregroundColor,
+        backgroundColor: qr.backgroundColor,
+        errorCorrectionLevel: qr.errorCorrectionLevel,
+        margin: qr.margin,
+      },
+    });
+  }
+
+  console.log(`Seeded ${qrCodes.length} demo QR codes`);
+}
+
 async function seedAdminUser() {
   const email = process.env.DEMO_ADMIN_EMAIL ?? 'admin@linkiq.com';
   const password = process.env.DEMO_ADMIN_PASSWORD ?? 'Admin@12345';
@@ -618,8 +728,9 @@ async function main() {
   await seedFeatureFlags();
   const links = await seedDemoLinks(workspace, user);
   await seedDemoClickEvents(workspace, links);
+  await seedDemoQrCodes(workspace, user, links);
 
-  // TODO (future milestones): seed QR codes, campaigns, AI insights, tags,
+  // TODO (future milestones): seed campaigns, AI insights, tags,
   // notifications, activity history, and custom domains for the demo
   // account once those modules exist.
 

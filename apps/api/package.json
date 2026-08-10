@@ -50,7 +50,8 @@
     "cookie-parser": "^1.4.7",
     "ua-parser-js": "^2.0.10",
     "isbot": "^5.2.1",
-    "geoip-country": "^5.0.202608080003"
+    "geoip-country": "^5.0.202608080003",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.5",
@@ -70,6 +71,7 @@
     "@types/jest": "^29.5.13",
     "ts-jest": "^29.2.5",
     "supertest": "^7.0.0",
-    "@types/supertest": "^6.0.2"
+    "@types/supertest": "^6.0.2",
+    "@types/qrcode": "^1.5.6"
   }
 }

@@ -153,5 +153,37 @@ export interface BreakdownItemDto {
   clicks: number;
 }
 
-// Campaign, QrCode, and Billing DTOs are added as their respective backend
-// modules are implemented.
+export type QrFormat = 'PNG' | 'SVG';
+export type QrErrorCorrectionLevel = 'L' | 'M' | 'Q' | 'H';
+
+export interface QrCodeDto {
+  id: string;
+  workspaceId: string;
+  linkId: string;
+  name: string;
+  format: QrFormat;
+  size: number;
+  foregroundColor: string;
+  backgroundColor: string;
+  errorCorrectionLevel: QrErrorCorrectionLevel;
+  margin: number;
+  createdById: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+  /** Present only on the workspace-wide list endpoint, which includes it
+   * for display (short code, title) without a separate lookup per row. */
+  link?: {
+    id: string;
+    shortCode: string;
+    title: string | null;
+  };
+}
+
+export interface PaginatedQrCodesDto {
+  items: QrCodeDto[];
+  pagination: PaginationMeta;
+}
+
+// Campaign and Billing DTOs are added as their respective backend modules
+// are implemented.

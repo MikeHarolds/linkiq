@@ -33,12 +33,12 @@ cp apps/api/.env.example apps/api/.env
 cp apps/docs/.env.example apps/docs/.env
 ```
 
-| File             | Purpose                                                                                                                     |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `.env`           | Values consumed by `docker/docker-compose.dev.yml` and `docker/docker-compose.prod.yml` (Postgres/Redis credentials, ports) |
-| `apps/api/.env`  | NestJS backend (`DATABASE_URL`, JWT secrets, Redis, logging, throttling)                                                    |
-| `apps/web/.env`  | Next.js frontend (`NEXT_PUBLIC_API_URL`)                                                                                    |
-| `apps/docs/.env` | Documentation site                                                                                                          |
+| File             | Purpose                                                                                                                                              |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.env`           | Values consumed by `docker/docker-compose.dev.yml` and `docker/docker-compose.prod.yml` (Postgres/Redis credentials, ports)                          |
+| `apps/api/.env`  | NestJS backend (`DATABASE_URL`, JWT secrets, Redis, logging, throttling, analytics visitor-hash salt/GeoIP provider, `APP_URL` for QR code encoding) |
+| `apps/web/.env`  | Next.js frontend (`NEXT_PUBLIC_API_URL`)                                                                                                             |
+| `apps/docs/.env` | Documentation site                                                                                                                                   |
 
 Default values in every `.env.example` work out of the box for local
 development — just make sure `apps/api/.env`'s `DATABASE_URL` credentials

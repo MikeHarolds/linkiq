@@ -30,6 +30,7 @@ import { useAuth } from '@/providers/auth-provider';
 const NAV_ITEMS = [
   { label: 'Overview', href: '/dashboard' },
   { label: 'Links', href: '/dashboard/links' },
+  { label: 'QR Codes', href: '/dashboard/qr-codes' },
   { label: 'Campaigns', href: '/dashboard/campaigns' },
   { label: 'Analytics', href: '/dashboard/analytics' },
   { label: 'Settings', href: '/dashboard/settings' },

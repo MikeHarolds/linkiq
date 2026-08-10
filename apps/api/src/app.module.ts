@@ -15,6 +15,7 @@ import { HealthModule } from './modules/health/health.module';
 import { LinksModule } from './modules/links/links.module';
 import { LoggingModule } from './modules/logging/logging.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
+import { QrCodesModule } from './modules/qr-codes/qr-codes.module';
 import { QueueModule } from './modules/queue/queue.module';
 import { RedisModule } from './modules/redis/redis.module';
 import { UsersModule } from './modules/users/users.module';
@@ -53,7 +54,8 @@ const disableRateLimitForTests =
     WorkspacesModule,
     LinksModule,
     AnalyticsModule,
-    // Campaigns, QrCodes, Domains, Billing, Webhooks, and Admin modules
+    QrCodesModule,
+    // Campaigns, Domains, Billing, Webhooks, and Admin modules
     // are added in subsequent milestones.
   ],
   providers: [
