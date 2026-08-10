@@ -66,6 +66,7 @@ model User {
   passwordResetTokens PasswordResetToken[]
   createdLinks        Link[]               @relation("LinkCreator")
   createdQrCodes      QrCode[]             @relation("QrCodeCreator")
+  createdCampaigns    Campaign[]           @relation("CampaignCreator")
 
   @@index([email])
   @@map("users")
@@ -101,6 +102,7 @@ model Workspace {
   auditLogs AuditLog[]
   links     Link[]
   qrCodes   QrCode[]
+  campaigns Campaign[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
@@ -167,6 +169,62 @@ model PasswordResetToken {
 }
 
 // ---------------------------------------------------------------------------
+// Campaign Management
+// ---------------------------------------------------------------------------
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+/// A workspace-scoped organizational/analytics grouping for links. A
+/// campaign is deliberately NOT a redirect or tracking mechanism of its
+/// own — it has no shortCode and is never itself hit by a browser. It
+/// exists purely to (a) group links for reporting and (b) provide UTM
+/// defaults new links in it can inherit. See docs/architecture/campaigns.md.
+///
+/// Deleting/archiving a campaign never touches its links — see the
+/// `campaign` relation on Link (onDelete: SetNull) — link availability
+/// stays entirely governed by the Link system, unaffected by campaign
+/// status, per this sprint's explicit design requirement.
+model Campaign {
+  id          String         @id @default(uuid()) @db.Uuid
+  workspaceId String         @db.Uuid
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  status      CampaignStatus @default(DRAFT)
+  startDate   DateTime?
+  endDate     DateTime?
+
+  /// UTM defaults new links assigned to this campaign inherit at creation
+  /// time (a one-time snapshot onto the link — see Link.utmSource et al.
+  /// for why this isn't a live lookup).
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmTerm     String?
+  utmContent  String?
+
+  createdById String? @db.Uuid
+  createdBy   User?   @relation("CampaignCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  links Link[]
+
+  @@index([workspaceId])
+  @@index([status])
+  @@index([createdById])
+  @@map("campaigns")
+}
+
+// ---------------------------------------------------------------------------
 // Link Management
 // ---------------------------------------------------------------------------
 
@@ -193,6 +251,29 @@ model Link {
   isActive  Boolean   @default(true)
   expiresAt DateTime?
 
+  /// Optional campaign association (Sprint 5). A link belongs to zero or
+  /// one campaign. Deliberately SetNull, not Cascade: deleting/archiving a
+  /// campaign must never delete or disable the links that reference it
+  /// (see docs/architecture/campaigns.md) — the link simply becomes
+  /// campaign-less again, exactly like it was before assignment.
+  campaignId String?   @db.Uuid
+  campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  /// UTM values resolved and stored on the link at create/update time —
+  /// either explicit overrides or inherited from the campaign's defaults
+  /// at that moment. Deliberately a snapshot, not a live lookup: editing a
+  /// campaign's UTM defaults later does NOT retroactively change already-
+  /// configured links ("do not mutate existing URLs unexpectedly" — see
+  /// docs/architecture/campaigns.md §UTM resolution). Applied to
+  /// destinationUrl dynamically at redirect time (RedirectService), never
+  /// baked into the stored destinationUrl itself — editing destinationUrl
+  /// later keeps working exactly as it did before this sprint.
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmTerm     String?
+  utmContent  String?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -206,6 +287,7 @@ model Link {
   @@index([status])
   @@index([expiresAt])
   @@index([createdAt])
+  @@index([campaignId])
   // Composite index for the redirect hot path: WHERE shortCode = ? AND
   // "deletedAt" IS NULL is the exact predicate the redirect resolver uses.
   @@index([shortCode, deletedAt])

@@ -57,6 +57,12 @@ export interface CreateLinkPayload {
   title?: string;
   description?: string;
   expiresAt?: string;
+  campaignId?: string;
+  utmSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
+  utmTerm?: string;
+  utmContent?: string;
 }
 
 export function createLink(

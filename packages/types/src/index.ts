@@ -185,5 +185,53 @@ export interface PaginatedQrCodesDto {
   pagination: PaginationMeta;
 }
 
-// Campaign and Billing DTOs are added as their respective backend modules
-// are implemented.
+export type CampaignStatus =
+  'DRAFT' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'ARCHIVED';
+
+export interface UtmDefaults {
+  utmSource?: string | null;
+  utmMedium?: string | null;
+  utmCampaign?: string | null;
+  utmTerm?: string | null;
+  utmContent?: string | null;
+}
+
+export interface CampaignDto extends UtmDefaults {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description: string | null;
+  status: CampaignStatus;
+  startDate: string | null;
+  endDate: string | null;
+  createdById: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+export interface CampaignListItemDto extends CampaignDto {
+  linkCount: number;
+}
+
+export interface PaginatedCampaignsDto {
+  items: CampaignListItemDto[];
+  pagination: PaginationMeta;
+}
+
+export interface CampaignLinkDto extends LinkDto {
+  qrCodes: { id: string; linkId: string; name: string; format: QrFormat }[];
+}
+
+export interface CampaignAnalyticsDto {
+  overview: AnalyticsOverviewDto;
+  clickTrend: AnalyticsTimeseriesPointDto[];
+  topLinks: TopLinkDto[];
+  topSources: BreakdownItemDto[];
+  topMediums: BreakdownItemDto[];
+  topCountries: BreakdownItemDto[];
+  devices: BreakdownItemDto[];
+  referrers: BreakdownItemDto[];
+}
+
+// Billing DTOs are added as that backend module is implemented.

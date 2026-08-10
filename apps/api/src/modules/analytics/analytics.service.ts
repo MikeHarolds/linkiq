@@ -320,4 +320,77 @@ export class AnalyticsService {
       'operating-systems',
     );
   }
+
+  /**
+   * Workspace-wide "clicks by campaign" — every campaign's traffic side
+   * by side, not scoped to any single one (that's what
+   * CampaignAnalyticsService.getOverview is for). Links with no campaign
+   * are grouped under "No campaign" rather than dropped, so the total
+   * across rows always reconciles with the plain overview endpoint's
+   * totalClicks (Sprint 5 spec section 15's dashboard addition).
+   */
+  async getTopCampaigns(
+    workspaceId: string,
+    query: AnalyticsQueryDto,
+    limit = 10,
+  ) {
+    const cacheKey = { ...query, limit };
+    const cached = await this.cache.get(workspaceId, 'top-campaigns', cacheKey);
+    if (cached) return cached;
+
+    const filters = this.resolveFilters(workspaceId, query);
+    const { clause, params } = this.buildWhere(filters, 1, 'ce');
+
+    const rows = await this.prisma.$queryRawUnsafe<
+      Array<{ campaignId: string | null; name: string; clicks: number }>
+    >(
+      `SELECT c.id AS "campaignId", COALESCE(c.name, 'No campaign') AS name, count(*)::int AS clicks
+      FROM click_events ce
+      JOIN links l ON l.id = ce."linkId"
+      LEFT JOIN campaigns c ON c.id = l."campaignId"
+      WHERE ${clause}
+      GROUP BY c.id, c.name
+      ORDER BY clicks DESC
+      LIMIT ${limit}`,
+      ...params,
+    );
+
+    await this.cache.set(workspaceId, 'top-campaigns', cacheKey, rows);
+    return rows;
+  }
+
+  /** Workspace-wide UTM source/medium breakdown — the link-level
+   * complement to getTopCampaigns, grouped by the same resolved
+   * Link.utmSource/utmMedium columns CampaignAnalyticsService's
+   * campaign-scoped breakdowns use (see that file's comment on why this
+   * is grouped by the link's stored UTM fields, not ClickEvent.queryParams). */
+  async getUtmBreakdown(
+    workspaceId: string,
+    query: AnalyticsQueryDto,
+    column:
+      'utmSource' | 'utmMedium' | 'utmCampaign' | 'utmTerm' | 'utmContent',
+  ) {
+    const cacheKey = { ...query, column };
+    const cached = await this.cache.get(workspaceId, `utm-${column}`, cacheKey);
+    if (cached) return cached;
+
+    const filters = this.resolveFilters(workspaceId, query);
+    const { clause, params } = this.buildWhere(filters, 1, 'ce');
+
+    const rows = await this.prisma.$queryRawUnsafe<
+      Array<{ value: string; clicks: number }>
+    >(
+      `SELECT COALESCE(l."${column}", 'none') AS value, count(*)::int AS clicks
+      FROM click_events ce
+      JOIN links l ON l.id = ce."linkId"
+      WHERE ${clause}
+      GROUP BY l."${column}"
+      ORDER BY clicks DESC
+      LIMIT 10`,
+      ...params,
+    );
+
+    await this.cache.set(workspaceId, `utm-${column}`, cacheKey, rows);
+    return rows;
+  }
 }

@@ -1,4 +1,11 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiHeader,
@@ -123,6 +130,58 @@ export class AnalyticsController {
     return this.analyticsService.getOperatingSystems(
       workspace.workspaceId,
       query,
+    );
+  }
+
+  @Get('campaigns')
+  @ApiOperation({
+    summary: 'Workspace-wide clicks-by-campaign breakdown (Sprint 5)',
+    description:
+      'Every campaign\'s traffic side by side, for the main analytics dashboard. Links with no campaign are grouped under "No campaign" rather than dropped.',
+  })
+  @ApiResponse({ status: 200, description: 'Clicks grouped by campaign' })
+  campaigns(
+    @CurrentWorkspace() workspace: WorkspaceMember,
+    @Query() query: AnalyticsQueryDto,
+  ) {
+    return this.analyticsService.getTopCampaigns(workspace.workspaceId, query);
+  }
+
+  @Get('utm/:field')
+  @ApiOperation({
+    summary:
+      'Workspace-wide UTM breakdown by field (source, medium, campaign, term, or content)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Clicks grouped by the requested UTM field',
+  })
+  @ApiResponse({ status: 400, description: 'Unknown UTM field' })
+  utmBreakdown(
+    @CurrentWorkspace() workspace: WorkspaceMember,
+    @Param('field') field: string,
+    @Query() query: AnalyticsQueryDto,
+  ) {
+    const validFields = [
+      'source',
+      'medium',
+      'campaign',
+      'term',
+      'content',
+    ] as const;
+    const normalized = field.toLowerCase() as (typeof validFields)[number];
+    if (!validFields.includes(normalized)) {
+      throw new BadRequestException(
+        `Unknown UTM field "${field}" — must be one of ${validFields.join(', ')}`,
+      );
+    }
+    const column =
+      `utm${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}` as
+        'utmSource' | 'utmMedium' | 'utmCampaign' | 'utmTerm' | 'utmContent';
+    return this.analyticsService.getUtmBreakdown(
+      workspace.workspaceId,
+      query,
+      column,
     );
   }
 }

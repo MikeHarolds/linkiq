@@ -136,6 +136,78 @@ describe('RedirectService', () => {
     });
   });
 
+  describe('UTM application (Sprint 5)', () => {
+    it('applies UTM params onto the destination when the link has UTM configured', async () => {
+      cache.get.mockResolvedValue(
+        makeCachedLink({
+          destinationUrl: 'https://example.com/product?id=123',
+          utmSource: 'facebook',
+          utmMedium: 'social',
+        }),
+      );
+
+      const outcome = await service.resolve('code', {});
+
+      expect(outcome).toEqual({
+        kind: 'redirect',
+        destinationUrl:
+          'https://example.com/product?id=123&utm_source=facebook&utm_medium=social',
+      });
+    });
+
+    it('returns the raw destination unchanged when the link has no UTM configuration', async () => {
+      cache.get.mockResolvedValue(makeCachedLink());
+
+      const outcome = await service.resolve('code', {});
+
+      expect(outcome).toEqual({
+        kind: 'redirect',
+        destinationUrl: 'https://example.com',
+      });
+    });
+
+    it('falls back to the raw destination (redirect still succeeds) if UTM application throws', async () => {
+      cache.get.mockResolvedValue(
+        makeCachedLink({
+          destinationUrl: 'not actually a valid url',
+          utmSource: 'x',
+        }),
+      );
+
+      const outcome = await service.resolve('code', {});
+
+      expect(outcome).toEqual({
+        kind: 'redirect',
+        destinationUrl: 'not actually a valid url',
+      });
+    });
+
+    it('applies UTM params when resolving from the database on a cache miss', async () => {
+      cache.get.mockResolvedValue(undefined);
+      prisma.link.findUnique.mockResolvedValue({
+        id: 'link-1',
+        workspaceId: 'ws-1',
+        destinationUrl: 'https://example.com',
+        status: 'ACTIVE',
+        isActive: true,
+        expiresAt: null,
+        deletedAt: null,
+        utmSource: 'newsletter',
+        utmMedium: null,
+        utmCampaign: null,
+        utmTerm: null,
+        utmContent: null,
+      });
+
+      const outcome = await service.resolve('code', {});
+
+      expect(outcome).toEqual({
+        kind: 'redirect',
+        destinationUrl: 'https://example.com/?utm_source=newsletter',
+      });
+    });
+  });
+
   describe('link state validation', () => {
     it('blocks a paused link', async () => {
       cache.get.mockResolvedValue(

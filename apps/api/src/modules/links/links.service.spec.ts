@@ -407,4 +407,225 @@ describe('LinksService', () => {
       ).toBe(false);
     });
   });
+
+  describe('campaign / UTM integration (Sprint 5)', () => {
+    function makeCampaign(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: 'campaign-1',
+        workspaceId: WORKSPACE_ID,
+        name: 'Test Campaign',
+        status: 'ACTIVE',
+        utmSource: 'newsletter',
+        utmMedium: 'email',
+        utmCampaign: 'campaign_default',
+        utmTerm: null,
+        utmContent: null,
+        deletedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...overrides,
+      };
+    }
+
+    it('rejects a campaignId for a campaign that does not exist', async () => {
+      prisma.campaign.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.create(
+          WORKSPACE_ID,
+          USER_ID,
+          { destinationUrl: 'https://example.com', campaignId: 'campaign-1' },
+          CTX,
+        ),
+      ).rejects.toThrow(NotFoundException);
+      expect(prisma.link.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a campaignId belonging to another workspace (404, not 403)', async () => {
+      prisma.campaign.findUnique.mockResolvedValue(
+        makeCampaign({ workspaceId: 'other-ws' }),
+      );
+
+      await expect(
+        service.create(
+          WORKSPACE_ID,
+          USER_ID,
+          { destinationUrl: 'https://example.com', campaignId: 'campaign-1' },
+          CTX,
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('inherits UTM defaults from the campaign when no overrides are given', async () => {
+      prisma.campaign.findUnique.mockResolvedValue(makeCampaign());
+      prisma.link.create.mockResolvedValue(makeLink());
+
+      await service.create(
+        WORKSPACE_ID,
+        USER_ID,
+        { destinationUrl: 'https://example.com', campaignId: 'campaign-1' },
+        CTX,
+      );
+
+      const createArgs = prisma.link.create.mock.calls[0][0];
+      expect(createArgs.data.utmSource).toBe('newsletter');
+      expect(createArgs.data.utmMedium).toBe('email');
+      expect(createArgs.data.utmCampaign).toBe('campaign_default');
+      expect(createArgs.data.campaignId).toBe('campaign-1');
+    });
+
+    it('lets an explicit UTM override win over the campaign default', async () => {
+      prisma.campaign.findUnique.mockResolvedValue(makeCampaign());
+      prisma.link.create.mockResolvedValue(makeLink());
+
+      await service.create(
+        WORKSPACE_ID,
+        USER_ID,
+        {
+          destinationUrl: 'https://example.com',
+          campaignId: 'campaign-1',
+          utmSource: 'facebook',
+        },
+        CTX,
+      );
+
+      const createArgs = prisma.link.create.mock.calls[0][0];
+      expect(createArgs.data.utmSource).toBe('facebook'); // override, not 'newsletter'
+      expect(createArgs.data.utmMedium).toBe('email'); // still inherited
+    });
+
+    it('creates a link with explicit UTM values and no campaign at all', async () => {
+      prisma.link.create.mockResolvedValue(makeLink());
+
+      await service.create(
+        WORKSPACE_ID,
+        USER_ID,
+        {
+          destinationUrl: 'https://example.com',
+          utmSource: 'facebook',
+          utmMedium: 'cpc',
+        },
+        CTX,
+      );
+
+      expect(prisma.campaign.findUnique).not.toHaveBeenCalled();
+      const createArgs = prisma.link.create.mock.calls[0][0];
+      expect(createArgs.data.utmSource).toBe('facebook');
+      expect(createArgs.data.campaignId).toBeUndefined();
+    });
+
+    it('rejects an invalid UTM value at creation', async () => {
+      await expect(
+        service.create(
+          WORKSPACE_ID,
+          USER_ID,
+          {
+            destinationUrl: 'https://example.com',
+            utmSource: '<script>bad</script>',
+          },
+          CTX,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.link.create).not.toHaveBeenCalled();
+    });
+
+    describe('update', () => {
+      it('reassigns a link to a new campaign, inheriting its UTM defaults for untouched fields', async () => {
+        prisma.link.findUnique.mockResolvedValue(
+          makeLink({ campaignId: null }),
+        );
+        prisma.campaign.findUnique.mockResolvedValue(makeCampaign());
+        prisma.link.update.mockResolvedValue(
+          makeLink({ campaignId: 'campaign-1' }),
+        );
+
+        await service.update(
+          WORKSPACE_ID,
+          'link-1',
+          USER_ID,
+          { campaignId: 'campaign-1' },
+          CTX,
+        );
+
+        const updateArgs = prisma.link.update.mock.calls[0][0];
+        expect(updateArgs.data.campaignId).toBe('campaign-1');
+        expect(updateArgs.data.utmSource).toBe('newsletter');
+      });
+
+      it('clears the campaign association and UTM fields when campaignId is set to null', async () => {
+        prisma.link.findUnique.mockResolvedValue(
+          makeLink({ campaignId: 'campaign-1', utmSource: 'newsletter' }),
+        );
+        prisma.link.update.mockResolvedValue(makeLink({ campaignId: null }));
+
+        await service.update(
+          WORKSPACE_ID,
+          'link-1',
+          USER_ID,
+          { campaignId: null },
+          CTX,
+        );
+
+        const updateArgs = prisma.link.update.mock.calls[0][0];
+        expect(updateArgs.data.campaignId).toBeNull();
+        expect(updateArgs.data.utmSource).toBeUndefined();
+        expect(prisma.campaign.findUnique).not.toHaveBeenCalled();
+      });
+
+      it('an explicit null UTM field wins over the new campaign default (explicit clear beats inheritance)', async () => {
+        prisma.link.findUnique.mockResolvedValue(
+          makeLink({ campaignId: null }),
+        );
+        prisma.campaign.findUnique.mockResolvedValue(makeCampaign());
+        prisma.link.update.mockResolvedValue(makeLink());
+
+        await service.update(
+          WORKSPACE_ID,
+          'link-1',
+          USER_ID,
+          { campaignId: 'campaign-1', utmSource: null },
+          CTX,
+        );
+
+        const updateArgs = prisma.link.update.mock.calls[0][0];
+        expect(updateArgs.data.utmSource).toBeUndefined(); // cleared, not 'newsletter'
+        expect(updateArgs.data.utmMedium).toBe('email'); // still inherited
+      });
+
+      it('updates a UTM field directly without touching campaignId or re-resolving defaults', async () => {
+        prisma.link.findUnique.mockResolvedValue(
+          makeLink({ campaignId: 'campaign-1' }),
+        );
+        prisma.link.update.mockResolvedValue(makeLink());
+
+        await service.update(
+          WORKSPACE_ID,
+          'link-1',
+          USER_ID,
+          { utmContent: 'header-cta' },
+          CTX,
+        );
+
+        expect(prisma.campaign.findUnique).not.toHaveBeenCalled();
+        const updateArgs = prisma.link.update.mock.calls[0][0];
+        expect(updateArgs.data.utmContent).toBe('header-cta');
+        expect(updateArgs.data.campaignId).toBeUndefined();
+      });
+
+      it('rejects an invalid UTM value on update', async () => {
+        prisma.link.findUnique.mockResolvedValue(makeLink());
+
+        await expect(
+          service.update(
+            WORKSPACE_ID,
+            'link-1',
+            USER_ID,
+            { utmSource: 'a'.repeat(300) },
+            CTX,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expect(prisma.link.update).not.toHaveBeenCalled();
+      });
+    });
+  });
 });

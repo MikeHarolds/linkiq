@@ -39,6 +39,6 @@ import { ClickEventProcessor } from './processors/click-event.processor';
           : GeoipCountryProvider,
     },
   ],
-  exports: [AnalyticsService],
+  exports: [AnalyticsService, AnalyticsCacheService],
 })
 export class AnalyticsModule {}

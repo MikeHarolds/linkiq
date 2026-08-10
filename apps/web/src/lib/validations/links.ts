@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { utmDefaultsSchema } from './utm';
+
 /**
  * Mirrors the backend's URL validation (apps/api's url-validator.ts):
  * absolute http/https URLs only. The backend re-validates independently
@@ -34,13 +36,16 @@ const slugSchema = z
     'Only letters, numbers, hyphens, and underscores are allowed',
   );
 
-export const createLinkSchema = z.object({
-  destinationUrl: destinationUrlSchema,
-  slug: z.union([slugSchema, z.literal('')]).optional(),
-  title: z.string().trim().max(200).optional().or(z.literal('')),
-  description: z.string().trim().max(1000).optional().or(z.literal('')),
-  expiresAt: z.string().optional().or(z.literal('')),
-});
+export const createLinkSchema = z
+  .object({
+    destinationUrl: destinationUrlSchema,
+    slug: z.union([slugSchema, z.literal('')]).optional(),
+    title: z.string().trim().max(200).optional().or(z.literal('')),
+    description: z.string().trim().max(1000).optional().or(z.literal('')),
+    expiresAt: z.string().optional().or(z.literal('')),
+    campaignId: z.string().optional().or(z.literal('')),
+  })
+  .merge(utmDefaultsSchema);
 
 export type CreateLinkFormValues = z.infer<typeof createLinkSchema>;
 

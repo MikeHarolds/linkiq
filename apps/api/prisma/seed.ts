@@ -8,17 +8,23 @@
  *   - 11 realistic demo links spanning every lifecycle state
  *   - ~30 days of realistic historical click events across those links
  *   - 6 demo QR codes across a mix of links, showing default config,
- *     custom brand colors, large/small sizes, and both PNG and SVG —
- *     internal demo data, not fabricated production traffic
+ *     custom brand colors, large/small sizes, and both PNG and SVG
+ *   - 4 demo campaigns (DRAFT/ACTIVE/PAUSED/COMPLETED-via-past-end-date),
+ *     retroactively associated with a subset of the already-seeded links
+ *     — their existing click history rolls up into campaign analytics
+ *     naturally, with no fabricated summary numbers
+ *
+ * All seeded analytics are internal demo data, never presented as real
+ * production traffic.
  *
  * NOT yet implemented (arrives with the relevant feature milestone):
- *   - Campaigns, AI insights, tags, notifications, activity history,
- *     custom domains
+ *   - AI insights, tags, notifications, activity history, custom domains
  *
  * Run with: npm run prisma:seed --workspace=apps/api
  */
 
 import {
+  CampaignStatus,
   GlobalRole,
   LinkStatus,
   PrismaClient,
@@ -690,6 +696,129 @@ async function seedAdminUser() {
   return admin;
 }
 
+async function seedDemoCampaigns(
+  workspace: Workspace,
+  user: User,
+  links: Link[],
+) {
+  const existing = await prisma.campaign.count({
+    where: { workspaceId: workspace.id },
+  });
+  if (existing > 0) {
+    console.log('Demo campaigns already seeded — skipping (idempotent)');
+    return;
+  }
+
+  const byShortCode = new Map(links.map((link) => [link.shortCode, link]));
+  const now = Date.now();
+  const days = (n: number) => new Date(now + n * 24 * 60 * 60 * 1000);
+
+  const campaignConfigs: Array<{
+    name: string;
+    description: string;
+    status: CampaignStatus;
+    startDate?: Date;
+    endDate?: Date;
+    utmSource?: string;
+    utmMedium?: string;
+    utmCampaign?: string;
+    linkShortCodes: string[];
+  }> = [
+    {
+      name: '2026 Summer Campaign',
+      description:
+        'Cross-channel push for the July sale — social, email, and print.',
+      status: CampaignStatus.ACTIVE,
+      startDate: days(-14),
+      endDate: days(30),
+      utmSource: 'newsletter',
+      utmMedium: 'email',
+      utmCampaign: 'summer_campaign_2026',
+      // Retroactively associates these already-seeded, already-clicked
+      // links with the campaign — their existing ClickEvent history
+      // rolls up into campaign analytics naturally, with no fabricated
+      // summary numbers (Sprint 5 spec, "Demo Data").
+      linkShortCodes: ['demo-flash-sale', 'demo-pricing'],
+    },
+    {
+      name: 'Product Launch Campaign',
+      description: 'Launch-day push for the new release across every channel.',
+      status: CampaignStatus.ACTIVE,
+      startDate: days(-7),
+      utmSource: 'twitter',
+      utmMedium: 'social',
+      utmCampaign: 'product_launch_2026',
+      linkShortCodes: ['demo-launch', 'demo-changelog'],
+    },
+    {
+      name: 'Social Media Campaign',
+      description: 'Ongoing organic + paid social promotion.',
+      status: CampaignStatus.PAUSED,
+      startDate: days(-30),
+      utmSource: 'facebook',
+      utmMedium: 'social',
+      utmCampaign: 'social_always_on',
+      linkShortCodes: ['demo-webinar'],
+    },
+    {
+      name: 'QR Promotion Campaign',
+      description:
+        'In-store and print QR codes driving traffic to the docs handout and pricing page.',
+      status: CampaignStatus.COMPLETED,
+      startDate: days(-60),
+      endDate: days(-1), // already ended — reported as COMPLETED via the derived-status rule
+      utmSource: 'qr_code',
+      utmMedium: 'qr',
+      utmCampaign: 'qr_promotion_2026',
+      linkShortCodes: ['demo-docs'],
+    },
+  ];
+
+  let seededCampaigns = 0;
+  let associatedLinks = 0;
+
+  for (const config of campaignConfigs) {
+    const campaign = await prisma.campaign.create({
+      data: {
+        workspaceId: workspace.id,
+        createdById: user.id,
+        name: config.name,
+        description: config.description,
+        status: config.status,
+        startDate: config.startDate,
+        endDate: config.endDate,
+        utmSource: config.utmSource,
+        utmMedium: config.utmMedium,
+        utmCampaign: config.utmCampaign,
+      },
+    });
+    seededCampaigns++;
+
+    for (const shortCode of config.linkShortCodes) {
+      const link = byShortCode.get(shortCode);
+      if (!link) continue; // defensive: skip silently if demo links ever change shape
+
+      await prisma.link.update({
+        where: { id: link.id },
+        data: {
+          campaignId: campaign.id,
+          // The link inherits the campaign's UTM defaults here, exactly
+          // as LinksService.resolveUtmFields would for a real user
+          // assigning a link to a campaign — not a special seed-only path.
+          utmSource: config.utmSource,
+          utmMedium: config.utmMedium,
+          utmCampaign: config.utmCampaign,
+        },
+      });
+      associatedLinks++;
+    }
+  }
+
+  console.log(
+    `Seeded ${seededCampaigns} demo campaigns, associated with ${associatedLinks} existing links (internal demo data)`,
+  );
+}
+
 async function seedFeatureFlags() {
   const flags = [
     {
@@ -729,10 +858,11 @@ async function main() {
   const links = await seedDemoLinks(workspace, user);
   await seedDemoClickEvents(workspace, links);
   await seedDemoQrCodes(workspace, user, links);
+  await seedDemoCampaigns(workspace, user, links);
 
-  // TODO (future milestones): seed campaigns, AI insights, tags,
-  // notifications, activity history, and custom domains for the demo
-  // account once those modules exist.
+  // TODO (future milestones): seed AI insights, tags, notifications,
+  // activity history, and custom domains for the demo account once
+  // those modules exist.
 
   console.log('\nSeed complete.');
 }

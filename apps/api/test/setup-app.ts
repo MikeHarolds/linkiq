@@ -70,6 +70,7 @@ export async function resetDatabase(
   await prisma.linkDailyStat.deleteMany();
   await prisma.qrCode.deleteMany();
   await prisma.link.deleteMany();
+  await prisma.campaign.deleteMany();
   await prisma.workspaceMember.deleteMany();
   await prisma.workspace.deleteMany();
   await prisma.organization.deleteMany();

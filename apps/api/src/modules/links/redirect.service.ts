@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+import { applyUtmParams, hasAnyUtmValue } from '../campaigns/utils/utm';
 import { PrismaService } from '../prisma/prisma.service';
 
 import { LinkCacheService, type CachedLink } from './link-cache.service';
@@ -63,6 +64,11 @@ export class RedirectService {
         status: dbLink.status,
         isActive: dbLink.isActive,
         expiresAt: dbLink.expiresAt ? dbLink.expiresAt.toISOString() : null,
+        utmSource: dbLink.utmSource,
+        utmMedium: dbLink.utmMedium,
+        utmCampaign: dbLink.utmCampaign,
+        utmTerm: dbLink.utmTerm,
+        utmContent: dbLink.utmContent,
       };
     }
 
@@ -109,6 +115,36 @@ export class RedirectService {
       );
       return { kind: 'not_found' };
     }
-    return { kind: 'redirect', destinationUrl: link.destinationUrl };
+    return {
+      kind: 'redirect',
+      destinationUrl: this.resolveDestinationUrl(link),
+    };
+  }
+
+  /**
+   * Applies the link's stored UTM values (Sprint 5) onto its
+   * destinationUrl — never onto the LinkIQ short URL itself, and never
+   * baked back into the stored destinationUrl. Deliberately checked with
+   * hasAnyUtmValue first: the overwhelming majority of links have no UTM
+   * configuration, and skipping the URL parse/rebuild entirely for that
+   * common case keeps the hot path exactly as cheap as it was before
+   * this sprint. destinationUrl was already validated as an absolute
+   * http(s) URL at creation time, so applyUtmParams should never throw
+   * here in practice — but if it somehow did, a redirect succeeding
+   * matters more than its UTM tags being present, so we fall back to the
+   * raw destination rather than let a redirect fail.
+   */
+  private resolveDestinationUrl(link: CachedLink): string {
+    if (!hasAnyUtmValue(link)) {
+      return link.destinationUrl;
+    }
+    try {
+      return applyUtmParams(link.destinationUrl, link);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to apply UTM params for link ${link.id}, redirecting to the raw destination: ${String(error)}`,
+      );
+      return link.destinationUrl;
+    }
   }
 }

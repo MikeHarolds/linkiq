@@ -13,6 +13,7 @@ import {
 } from '../../common/utils/short-code';
 import { validateDestinationUrl } from '../../common/utils/url-validator';
 import { AuditService } from '../audit/audit.service';
+import { validateUtmValues, type UtmValues } from '../campaigns/utils/utm';
 import { PrismaService } from '../prisma/prisma.service';
 
 import type { CreateLinkDto } from './dto/create-link.dto';
@@ -58,6 +59,77 @@ export class LinksService {
     );
   }
 
+  /**
+   * Resolves the effective UTM values for a link being created or
+   * updated: explicit fields on the DTO win; anything left unset falls
+   * back to the campaign's defaults, if a campaign is given. Returns a
+   * plain snapshot — see Link.utmSource et al. in schema.prisma for why
+   * this is captured once here rather than re-resolved from the
+   * campaign on every read.
+   */
+  private async resolveUtmFields(
+    workspaceId: string,
+    campaignId: string | undefined,
+    dto: {
+      utmSource?: string | null;
+      utmMedium?: string | null;
+      utmCampaign?: string | null;
+      utmTerm?: string | null;
+      utmContent?: string | null;
+    },
+  ): Promise<UtmValues> {
+    let campaignDefaults: UtmValues = {};
+
+    if (campaignId) {
+      const campaign = await this.prisma.campaign.findUnique({
+        where: { id: campaignId },
+      });
+      if (
+        !campaign ||
+        campaign.deletedAt !== null ||
+        campaign.workspaceId !== workspaceId
+      ) {
+        // Same "don't confirm existence in a workspace you can't see"
+        // reasoning as everywhere else in the app.
+        throw new NotFoundException('Campaign not found');
+      }
+      campaignDefaults = {
+        utmSource: campaign.utmSource,
+        utmMedium: campaign.utmMedium,
+        utmCampaign: campaign.utmCampaign,
+        utmTerm: campaign.utmTerm,
+        utmContent: campaign.utmContent,
+      };
+    }
+
+    // Deliberately `!== undefined`, not `??`: an explicit `null` (from
+    // UpdateLinkDto, meaning "clear this field") must win outright and
+    // never fall through to a campaign default, which `??` would do
+    // incorrectly since it treats null and undefined as equally "unset".
+    const pick = (
+      explicit: string | null | undefined,
+      fallback: string | null | undefined,
+    ) =>
+      explicit !== undefined
+        ? (explicit ?? undefined)
+        : (fallback ?? undefined);
+
+    const resolved: UtmValues = {
+      utmSource: pick(dto.utmSource, campaignDefaults.utmSource),
+      utmMedium: pick(dto.utmMedium, campaignDefaults.utmMedium),
+      utmCampaign: pick(dto.utmCampaign, campaignDefaults.utmCampaign),
+      utmTerm: pick(dto.utmTerm, campaignDefaults.utmTerm),
+      utmContent: pick(dto.utmContent, campaignDefaults.utmContent),
+    };
+
+    const validation = validateUtmValues(resolved);
+    if (!validation.valid) {
+      throw new BadRequestException(validation.reason ?? 'Invalid UTM values');
+    }
+
+    return resolved;
+  }
+
   async create(
     workspaceId: string,
     userId: string,
@@ -77,6 +149,8 @@ export class LinksService {
       throw new BadRequestException('expiresAt must be in the future');
     }
 
+    const utm = await this.resolveUtmFields(workspaceId, dto.campaignId, dto);
+
     const link = dto.slug
       ? await this.createWithCustomSlug(
           workspaceId,
@@ -85,6 +159,7 @@ export class LinksService {
           destinationUrl,
           dto,
           expiresAt,
+          utm,
         )
       : await this.createWithGeneratedSlug(
           workspaceId,
@@ -92,6 +167,7 @@ export class LinksService {
           destinationUrl,
           dto,
           expiresAt,
+          utm,
         );
 
     await this.audit.record({
@@ -115,6 +191,7 @@ export class LinksService {
     destinationUrl: string,
     dto: CreateLinkDto,
     expiresAt: Date | undefined,
+    utm: UtmValues,
   ): Promise<Link> {
     const slugResult = validateCustomSlug(slug);
     if (!slugResult.valid) {
@@ -131,6 +208,8 @@ export class LinksService {
           title: dto.title,
           description: dto.description,
           expiresAt,
+          campaignId: dto.campaignId,
+          ...utm,
         },
       });
     } catch (error) {
@@ -151,6 +230,7 @@ export class LinksService {
     destinationUrl: string,
     dto: CreateLinkDto,
     expiresAt: Date | undefined,
+    utm: UtmValues,
   ): Promise<Link> {
     for (let attempt = 0; attempt < MAX_AUTO_CODE_ATTEMPTS; attempt++) {
       const shortCode = generateShortCode();
@@ -164,6 +244,8 @@ export class LinksService {
             title: dto.title,
             description: dto.description,
             expiresAt,
+            campaignId: dto.campaignId,
+            ...utm,
           },
         });
       } catch (error) {
@@ -319,6 +401,42 @@ export class LinksService {
         throw new BadRequestException('expiresAt must be in the future');
       }
       data.expiresAt = nextExpiresAt;
+    }
+
+    if (dto.campaignId !== undefined) {
+      // Reassigning (or clearing) the campaign is treated the same way
+      // as at creation: any UTM field not explicitly set in THIS same
+      // request inherits the new campaign's defaults (or clears to null,
+      // if campaignId is being unset). Fields explicitly given always win.
+      data.campaignId = dto.campaignId;
+      const utm = await this.resolveUtmFields(
+        workspaceId,
+        dto.campaignId ?? undefined,
+        dto,
+      );
+      Object.assign(data, utm);
+    } else {
+      // campaignId untouched — UTM fields (if any) are plain explicit
+      // overrides, validated on their own; no campaign lookup needed.
+      const explicitUtm = {
+        utmSource: dto.utmSource,
+        utmMedium: dto.utmMedium,
+        utmCampaign: dto.utmCampaign,
+        utmTerm: dto.utmTerm,
+        utmContent: dto.utmContent,
+      };
+      const providedKeys = Object.entries(explicitUtm).filter(
+        ([, v]) => v !== undefined,
+      );
+      if (providedKeys.length > 0) {
+        const validation = validateUtmValues(Object.fromEntries(providedKeys));
+        if (!validation.valid) {
+          throw new BadRequestException(
+            validation.reason ?? 'Invalid UTM values',
+          );
+        }
+        for (const [key, value] of providedKeys) data[key] = value;
+      }
     }
 
     const updated = await this.prisma.link.update({

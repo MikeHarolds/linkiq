@@ -23,6 +23,7 @@ import {
   MetricCard,
 } from '@/components/analytics/analytics-states';
 import { BreakdownDonutChart } from '@/components/analytics/breakdown-donut-chart';
+import { CampaignUtmSection } from '@/components/analytics/campaign-utm-section';
 import {
   type DateRangeValue,
   DateRangePicker,
@@ -283,6 +284,11 @@ export default function AnalyticsDashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <CampaignUtmSection
+        workspaceId={currentWorkspaceId}
+        queryParams={queryParams}
+      />
     </div>
   );
 }

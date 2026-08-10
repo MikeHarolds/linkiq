@@ -27,7 +27,7 @@ describe('QR Codes (e2e)', () => {
   afterAll(async () => {
     await resetDatabase(prisma, redis);
     await app.close();
-  }, 20000);
+  }, 30000);
 
   async function registerUser(email: string) {
     const res = await request(server).post('/api/v1/auth/register').send({

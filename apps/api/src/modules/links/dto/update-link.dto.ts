@@ -1,7 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsDateString,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 
 import { IsDestinationUrl } from '../../../common/validators/is-destination-url.decorator';
+import { IsValidUtmValue } from '../../campaigns/utils/is-valid-utm-value.decorator';
 
 export class UpdateLinkDto {
   @ApiPropertyOptional({ example: 'https://example.com/updated-destination' })
@@ -26,4 +33,43 @@ export class UpdateLinkDto {
   @IsOptional()
   @IsDateString()
   expiresAt?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      "Reassign to a different campaign, or pass null to remove the campaign association. Any UTM field not explicitly set in this same request inherits the new campaign's defaults (or clears, if campaignId is set to null).",
+  })
+  @IsOptional()
+  @IsUUID()
+  campaignId?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @IsValidUtmValue()
+  utmSource?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @IsValidUtmValue()
+  utmMedium?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @IsValidUtmValue()
+  utmCampaign?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @IsValidUtmValue()
+  utmTerm?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @IsValidUtmValue()
+  utmContent?: string | null;
 }

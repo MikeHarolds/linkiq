@@ -12,6 +12,15 @@ export interface CachedLink {
   status: string;
   isActive: boolean;
   expiresAt: string | null; // ISO string — Redis only stores strings
+  /** UTM values resolved onto this link at create/update time (Sprint 5)
+   * — see RedirectService, which applies these onto destinationUrl at
+   * redirect time. Absent/undefined fields mean "no UTM configured for
+   * this link", not "explicitly cleared". */
+  utmSource?: string | null;
+  utmMedium?: string | null;
+  utmCampaign?: string | null;
+  utmTerm?: string | null;
+  utmContent?: string | null;
 }
 
 const CACHE_KEY_PREFIX = 'link:shortcode:';
@@ -63,6 +72,11 @@ export class LinkCacheService {
       status: link.status,
       isActive: link.isActive,
       expiresAt: link.expiresAt ? link.expiresAt.toISOString() : null,
+      utmSource: link.utmSource,
+      utmMedium: link.utmMedium,
+      utmCampaign: link.utmCampaign,
+      utmTerm: link.utmTerm,
+      utmContent: link.utmContent,
     };
     try {
       await this.redis.set(

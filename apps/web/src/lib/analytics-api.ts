@@ -100,3 +100,28 @@ export function getOperatingSystems(
     headers: workspaceHeaders(workspaceId),
   });
 }
+
+export interface CampaignBreakdownItemDto {
+  campaignId: string | null;
+  name: string;
+  clicks: number;
+}
+
+export function getTopCampaigns(
+  workspaceId: string,
+  params: AnalyticsQueryParams,
+): Promise<CampaignBreakdownItemDto[]> {
+  return api.get(`/analytics/campaigns${buildQuery(params)}`, {
+    headers: workspaceHeaders(workspaceId),
+  });
+}
+
+export function getUtmBreakdown(
+  workspaceId: string,
+  field: 'source' | 'medium' | 'campaign' | 'term' | 'content',
+  params: AnalyticsQueryParams,
+): Promise<BreakdownItemDto[]> {
+  return api.get(`/analytics/utm/${field}${buildQuery(params)}`, {
+    headers: workspaceHeaders(workspaceId),
+  });
+}

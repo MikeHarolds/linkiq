@@ -316,4 +316,62 @@ describe('AnalyticsService', () => {
       ]);
     });
   });
+
+  describe('getTopCampaigns (Sprint 5)', () => {
+    it('joins links and campaigns, grouping links with no campaign under "No campaign"', async () => {
+      prisma.$queryRawUnsafe.mockResolvedValue([
+        { campaignId: 'c-1', name: 'Summer', clicks: 10 },
+        { campaignId: null, name: 'No campaign', clicks: 5 },
+      ]);
+
+      const result = await service.getTopCampaigns('ws-1', baseQuery());
+
+      const [sql] = prisma.$queryRawUnsafe.mock.calls[0];
+      expect(sql).toContain('LEFT JOIN campaigns');
+      expect(sql).toContain("'No campaign'");
+      expect(result).toHaveLength(2);
+    });
+
+    it('qualifies WHERE-clause columns to avoid ambiguity across the three joined tables', async () => {
+      prisma.$queryRawUnsafe.mockResolvedValue([]);
+
+      await service.getTopCampaigns('ws-1', baseQuery());
+
+      const [sql] = prisma.$queryRawUnsafe.mock.calls[0];
+      expect(sql).toMatch(/ce\."workspaceId"\s*=/);
+    });
+  });
+
+  describe('getUtmBreakdown (Sprint 5)', () => {
+    it('groups by the requested link UTM column', async () => {
+      prisma.$queryRawUnsafe.mockResolvedValue([
+        { value: 'facebook', clicks: 3 },
+      ]);
+
+      await service.getUtmBreakdown('ws-1', baseQuery(), 'utmSource');
+
+      const [sql] = prisma.$queryRawUnsafe.mock.calls[0];
+      expect(sql).toContain('l."utmSource"');
+    });
+
+    it('uses a distinct cache namespace per UTM field', async () => {
+      prisma.$queryRawUnsafe.mockResolvedValue([]);
+
+      await service.getUtmBreakdown('ws-1', baseQuery(), 'utmSource');
+      await service.getUtmBreakdown('ws-1', baseQuery(), 'utmMedium');
+
+      expect(cache.get).toHaveBeenNthCalledWith(
+        1,
+        'ws-1',
+        'utm-utmSource',
+        expect.anything(),
+      );
+      expect(cache.get).toHaveBeenNthCalledWith(
+        2,
+        'ws-1',
+        'utm-utmMedium',
+        expect.anything(),
+      );
+    });
+  });
 });

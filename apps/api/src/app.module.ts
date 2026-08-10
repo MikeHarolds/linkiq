@@ -11,6 +11,7 @@ import redisConfig from './config/redis.config';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { HealthModule } from './modules/health/health.module';
 import { LinksModule } from './modules/links/links.module';
 import { LoggingModule } from './modules/logging/logging.module';
@@ -55,8 +56,9 @@ const disableRateLimitForTests =
     LinksModule,
     AnalyticsModule,
     QrCodesModule,
-    // Campaigns, Domains, Billing, Webhooks, and Admin modules
-    // are added in subsequent milestones.
+    CampaignsModule,
+    // Domains, Billing, Webhooks, and Admin modules are added in
+    // subsequent milestones.
   ],
   providers: [
     // ThrottlerModule.forRoot() alone only registers configuration — it does
