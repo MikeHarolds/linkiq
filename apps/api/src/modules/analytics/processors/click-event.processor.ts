@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import type { Job } from 'bullmq';
 
 import {
@@ -138,7 +139,7 @@ export class ClickEventProcessor extends WorkerHost {
             referrerUrl: referrer.url,
             referrerDomain: referrer.domain,
             referrerCategory: referrer.category,
-            queryParams,
+            queryParams: queryParams ?? Prisma.JsonNull,
             isBot: ua.isBot,
           },
         });

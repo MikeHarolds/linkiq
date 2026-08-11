@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import type { Job } from 'bullmq';
 
 import type { RecordClickJobData } from '../../links/queue/click-event.types';
@@ -82,6 +83,23 @@ describe('ClickEventProcessor', () => {
         }),
       }),
     );
+  });
+
+  it('uses Prisma.JsonNull (not a bare null) for queryParams when no marketing params were captured', async () => {
+    // Regression test: extractMarketingParams returns a bare JS `null`
+    // when a redirect carries no utm_* params. Prisma's generated types
+    // for a nullable Json field reject a bare `null` outright — passing
+    // one there is a real Prisma-5.22 compile error the local shim's
+    // permissive `any`-typed delegate never caught (see
+    // click-event.processor.ts). Prisma.JsonNull is the correct
+    // sentinel for "the column holds the JSON value null", which is
+    // also what this code stored before the fix (JSON.stringify(null)),
+    // so this asserts the exact pre-existing runtime behavior is
+    // preserved, not just that the code compiles.
+    await processor.process(makeJob({ queryString: undefined }));
+
+    const createCall = prisma.clickEvent.create.mock.calls[0][0];
+    expect(createCall.data.queryParams).toBe(Prisma.JsonNull);
   });
 
   it('never includes a raw ipAddress field in the persisted data', async () => {

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -8,7 +9,17 @@ export interface RecordAuditEventInput {
   entityId?: string;
   userId?: string;
   workspaceId?: string;
-  metadata?: Record<string, unknown>;
+  /**
+   * Must be genuinely JSON-serializable — `Prisma.InputJsonValue` is the
+   * precise type Prisma's generated client expects for a nullable Json
+   * field's create input (unlike `Record<string, unknown>`, whose values
+   * are typed `unknown` and therefore not provably JSON-safe: `unknown`
+   * could be a Date, a function, a Symbol, none of which round-trip
+   * through JSON). Every existing call site already passes plain
+   * string/number/array/object literals, so this is a more accurate type
+   * for what was always actually required, not a behavior change.
+   */
+  metadata?: Prisma.InputJsonValue;
   ipAddress?: string;
   userAgent?: string;
 }
