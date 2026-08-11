@@ -1,6 +1,12 @@
 /**
  * Shared base ESLint config for all LinkIQ packages/apps.
  * Extended by app-specific configs (nextjs.js, nestjs.js).
+ *
+ * Deliberately does NOT register eslint-plugin-import itself anymore —
+ * see import-rules.js for why, and extend that fragment explicitly in
+ * any config that needs it and doesn't already get it from elsewhere
+ * (e.g. nestjs.js does; nextjs.js does not, since next/core-web-vitals
+ * already provides it).
  */
 module.exports = {
   root: false,
@@ -13,21 +19,12 @@ module.exports = {
     ecmaVersion: 2022,
     sourceType: 'module',
   },
-  plugins: ['@typescript-eslint', 'import'],
+  plugins: ['@typescript-eslint'],
   extends: [
     'eslint:recommended',
     'plugin:@typescript-eslint/recommended',
-    'plugin:import/recommended',
-    'plugin:import/typescript',
     'prettier',
   ],
-  settings: {
-    'import/resolver': {
-      typescript: {
-        alwaysTryTypes: true,
-      },
-    },
-  },
   rules: {
     '@typescript-eslint/no-unused-vars': [
       'warn',
@@ -37,21 +34,6 @@ module.exports = {
     '@typescript-eslint/consistent-type-imports': [
       'warn',
       { prefer: 'type-imports' },
-    ],
-    'import/order': [
-      'warn',
-      {
-        groups: [
-          'builtin',
-          'external',
-          'internal',
-          'parent',
-          'sibling',
-          'index',
-        ],
-        'newlines-between': 'always',
-        alphabetize: { order: 'asc', caseInsensitive: true },
-      },
     ],
     'no-console': ['warn', { allow: ['warn', 'error'] }],
   },

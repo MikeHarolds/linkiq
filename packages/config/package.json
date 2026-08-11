@@ -8,6 +8,7 @@
     "./typescript/nextjs.json": "./typescript/nextjs.json",
     "./typescript/nestjs.json": "./typescript/nestjs.json",
     "./eslint/base": "./eslint/base.js",
+    "./eslint/import-rules": "./eslint/import-rules.js",
     "./eslint/nextjs": "./eslint/nextjs.js",
     "./eslint/nestjs": "./eslint/nestjs.js",
     "./tailwind/base": "./tailwind/base.js",

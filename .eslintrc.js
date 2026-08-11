@@ -6,7 +6,10 @@
  */
 module.exports = {
   root: true,
-  extends: [require.resolve('@linkiq/config/eslint/base')],
+  extends: [
+    require.resolve('@linkiq/config/eslint/base'),
+    require.resolve('@linkiq/config/eslint/import-rules'),
+  ],
   env: {
     node: true,
   },
