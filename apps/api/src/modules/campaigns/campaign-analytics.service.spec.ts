@@ -201,4 +201,97 @@ describe('CampaignAnalyticsService', () => {
       expect(result).toHaveProperty('referrers');
     });
   });
+
+  /**
+   * Regression suite: the same class of bug fixed in
+   * AnalyticsService.buildWhere (see that file's spec for the full
+   * writeup and a real-Postgres reproduction of the exact SQLSTATE
+   * 42883 error) also existed in this class's own buildWhere — a
+   * separate implementation, not shared code, so it needed its own fix
+   * and its own regression coverage.
+   */
+  describe('UUID parameter casting (regression)', () => {
+    const METHODS: Array<{ name: string; run: () => Promise<unknown> }> = [];
+
+    beforeEach(() => {
+      METHODS.push(
+        {
+          name: 'getOverview',
+          run: () =>
+            service.getOverview(WORKSPACE_ID, CAMPAIGN_ID, baseQuery()),
+        },
+        {
+          name: 'getTimeseries',
+          run: () =>
+            service.getTimeseries(WORKSPACE_ID, CAMPAIGN_ID, {
+              ...baseQuery(),
+              interval: 'day' as const,
+            }),
+        },
+        {
+          name: 'getTopLinks',
+          run: () =>
+            service.getTopLinks(WORKSPACE_ID, CAMPAIGN_ID, baseQuery()),
+        },
+        {
+          name: 'getTopSources',
+          run: () =>
+            service.getTopSources(WORKSPACE_ID, CAMPAIGN_ID, baseQuery()),
+        },
+        {
+          name: 'getTopMediums',
+          run: () =>
+            service.getTopMediums(WORKSPACE_ID, CAMPAIGN_ID, baseQuery()),
+        },
+        {
+          name: 'getTopCountries',
+          run: () =>
+            service.getTopCountries(WORKSPACE_ID, CAMPAIGN_ID, baseQuery()),
+        },
+        {
+          name: 'getDeviceBreakdown',
+          run: () =>
+            service.getDeviceBreakdown(WORKSPACE_ID, CAMPAIGN_ID, baseQuery()),
+        },
+        {
+          name: 'getReferrerBreakdown',
+          run: () =>
+            service.getReferrerBreakdown(
+              WORKSPACE_ID,
+              CAMPAIGN_ID,
+              baseQuery(),
+            ),
+        },
+      );
+    });
+
+    afterEach(() => {
+      METHODS.length = 0;
+    });
+
+    it('casts both workspaceId and campaignId to ::uuid in every campaign-analytics query', async () => {
+      prisma.$queryRawUnsafe.mockResolvedValue([]);
+
+      for (const { name, run } of METHODS) {
+        prisma.$queryRawUnsafe.mockClear();
+        // eslint-disable-next-line no-await-in-loop
+        await run();
+
+        const calls = prisma.$queryRawUnsafe.mock.calls;
+        expect(calls.length).toBeGreaterThan(0);
+        for (const [sql] of calls) {
+          if (!/ce\."workspaceId"\s*=\s*\$\d+::uuid/.test(sql)) {
+            throw new Error(
+              `${name}'s SQL must cast ce.workspaceId to ::uuid — got:\n${sql}`,
+            );
+          }
+          if (!/l\."campaignId"\s*=\s*\$\d+::uuid/.test(sql)) {
+            throw new Error(
+              `${name}'s SQL must cast l.campaignId to ::uuid — got:\n${sql}`,
+            );
+          }
+        }
+      }
+    });
+  });
 });

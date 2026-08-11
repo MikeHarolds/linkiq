@@ -374,4 +374,115 @@ describe('AnalyticsService', () => {
       );
     });
   });
+
+  /**
+   * Regression suite for a real production bug: every raw-SQL query here
+   * compares a bare string parameter against Postgres `uuid` columns
+   * (`workspaceId`, `linkId`). Against the actual generated Prisma
+   * Client, `$queryRawUnsafe` types a plain JS string parameter as
+   * `text`, not `uuid` — Postgres then rejects the comparison with
+   * `operator does not exist: uuid = text` (SQLSTATE 42883), since it
+   * has no such operator and (unlike a bare unqualified parameter in a
+   * context Postgres itself controls) does not attempt to coerce an
+   * explicitly-`text`-typed value into `uuid`. This was reproduced
+   * directly against a real Postgres connection during development:
+   *
+   *   SELECT count(*) FROM click_events WHERE "workspaceId" = ($1::text)
+   *   -- forcing $1 to bind as text, exactly mirroring what Prisma's
+   *   -- query engine does for a bare string parameter -- fails with
+   *   -- the exact reported error: "operator does not exist: uuid =
+   *   -- text", 42883.
+   *
+   * These tests assert the fix (`::uuid` on every workspaceId/linkId
+   * comparison) is present in the generated SQL for every affected
+   * method — the local test double's Postgres driver (unlike the real
+   * Prisma Client) infers parameter types from context regardless, so
+   * it does not itself surface this bug; asserting on the SQL text is
+   * what actually guards against the cast being silently dropped again.
+   */
+  describe('UUID parameter casting (regression)', () => {
+    const UUID_CAST_METHODS: Array<{
+      name: string;
+      run: () => Promise<unknown>;
+    }> = [];
+
+    beforeEach(() => {
+      UUID_CAST_METHODS.push(
+        {
+          name: 'getOverview',
+          run: () => service.getOverview('ws-1', baseQuery()),
+        },
+        {
+          name: 'getTimeseries',
+          run: () =>
+            service.getTimeseries('ws-1', { ...baseQuery(), interval: 'day' }),
+        },
+        {
+          name: 'getTopLinks',
+          run: () => service.getTopLinks('ws-1', baseQuery()),
+        },
+        {
+          name: 'getReferrers',
+          run: () => service.getReferrers('ws-1', baseQuery()),
+        },
+        {
+          name: 'getGeography',
+          run: () => service.getGeography('ws-1', baseQuery()),
+        },
+        {
+          name: 'getDevices',
+          run: () => service.getDevices('ws-1', baseQuery()),
+        },
+        {
+          name: 'getBrowsers',
+          run: () => service.getBrowsers('ws-1', baseQuery()),
+        },
+        {
+          name: 'getOperatingSystems',
+          run: () => service.getOperatingSystems('ws-1', baseQuery()),
+        },
+        {
+          name: 'getTopCampaigns',
+          run: () => service.getTopCampaigns('ws-1', baseQuery()),
+        },
+        {
+          name: 'getUtmBreakdown',
+          run: () => service.getUtmBreakdown('ws-1', baseQuery(), 'utmSource'),
+        },
+      );
+    });
+
+    afterEach(() => {
+      UUID_CAST_METHODS.length = 0;
+    });
+
+    it('casts the workspaceId parameter to ::uuid in every analytics query', async () => {
+      prisma.$queryRawUnsafe.mockResolvedValue([]);
+
+      for (const { name, run } of UUID_CAST_METHODS) {
+        prisma.$queryRawUnsafe.mockClear();
+        // eslint-disable-next-line no-await-in-loop
+        await run();
+
+        const calls = prisma.$queryRawUnsafe.mock.calls;
+        expect(calls.length).toBeGreaterThan(0);
+        for (const [sql] of calls) {
+          if (!/"workspaceId"\s*=\s*\$\d+::uuid/.test(sql)) {
+            throw new Error(
+              `${name}'s SQL must cast workspaceId to ::uuid — got:\n${sql}`,
+            );
+          }
+        }
+      }
+    });
+
+    it('casts the linkId parameter to ::uuid when a link filter is applied', async () => {
+      prisma.$queryRawUnsafe.mockResolvedValue([]);
+
+      await service.getOverview('ws-1', { ...baseQuery(), linkId: 'link-1' });
+
+      const [sql] = prisma.$queryRawUnsafe.mock.calls[0];
+      expect(sql).toMatch(/"linkId"\s*=\s*\$\d+::uuid/);
+    });
+  });
 });

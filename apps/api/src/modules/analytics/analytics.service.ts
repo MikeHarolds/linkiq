@@ -73,6 +73,19 @@ export class AnalyticsService {
    * also has a workspaceId column — making an unqualified reference
    * genuinely ambiguous to Postgres, not just a style preference.
    */
+  /**
+   * `::uuid` casts below are load-bearing, not decorative: `workspaceId`
+   * and `linkId` are Postgres `uuid` columns, but a raw string parameter
+   * passed through `$queryRawUnsafe` is typed `text` by Prisma's query
+   * engine (it has no way to know a plain JS string is meant to be a
+   * uuid the way it does for a JS `Date` -> `timestamp`). Without the
+   * explicit cast, Postgres correctly rejects the comparison with
+   * `operator does not exist: uuid = text` (SQLSTATE 42883) — this is
+   * Prisma's own documented behavior for raw queries against uuid
+   * columns, not a bug in Postgres or in this query's logic. Every
+   * method in this class routes through this one helper, so the fix
+   * here covers all of them.
+   */
   private buildWhere(
     filters: CommonFilters,
     startParamIndex: number,
@@ -80,11 +93,11 @@ export class AnalyticsService {
   ) {
     const col = (name: string) => (alias ? `${alias}."${name}"` : `"${name}"`);
     const params: unknown[] = [filters.workspaceId, filters.from, filters.to];
-    let clause = `${col('workspaceId')} = $${startParamIndex} AND ${col('occurredAt')} >= $${startParamIndex + 1} AND ${col('occurredAt')} < $${startParamIndex + 2}`;
+    let clause = `${col('workspaceId')} = $${startParamIndex}::uuid AND ${col('occurredAt')} >= $${startParamIndex + 1} AND ${col('occurredAt')} < $${startParamIndex + 2}`;
     let nextIndex = startParamIndex + 3;
 
     if (filters.linkId) {
-      clause += ` AND ${col('linkId')} = $${nextIndex}`;
+      clause += ` AND ${col('linkId')} = $${nextIndex}::uuid`;
       params.push(filters.linkId);
       nextIndex += 1;
     }

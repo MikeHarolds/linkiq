@@ -1,5 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import type { Redis } from 'ioredis';
+import { Pool } from 'pg';
 import request from 'supertest';
 
 import { ClickEventProcessor } from '../src/modules/analytics/processors/click-event.processor';
@@ -386,6 +387,121 @@ describe('Analytics (e2e)', () => {
       } finally {
         queue.add = originalAdd;
       }
+    });
+  });
+
+  /**
+   * Regression suite for a real production bug reported after Sprint 5:
+   * every analytics endpoint failed with PrismaClientKnownRequestError
+   * P2010 / "operator does not exist: uuid = text" (SQLSTATE 42883)
+   * against a real generated Prisma Client, because raw-SQL comparisons
+   * against Postgres `uuid` columns (workspaceId, linkId) received a
+   * bare string parameter typed `text` by Prisma's query engine. Fixed
+   * by adding explicit `::uuid` casts in AnalyticsService.buildWhere and
+   * CampaignAnalyticsService.buildWhere (see analytics.service.spec.ts
+   * for the unit-level SQL assertions and a from-scratch explanation).
+   */
+  describe('UUID parameter casting (regression)', () => {
+    it('reproduces the exact reported Postgres error when a parameter is text-typed against a uuid column', async () => {
+      // Independent of AnalyticsService entirely — proves the underlying
+      // Postgres/driver behavior the fix depends on, against the same
+      // real database connection this whole e2e suite runs against.
+      const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+      try {
+        await expect(
+          pool.query(
+            'SELECT count(*) FROM click_events WHERE "workspaceId" = ($1::text)',
+            ['00000000-0000-0000-0000-000000000000'],
+          ),
+        ).rejects.toMatchObject({
+          code: '42883',
+          message: expect.stringContaining(
+            'operator does not exist: uuid = text',
+          ),
+        });
+
+        // The fix: the same comparison with an explicit ::uuid cast on
+        // the parameter succeeds.
+        await expect(
+          pool.query(
+            'SELECT count(*) FROM click_events WHERE "workspaceId" = $1::uuid',
+            ['00000000-0000-0000-0000-000000000000'],
+          ),
+        ).resolves.toBeDefined();
+      } finally {
+        await pool.end();
+      }
+    });
+
+    it('every listed analytics endpoint succeeds with a real UUID workspace id and timezone', async () => {
+      const owner = await registerAndCreateLink(
+        'uuid-regression1@example.com',
+        'uuid-regression-link',
+      );
+      await request(server).get(`/${owner.link.shortCode}`).redirects(0);
+
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        // eslint-disable-next-line no-await-in-loop
+        const count = await prisma.clickEvent.count({
+          where: { linkId: owner.link.id },
+        });
+        if (count > 0) break;
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      const authHeaders = {
+        Authorization: `Bearer ${owner.accessToken}`,
+        'X-Workspace-Id': owner.workspaceId,
+      };
+      const qs = 'range=7d&timezone=Europe/London';
+
+      const endpoints = [
+        '/api/v1/analytics/overview',
+        '/api/v1/analytics/timeseries',
+        '/api/v1/analytics/links',
+        '/api/v1/analytics/referrers',
+        '/api/v1/analytics/geography',
+        '/api/v1/analytics/devices',
+        '/api/v1/analytics/browsers',
+        '/api/v1/analytics/operating-systems',
+        '/api/v1/analytics/campaigns',
+      ];
+
+      for (const endpoint of endpoints) {
+        // eslint-disable-next-line no-await-in-loop
+        const res = await request(server)
+          .get(`${endpoint}?${qs}`)
+          .set(authHeaders);
+        expect(res.status).toBe(200);
+      }
+    });
+
+    it('a workspace cannot access analytics belonging to another workspace', async () => {
+      const owner = await registerAndCreateLink(
+        'uuid-regression2@example.com',
+        'uuid-regression-link2',
+      );
+      const outsiderReg = await request(server)
+        .post('/api/v1/auth/register')
+        .send({
+          firstName: 'Out',
+          lastName: 'Sider',
+          email: 'uuid-regression2-outsider@example.com',
+          password: 'SecurePass123',
+          passwordConfirmation: 'SecurePass123',
+          termsAccepted: true,
+        });
+
+      const res = await request(server)
+        .get('/api/v1/analytics/devices?range=7d&timezone=Europe/London')
+        .set({
+          Authorization: `Bearer ${outsiderReg.body.accessToken}`,
+          'X-Workspace-Id': owner.workspaceId,
+        });
+
+      expect(res.status).toBe(403);
     });
   });
 });

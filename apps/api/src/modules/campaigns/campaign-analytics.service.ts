@@ -64,6 +64,15 @@ export class CampaignAnalyticsService {
 
   /** WHERE clause shared by every query below — always joins through
    * `l` (links), always scoped to both workspace and campaign. */
+  /**
+   * `::uuid` casts below are load-bearing, not decorative — see
+   * AnalyticsService.buildWhere's comment for the full explanation.
+   * `workspaceId` and `campaignId` are Postgres `uuid` columns; a raw
+   * string parameter through `$queryRawUnsafe` is typed `text` by
+   * Prisma's query engine unless the SQL says otherwise, which produces
+   * `operator does not exist: uuid = text` (SQLSTATE 42883) without the
+   * cast.
+   */
   private buildWhere(filters: CampaignFilters, startParamIndex: number) {
     const params: unknown[] = [
       filters.workspaceId,
@@ -71,7 +80,7 @@ export class CampaignAnalyticsService {
       filters.from,
       filters.to,
     ];
-    let clause = `ce."workspaceId" = $${startParamIndex} AND l."campaignId" = $${startParamIndex + 1} AND ce."occurredAt" >= $${startParamIndex + 2} AND ce."occurredAt" < $${startParamIndex + 3}`;
+    let clause = `ce."workspaceId" = $${startParamIndex}::uuid AND l."campaignId" = $${startParamIndex + 1}::uuid AND ce."occurredAt" >= $${startParamIndex + 2} AND ce."occurredAt" < $${startParamIndex + 3}`;
     if (!filters.includeBots) {
       clause += ' AND ce."isBot" = false';
     }
