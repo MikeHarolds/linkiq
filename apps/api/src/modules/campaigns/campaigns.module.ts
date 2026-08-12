@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { AnalyticsModule } from '../analytics/analytics.module';
+import { BillingModule } from '../billing/billing.module';
 
 import { CampaignAnalyticsService } from './campaign-analytics.service';
 import { CampaignsController } from './campaigns.controller';
@@ -20,7 +21,7 @@ import { CampaignsService } from './campaigns.service';
  * isolation falls out of the existing mechanism for free.
  */
 @Module({
-  imports: [AnalyticsModule],
+  imports: [AnalyticsModule, BillingModule],
   controllers: [CampaignsController],
   providers: [CampaignsService, CampaignAnalyticsService],
   exports: [CampaignsService],

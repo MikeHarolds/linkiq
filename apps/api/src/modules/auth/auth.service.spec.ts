@@ -9,6 +9,7 @@ import {
   type MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
 import type { AuditService } from '../audit/audit.service';
+import type { SubscriptionsService } from '../billing/subscriptions.service';
 
 import { AuthService } from './auth.service';
 import type { LoginDto } from './dto/login.dto';
@@ -40,12 +41,16 @@ describe('AuthService', () => {
   let jwt: { sign: jest.Mock };
   let config: { get: jest.Mock };
   let audit: { record: jest.Mock };
+  let subscriptions: { createDefaultSubscription: jest.Mock };
   let service: AuthService;
 
   beforeEach(() => {
     prisma = createMockPrismaService();
     jwt = { sign: jest.fn().mockReturnValue('signed.access.token') };
     audit = { record: jest.fn().mockResolvedValue(undefined) };
+    subscriptions = {
+      createDefaultSubscription: jest.fn().mockResolvedValue(undefined),
+    };
 
     const configValues: Record<string, unknown> = {
       'auth.bcryptSaltRounds': 4, // low rounds keep unit tests fast
@@ -61,6 +66,7 @@ describe('AuthService', () => {
       jwt as unknown as JwtService,
       config as unknown as ConfigService,
       audit as unknown as AuditService,
+      subscriptions as unknown as SubscriptionsService,
     );
   });
 

@@ -11,6 +11,7 @@ import {
   type MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
 import type { AuditService } from '../audit/audit.service';
+import type { BillingUsageService } from '../billing/billing-usage.service';
 import type { DomainsService } from '../domains/domains.service';
 import { PublicUrlService } from '../domains/public-url.service';
 
@@ -48,6 +49,7 @@ describe('LinksService', () => {
   let audit: { record: jest.Mock };
   let cache: { invalidate: jest.Mock };
   let domains: { findSelectableOrThrow: jest.Mock };
+  let billingUsage: { assertCanUse: jest.Mock };
   let service: LinksService;
 
   beforeEach(() => {
@@ -57,12 +59,17 @@ describe('LinksService', () => {
     // Not exercised by any test below (none pass customDomainId) —
     // present so the constructor has a valid 4th argument.
     domains = { findSelectableOrThrow: jest.fn() };
+    // Defaults to "always allowed" — matches every existing test below,
+    // which expects Sprint 0-6 create behavior completely unaffected by
+    // Sprint 7's limit enforcement unless a test explicitly overrides it.
+    billingUsage = { assertCanUse: jest.fn().mockResolvedValue(undefined) };
     service = new LinksService(
       prisma as unknown as never,
       audit as unknown as AuditService,
       cache as unknown as LinkCacheService,
       domains as unknown as DomainsService,
       new PublicUrlService(),
+      billingUsage as unknown as BillingUsageService,
     );
   });
 
@@ -102,6 +109,41 @@ describe('LinksService', () => {
           CTX,
         ),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('create — plan limits (Sprint 7)', () => {
+    it('rejects creation when the workspace has reached its link limit', async () => {
+      billingUsage.assertCanUse.mockRejectedValue(
+        new Error('PLAN_LIMIT_REACHED'),
+      );
+
+      await expect(
+        service.create(
+          WORKSPACE_ID,
+          USER_ID,
+          { destinationUrl: 'https://example.com' },
+          CTX,
+        ),
+      ).rejects.toThrow('PLAN_LIMIT_REACHED');
+      expect(prisma.link.create).not.toHaveBeenCalled();
+    });
+
+    it('checks the MAX_LINKS limit for the creating workspace', async () => {
+      prisma.link.create.mockResolvedValue(makeLink());
+
+      await service.create(
+        WORKSPACE_ID,
+        USER_ID,
+        { destinationUrl: 'https://example.com' },
+        CTX,
+      );
+
+      expect(billingUsage.assertCanUse).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        'MAX_LINKS',
+        'links',
+      );
     });
   });
 

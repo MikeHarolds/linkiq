@@ -10,6 +10,8 @@ import {
   type MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
 import type { AuditService } from '../audit/audit.service';
+import type { BillingUsageService } from '../billing/billing-usage.service';
+import type { SubscriptionsService } from '../billing/subscriptions.service';
 
 import { WorkspacesService } from './workspaces.service';
 
@@ -22,14 +24,22 @@ const CTX = { ipAddress: '127.0.0.1', userAgent: 'jest' };
 describe('WorkspacesService', () => {
   let prisma: MockPrismaService;
   let audit: { record: jest.Mock };
+  let subscriptions: { createDefaultSubscription: jest.Mock };
+  let usage: { assertCanUse: jest.Mock };
   let service: WorkspacesService;
 
   beforeEach(() => {
     prisma = createMockPrismaService();
     audit = { record: jest.fn().mockResolvedValue(undefined) };
+    subscriptions = {
+      createDefaultSubscription: jest.fn().mockResolvedValue(undefined),
+    };
+    usage = { assertCanUse: jest.fn().mockResolvedValue(undefined) };
     service = new WorkspacesService(
       prisma as unknown as never,
       audit as unknown as AuditService,
+      subscriptions as unknown as SubscriptionsService,
+      usage as unknown as BillingUsageService,
     );
   });
 
@@ -96,6 +106,22 @@ describe('WorkspacesService', () => {
           CTX,
         ),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('rejects the invite when the workspace has reached its member limit', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-2' });
+      prisma.workspaceMember.findUnique.mockResolvedValue(null);
+      usage.assertCanUse.mockRejectedValue(new Error('PLAN_LIMIT_REACHED'));
+
+      await expect(
+        service.inviteMember(
+          'ws-1',
+          'inviter-1',
+          { email: 'new@example.com' },
+          CTX,
+        ),
+      ).rejects.toThrow('PLAN_LIMIT_REACHED');
+      expect(prisma.workspaceMember.create).not.toHaveBeenCalled();
     });
 
     it('adds the member with the requested role (defaulting to MEMBER) and audits it', async () => {

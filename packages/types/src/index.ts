@@ -281,4 +281,105 @@ export interface UpdateDomainPayload {
   domain?: string;
 }
 
-// Billing DTOs are added as that backend module is implemented.
+export type PlanTier =
+  'FREE' | 'STARTER' | 'PROFESSIONAL' | 'BUSINESS' | 'ENTERPRISE';
+
+export type BillingInterval = 'MONTHLY' | 'ANNUAL';
+
+export type PlanLimitKey =
+  | 'MAX_LINKS'
+  | 'MAX_QR_CODES'
+  | 'MAX_CAMPAIGNS'
+  | 'MAX_CUSTOM_DOMAINS'
+  | 'MAX_TEAM_MEMBERS'
+  | 'MONTHLY_CLICKS'
+  | 'ANALYTICS_RETENTION_DAYS';
+
+export type SubscriptionStatus =
+  'TRIALING' | 'ACTIVE' | 'PAST_DUE' | 'PAUSED' | 'CANCELED' | 'EXPIRED';
+
+export type InvoiceStatus = 'DRAFT' | 'OPEN' | 'PAID' | 'VOID' | 'UNCOLLECTIBLE';
+
+export interface PlanLimitDto {
+  key: PlanLimitKey;
+  /** null = unlimited. */
+  value: number | null;
+}
+
+export interface PlanDto {
+  id: string;
+  name: string;
+  slug: string;
+  tier: PlanTier;
+  description: string | null;
+  /** Smallest currency unit (cents). */
+  priceAmount: number;
+  currency: string;
+  billingInterval: BillingInterval;
+  trialDays: number | null;
+  isActive: boolean;
+  displayOrder: number;
+  limits: PlanLimitDto[];
+}
+
+export interface UsageSnapshotDto {
+  key: PlanLimitKey;
+  usage: number;
+  /** null = unlimited. */
+  limit: number | null;
+  /** null = unlimited. */
+  remaining: number | null;
+  unlimited: boolean;
+}
+
+export interface SubscriptionDto {
+  id: string;
+  workspaceId: string;
+  /** The stored status — see `effectiveStatus` for the derived value
+   * that reflects an expired trial or a reached cancellation date. */
+  status: SubscriptionStatus;
+  effectiveStatus: SubscriptionStatus;
+  plan: PlanDto;
+  billingPeriod: { start: string; end: string | null };
+  trial: { start: string | null; end: string | null } | null;
+  cancellation: { cancelAt: string; canceledAt: string | null } | null;
+  provider: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BillingSummaryDto {
+  subscription: SubscriptionDto | null;
+  plan: PlanDto;
+  usage: UsageSnapshotDto[];
+  invoiceCount: number;
+}
+
+export interface InvoiceDto {
+  id: string;
+  workspaceId: string;
+  subscriptionId: string | null;
+  number: string;
+  amount: number;
+  currency: string;
+  status: InvoiceStatus;
+  issueDate: string;
+  dueDate: string | null;
+  paidAt: string | null;
+  provider: string | null;
+  providerInvoiceId: string | null;
+  hostedInvoiceUrl: string | null;
+}
+
+/** Structured billing/limit error body — see
+ * docs/architecture/billing.md §Limit enforcement. Distinguishes a
+ * plan-limit rejection from a generic 403 so the frontend can show an
+ * upgrade prompt instead of a plain error toast. */
+export interface PlanLimitReachedError {
+  code: 'PLAN_LIMIT_REACHED';
+  feature: string;
+  limit: number;
+  usage: number;
+  remaining: number;
+  message: string;
+}

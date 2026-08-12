@@ -14,6 +14,7 @@ import type { RequestContext } from '../../common/decorators/request-context.dec
 import { uniqueSlug } from '../../common/utils/slugify';
 import { generateOpaqueToken, hashToken } from '../../common/utils/token';
 import { AuditService } from '../audit/audit.service';
+import { SubscriptionsService } from '../billing/subscriptions.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 import type { LoginDto } from './dto/login.dto';
@@ -49,6 +50,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly audit: AuditService,
+    private readonly subscriptions: SubscriptionsService,
   ) {}
 
   private get bcryptRounds(): number {
@@ -126,6 +128,10 @@ export class AuthService {
           role: WorkspaceRole.OWNER,
         },
       });
+
+      // Same transaction as the workspace itself — a workspace can never
+      // exist without a subscription, even under a crash mid-request.
+      await this.subscriptions.createDefaultSubscription(tx, workspace.id);
 
       return { user, workspace };
     });

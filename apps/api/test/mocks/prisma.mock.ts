@@ -62,6 +62,7 @@ export function createMockPrismaService() {
       findMany: jest.fn(),
       update: jest.fn(),
       upsert: jest.fn(),
+      aggregate: jest.fn(),
     },
     qrCode: {
       create: jest.fn(),
@@ -85,6 +86,24 @@ export function createMockPrismaService() {
       update: jest.fn(),
       updateMany: jest.fn(),
       count: jest.fn(),
+    },
+    plan: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+    },
+    subscription: {
+      create: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      upsert: jest.fn(),
+    },
+    billingEvent: {
+      create: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
+      update: jest.fn(),
+    },
+    invoice: {
+      findMany: jest.fn(),
     },
     $queryRawUnsafe: jest.fn(),
     $queryRaw: jest.fn(),

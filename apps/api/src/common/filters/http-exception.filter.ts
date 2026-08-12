@@ -11,6 +11,15 @@ import { Request, Response } from 'express';
 /**
  * Normalizes every error response into a consistent JSON envelope:
  * { statusCode, message, error, path, timestamp }
+ *
+ * An exception whose response is a plain object (not just a string or a
+ * bare `{message}`, e.g. PlanLimitExceededException's structured
+ * `{code, feature, limit, usage, remaining}` body) has those extra fields
+ * merged in too — spread first, so the five canonical fields below always
+ * win if a name ever collided. Every existing exception in this codebase
+ * only ever passes a string or `{message}`, so this is purely additive:
+ * spreading `{message}` and then setting `message` again to the same
+ * value changes nothing observable.
  */
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -40,7 +49,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
       this.logger.error(exception);
     }
 
+    const extra =
+      typeof exceptionResponse === 'object' && exceptionResponse !== null
+        ? (exceptionResponse as Record<string, unknown>)
+        : {};
+
     response.status(status).json({
+      ...extra,
       statusCode: status,
       message,
       error: HttpStatus[status] ?? 'Error',

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { BillingModule } from '../billing/billing.module';
 import { DomainsModule } from '../domains/domains.module';
 
 import { LinkQrCodesController } from './link-qr-codes.controller';
@@ -32,7 +33,7 @@ import { QrGeneratorService } from './qr-generator.service';
  * a queue.
  */
 @Module({
-  imports: [DomainsModule],
+  imports: [BillingModule, DomainsModule],
   controllers: [LinkQrCodesController, QrCodesController],
   providers: [QrCodesService, QrGeneratorService],
   exports: [QrCodesService],

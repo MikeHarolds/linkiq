@@ -1,6 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 
+import { BillingModule } from '../billing/billing.module';
 import { DomainsModule } from '../domains/domains.module';
 
 import { LinkCacheService } from './link-cache.service';
@@ -31,10 +32,16 @@ import { RedirectService } from './redirect.service';
  * lives in AnalyticsModule, which registers the same queue name
  * independently. See analytics.module.ts's docs for why that split is
  * the standard BullMQ+Nest pattern rather than a workaround.
+ *
+ * BillingModule is imported for LinksService's MAX_LINKS check on
+ * `create` only (Sprint 7) — RedirectService deliberately never injects
+ * BillingUsageService, keeping the redirect hot path fully independent
+ * of billing, per docs/architecture/billing.md.
  */
 @Module({
   imports: [
     BullModule.registerQueue({ name: CLICK_EVENT_QUEUE }),
+    BillingModule,
     DomainsModule,
   ],
   controllers: [LinksController],

@@ -6,6 +6,7 @@ import {
   type MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
 import type { AuditService } from '../audit/audit.service';
+import type { BillingUsageService } from '../billing/billing-usage.service';
 import { PublicUrlService } from '../domains/public-url.service';
 
 import { QrCodesService } from './qr-codes.service';
@@ -50,6 +51,7 @@ describe('QrCodesService', () => {
   let prisma: MockPrismaService;
   let audit: { record: jest.Mock };
   let generator: { generatePng: jest.Mock; generateSvg: jest.Mock };
+  let billingUsage: { assertCanUse: jest.Mock };
   let service: QrCodesService;
 
   beforeEach(() => {
@@ -59,11 +61,13 @@ describe('QrCodesService', () => {
       generatePng: jest.fn().mockResolvedValue(Buffer.from('fake-png')),
       generateSvg: jest.fn().mockResolvedValue('<svg>fake</svg>'),
     };
+    billingUsage = { assertCanUse: jest.fn().mockResolvedValue(undefined) };
     service = new QrCodesService(
       prisma as unknown as never,
       audit as unknown as AuditService,
       generator as unknown as QrGeneratorService,
       new PublicUrlService(),
+      billingUsage as unknown as BillingUsageService,
     );
   });
 
@@ -95,6 +99,16 @@ describe('QrCodesService', () => {
       await expect(
         service.create(WORKSPACE_ID, LINK_ID, USER_ID, { name: 'Test' }, CTX),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects creation when the workspace has reached its QR code limit', async () => {
+      prisma.link.findUnique.mockResolvedValue(makeLink());
+      billingUsage.assertCanUse.mockRejectedValue(new Error('PLAN_LIMIT_REACHED'));
+
+      await expect(
+        service.create(WORKSPACE_ID, LINK_ID, USER_ID, { name: 'Test' }, CTX),
+      ).rejects.toThrow('PLAN_LIMIT_REACHED');
+      expect(prisma.qrCode.create).not.toHaveBeenCalled();
     });
 
     it('creates a QR code with defaults when only name is given', async () => {

@@ -12,6 +12,7 @@ import {
 } from '../../../test/mocks/prisma.mock';
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import type { AuditService } from '../audit/audit.service';
+import type { BillingUsageService } from '../billing/billing-usage.service';
 
 import type { DomainCacheService } from './domain-cache.service';
 import type { DomainResolverService } from './domain-resolver.service';
@@ -47,6 +48,7 @@ describe('DomainsService', () => {
   let cache: { invalidate: jest.Mock };
   let resolver: { isDefaultHost: jest.Mock };
   let verificationProvider: { check: jest.Mock };
+  let billingUsage: { assertCanUse: jest.Mock };
   let service: DomainsService;
 
   beforeEach(() => {
@@ -55,16 +57,27 @@ describe('DomainsService', () => {
     cache = { invalidate: jest.fn().mockResolvedValue(undefined) };
     resolver = { isDefaultHost: jest.fn().mockReturnValue(false) };
     verificationProvider = { check: jest.fn() };
+    billingUsage = { assertCanUse: jest.fn().mockResolvedValue(undefined) };
     service = new DomainsService(
       prisma as unknown as never,
       audit as unknown as AuditService,
       cache as unknown as DomainCacheService,
       resolver as unknown as DomainResolverService,
       verificationProvider as unknown as DomainVerificationProvider,
+      billingUsage as unknown as BillingUsageService,
     );
   });
 
   describe('create', () => {
+    it('rejects creation when the workspace has reached its custom domain limit', async () => {
+      billingUsage.assertCanUse.mockRejectedValue(new Error('PLAN_LIMIT_REACHED'));
+
+      await expect(
+        service.create(WORKSPACE_ID, USER_ID, { domain: 'go.acme.com' }, CTX),
+      ).rejects.toThrow('PLAN_LIMIT_REACHED');
+      expect(prisma.customDomain.create).not.toHaveBeenCalled();
+    });
+
     it('rejects an invalid domain before touching the database', async () => {
       await expect(
         service.create(WORKSPACE_ID, USER_ID, { domain: 'not a domain' }, CTX),

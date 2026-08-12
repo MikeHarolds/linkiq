@@ -4,6 +4,7 @@ import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import type Redis from 'ioredis';
 
+import { seedPlans } from '../prisma/seed';
 import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { registerRedirectRoute } from '../src/modules/links/redirect-route';
@@ -51,6 +52,20 @@ export async function createTestApp(): Promise<{
 
   const prisma = app.get(PrismaService);
   const redis = app.get<Redis>(REDIS_CLIENT);
+
+  // Every workspace-creation path (AuthService.register,
+  // WorkspacesService.create) requires a FREE plan to exist — reuse the
+  // real seed script's plan data so registration works exactly as it does
+  // against a real dev database, instead of hand-rolling separate fixture
+  // plans that could drift from production. Always re-run this (not
+  // guarded behind a "plans already exist" check): resetDatabase() never
+  // touches Plan/PlanLimit rows, so a stale row from an earlier run would
+  // otherwise silently outlive a PLAN_CONFIGS edit for the rest of this
+  // shared test database's life. seedPlans() upserts everything in two
+  // parallel batches rather than ~40 sequential round trips specifically
+  // so this stays cheap enough to call unconditionally on every file.
+  await seedPlans(prisma);
+
   return { app, prisma, redis };
 }
 

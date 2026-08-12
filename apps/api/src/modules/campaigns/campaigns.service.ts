@@ -9,6 +9,7 @@ import { CampaignStatus, type Campaign } from '@prisma/client';
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import { isUniqueConstraintViolation } from '../../common/utils/prisma-errors';
 import { AuditService } from '../audit/audit.service';
+import { BillingUsageService } from '../billing/billing-usage.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 import type { CreateCampaignDto } from './dto/create-campaign.dto';
@@ -44,6 +45,7 @@ export class CampaignsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly billingUsage: BillingUsageService,
   ) {}
 
   /**
@@ -95,6 +97,8 @@ export class CampaignsService {
         utmValidation.reason ?? 'Invalid UTM values',
       );
     }
+
+    await this.billingUsage.assertCanUse(workspaceId, 'MAX_CAMPAIGNS', 'campaigns');
 
     try {
       const campaign = await this.prisma.campaign.create({

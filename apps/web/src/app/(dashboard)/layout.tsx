@@ -33,6 +33,7 @@ const NAV_ITEMS = [
   { label: 'QR Codes', href: '/dashboard/qr-codes' },
   { label: 'Campaigns', href: '/dashboard/campaigns' },
   { label: 'Domains', href: '/dashboard/domains' },
+  { label: 'Billing', href: '/dashboard/billing' },
   { label: 'Analytics', href: '/dashboard/analytics' },
   { label: 'Settings', href: '/dashboard/settings' },
 ] as const;

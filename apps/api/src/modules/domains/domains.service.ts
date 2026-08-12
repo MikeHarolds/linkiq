@@ -10,6 +10,7 @@ import { DomainStatus, type CustomDomain } from '@prisma/client';
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import { isUniqueConstraintViolation } from '../../common/utils/prisma-errors';
 import { AuditService } from '../audit/audit.service';
+import { BillingUsageService } from '../billing/billing-usage.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 import { DomainCacheService } from './domain-cache.service';
@@ -50,6 +51,7 @@ export class DomainsService {
     private readonly resolver: DomainResolverService,
     @Inject(DOMAIN_VERIFICATION_PROVIDER)
     private readonly verificationProvider: DomainVerificationProvider,
+    private readonly billingUsage: BillingUsageService,
   ) {}
 
   private assertNotReservedHost(normalizedDomain: string): void {
@@ -72,6 +74,11 @@ export class DomainsService {
     }
     const normalizedDomain = validation.normalized!;
     this.assertNotReservedHost(normalizedDomain);
+    await this.billingUsage.assertCanUse(
+      workspaceId,
+      'MAX_CUSTOM_DOMAINS',
+      'custom domains',
+    );
 
     try {
       const domain = await this.prisma.customDomain.create({

@@ -2,8 +2,13 @@
  * LinkIQ — Database Seed Script
  *
  * Creates:
+ *   - 5 billing plans (Free/Starter/Professional/Business/Enterprise)
+ *     with their plan-limit rows — placeholder pricing, not final
+ *     commercial figures, see docs/architecture/billing.md
  *   - The demo user and demo admin accounts
- *   - A starter organization + workspace for the demo user
+ *   - A starter organization + workspace for the demo user, with an
+ *     ACTIVE Professional subscription (see seedDemoSubscription for why
+ *     it isn't FREE)
  *   - A small set of platform feature flags
  *   - 11 realistic demo links spanning every lifecycle state
  *   - ~30 days of realistic historical click events across those links
@@ -13,26 +18,39 @@
  *     retroactively associated with a subset of the already-seeded links
  *     — their existing click history rolls up into campaign analytics
  *     naturally, with no fabricated summary numbers
+ *   - A FREE-plan subscription backfilled onto any pre-existing
+ *     workspace that doesn't already have one (see
+ *     backfillMissingSubscriptions)
  *
  * All seeded analytics are internal demo data, never presented as real
- * production traffic.
+ * production traffic. No invoice/billing-history rows are seeded — see
+ * docs/architecture/billing.md for why (no real payment ever occurred).
  *
  * NOT yet implemented (arrives with the relevant feature milestone):
- *   - AI insights, tags, notifications, activity history, custom domains
+ *   - AI insights, tags, notifications, activity history
  *
  * Run with: npm run prisma:seed --workspace=apps/api
  */
 
 import {
+  BillingInterval,
   CampaignStatus,
   GlobalRole,
   LinkStatus,
+  PlanTier,
   PrismaClient,
   QrErrorCorrectionLevel,
   QrFormat,
+  SubscriptionStatus,
   WorkspaceRole,
 } from '@prisma/client';
-import type { Workspace, User, Link } from '@prisma/client';
+import type {
+  Plan,
+  PlanLimitKey,
+  Workspace,
+  User,
+  Link,
+} from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 import { computeVisitorHash } from '../src/modules/analytics/utils/visitor-hash';
@@ -43,6 +61,197 @@ const SALT_ROUNDS = 12;
 
 async function hash(password: string): Promise<string> {
   return bcrypt.hash(password, SALT_ROUNDS);
+}
+
+interface PlanSeedConfig {
+  name: string;
+  slug: string;
+  tier: PlanTier;
+  description: string;
+  /** Smallest currency unit (cents) — 0 for FREE. */
+  priceAmount: number;
+  currency: string;
+  billingInterval: BillingInterval;
+  trialDays: number | null;
+  displayOrder: number;
+  /** null = unlimited for that key. Placeholder figures — explicitly NOT
+   * final commercial pricing, see docs/architecture/billing.md. */
+  limits: Partial<Record<PlanLimitKey, number | null>>;
+}
+
+const PLAN_CONFIGS: PlanSeedConfig[] = [
+  {
+    name: 'Free',
+    slug: 'free',
+    tier: PlanTier.FREE,
+    description: 'Get started with the essentials, no card required.',
+    priceAmount: 0,
+    currency: 'USD',
+    billingInterval: BillingInterval.MONTHLY,
+    trialDays: null,
+    displayOrder: 0,
+    limits: {
+      MAX_LINKS: 25,
+      MAX_QR_CODES: 10,
+      MAX_CAMPAIGNS: 3,
+      MAX_CUSTOM_DOMAINS: 3,
+      MAX_TEAM_MEMBERS: 3,
+      MONTHLY_CLICKS: 1000,
+      ANALYTICS_RETENTION_DAYS: 30,
+    },
+  },
+  {
+    name: 'Starter',
+    slug: 'starter',
+    tier: PlanTier.STARTER,
+    description: 'For individuals and small projects ready to grow.',
+    priceAmount: 1900,
+    currency: 'USD',
+    billingInterval: BillingInterval.MONTHLY,
+    trialDays: 14,
+    displayOrder: 1,
+    limits: {
+      MAX_LINKS: 500,
+      MAX_QR_CODES: 100,
+      MAX_CAMPAIGNS: 20,
+      MAX_CUSTOM_DOMAINS: 5,
+      MAX_TEAM_MEMBERS: 5,
+      MONTHLY_CLICKS: 25_000,
+      ANALYTICS_RETENTION_DAYS: 90,
+    },
+  },
+  {
+    name: 'Professional',
+    slug: 'professional',
+    tier: PlanTier.PROFESSIONAL,
+    description: 'For growing teams running multiple campaigns.',
+    priceAmount: 4900,
+    currency: 'USD',
+    billingInterval: BillingInterval.MONTHLY,
+    trialDays: 14,
+    displayOrder: 2,
+    limits: {
+      MAX_LINKS: 5000,
+      MAX_QR_CODES: 1000,
+      MAX_CAMPAIGNS: 100,
+      MAX_CUSTOM_DOMAINS: 10,
+      MAX_TEAM_MEMBERS: 20,
+      MONTHLY_CLICKS: 250_000,
+      ANALYTICS_RETENTION_DAYS: 365,
+    },
+  },
+  {
+    name: 'Business',
+    slug: 'business',
+    tier: PlanTier.BUSINESS,
+    description: 'For larger organizations with advanced branding needs.',
+    priceAmount: 14_900,
+    currency: 'USD',
+    billingInterval: BillingInterval.MONTHLY,
+    trialDays: 14,
+    displayOrder: 3,
+    limits: {
+      MAX_LINKS: 50_000,
+      MAX_QR_CODES: 10_000,
+      MAX_CAMPAIGNS: 1000,
+      MAX_CUSTOM_DOMAINS: 25,
+      MAX_TEAM_MEMBERS: 100,
+      MONTHLY_CLICKS: 2_000_000,
+      ANALYTICS_RETENTION_DAYS: 730,
+    },
+  },
+  {
+    name: 'Enterprise',
+    slug: 'enterprise',
+    tier: PlanTier.ENTERPRISE,
+    description: 'Custom limits, dedicated support, and contract billing.',
+    priceAmount: 0, // contract pricing — not a real "free" plan, see docs
+    currency: 'USD',
+    billingInterval: BillingInterval.ANNUAL,
+    trialDays: null,
+    displayOrder: 4,
+    limits: {
+      MAX_LINKS: null,
+      MAX_QR_CODES: null,
+      MAX_CAMPAIGNS: null,
+      MAX_CUSTOM_DOMAINS: null,
+      MAX_TEAM_MEMBERS: null,
+      MONTHLY_CLICKS: null,
+      ANALYTICS_RETENTION_DAYS: null,
+    },
+  },
+];
+
+/** Upserts every plan + its PlanLimit rows, idempotent across re-runs.
+ * Returns a slug -> Plan map for the rest of the seed script to
+ * reference (e.g. the demo workspace's Professional subscription).
+ *
+ * Accepts an explicit client so the e2e test suite can reuse this exact
+ * seed logic against its own disposable database (see
+ * test/setup-app.ts::createTestApp) without a real registration ever
+ * hitting "no FREE plan configured" — defaults to this script's own
+ * module-level PrismaClient for the standalone `npm run prisma:seed` path. */
+export async function seedPlans(
+  client: PrismaClient = prisma,
+): Promise<Record<string, Plan>> {
+  // Every plan is independent, and so is every limit within a plan — run
+  // both waves in parallel rather than ~40 sequential round trips. This
+  // keeps seedPlans() cheap enough to call unconditionally on every e2e
+  // spec file's bootstrap (see test/setup-app.ts), so a PLAN_CONFIGS edit
+  // (like a limit change) always takes effect immediately rather than
+  // depending on whichever stale rows a previous run already committed to
+  // the shared test database.
+  const plans = await Promise.all(
+    PLAN_CONFIGS.map((config) =>
+      client.plan.upsert({
+        where: { slug: config.slug },
+        update: {
+          name: config.name,
+          tier: config.tier,
+          description: config.description,
+          priceAmount: config.priceAmount,
+          currency: config.currency,
+          billingInterval: config.billingInterval,
+          trialDays: config.trialDays,
+          displayOrder: config.displayOrder,
+          isActive: true,
+        },
+        create: {
+          name: config.name,
+          slug: config.slug,
+          tier: config.tier,
+          description: config.description,
+          priceAmount: config.priceAmount,
+          currency: config.currency,
+          billingInterval: config.billingInterval,
+          trialDays: config.trialDays,
+          displayOrder: config.displayOrder,
+        },
+      }),
+    ),
+  );
+
+  const bySlug: Record<string, Plan> = {};
+  await Promise.all(
+    PLAN_CONFIGS.map(async (config, i) => {
+      const plan = plans[i]!;
+      bySlug[config.slug] = plan;
+      await Promise.all(
+        Object.entries(config.limits).map(([key, value]) =>
+          client.planLimit.upsert({
+            where: {
+              planId_key: { planId: plan.id, key: key as PlanLimitKey },
+            },
+            update: { value: value ?? null },
+            create: { planId: plan.id, key: key as PlanLimitKey, value: value ?? null },
+          }),
+        ),
+      );
+    }),
+  );
+
+  console.log(`Seeded ${PLAN_CONFIGS.length} plans`);
+  return bySlug;
 }
 
 async function seedDemoUser() {
@@ -104,6 +313,47 @@ async function seedDemoUser() {
 
   console.log(`Seeded demo user: ${email} / ${password}`);
   return { user, organization, workspace };
+}
+
+/**
+ * The demo workspace gets an ACTIVE Professional subscription rather than
+ * FREE — its seeded links/QR codes/campaigns below already exceed a
+ * sensible FREE tier, and a demo account showcasing a populated dashboard
+ * makes more sense on a paid-tier subscription. This doesn't contradict
+ * "new workspaces receive FREE" — that governs the live registration
+ * path (AuthService.register / WorkspacesService.create), unaffected by
+ * this seed-only override. Idempotent: leaves an existing subscription
+ * alone on re-run, so manual test changes to the demo workspace's plan
+ * aren't clobbered every time the seed script runs.
+ */
+async function seedDemoSubscription(
+  workspace: Workspace,
+  plans: Record<string, Plan>,
+) {
+  const professional = plans['professional'];
+  if (!professional) {
+    throw new Error('seedDemoSubscription: "professional" plan is missing');
+  }
+
+  const existing = await prisma.subscription.findUnique({
+    where: { workspaceId: workspace.id },
+  });
+  if (existing) {
+    console.log('Demo workspace subscription already exists — skipping (idempotent)');
+    return;
+  }
+
+  const now = new Date();
+  await prisma.subscription.create({
+    data: {
+      workspaceId: workspace.id,
+      planId: professional.id,
+      status: SubscriptionStatus.ACTIVE,
+      currentPeriodStart: now,
+      currentPeriodEnd: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+    },
+  });
+  console.log('Seeded demo workspace subscription (Professional, ACTIVE)');
 }
 
 async function seedDemoLinks(workspace: Workspace, user: User) {
@@ -849,16 +1099,56 @@ async function seedFeatureFlags() {
   console.log(`Seeded ${flags.length} feature flags`);
 }
 
+/**
+ * Every workspace created through the live app (AuthService.register,
+ * WorkspacesService.create) gets a subscription transactionally and can
+ * never be missing one — this covers workspaces that already existed in
+ * a local dev database from before Sprint 7, which never went through
+ * that path. Idempotent and safe to re-run; BillingUsageService also
+ * tolerates a missing subscription gracefully regardless (falls back to
+ * FREE), so this is belt-and-braces, not load-bearing.
+ */
+async function backfillMissingSubscriptions(plans: Record<string, Plan>) {
+  const free = plans['free'];
+  if (!free) {
+    throw new Error('backfillMissingSubscriptions: "free" plan is missing');
+  }
+
+  const orphaned = await prisma.workspace.findMany({
+    where: { subscription: null },
+    select: { id: true },
+  });
+
+  for (const workspace of orphaned) {
+    await prisma.subscription.create({
+      data: {
+        workspaceId: workspace.id,
+        planId: free.id,
+        status: SubscriptionStatus.ACTIVE,
+      },
+    });
+  }
+
+  if (orphaned.length > 0) {
+    console.log(
+      `Backfilled FREE subscriptions for ${orphaned.length} pre-existing workspace(s)`,
+    );
+  }
+}
+
 async function main() {
   console.log('Seeding LinkIQ database...\n');
 
+  const plans = await seedPlans();
   const { user, workspace } = await seedDemoUser();
+  await seedDemoSubscription(workspace, plans);
   await seedAdminUser();
   await seedFeatureFlags();
   const links = await seedDemoLinks(workspace, user);
   await seedDemoClickEvents(workspace, links);
   await seedDemoQrCodes(workspace, user, links);
   await seedDemoCampaigns(workspace, user, links);
+  await backfillMissingSubscriptions(plans);
 
   // TODO (future milestones): seed AI insights, tags, notifications,
   // activity history, and custom domains for the demo account once
@@ -867,11 +1157,16 @@ async function main() {
   console.log('\nSeed complete.');
 }
 
-main()
-  .catch((error) => {
-    console.error('Seed failed:', error);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+// Only run the full demo seed when this file is executed directly (`npm
+// run prisma:seed`) — the e2e test suite imports `seedPlans` from this
+// module without wanting the demo user/links/campaigns/etc. seeded too.
+if (require.main === module) {
+  main()
+    .catch((error) => {
+      console.error('Seed failed:', error);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}

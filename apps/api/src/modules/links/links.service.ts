@@ -14,6 +14,7 @@ import {
 } from '../../common/utils/short-code';
 import { validateDestinationUrl } from '../../common/utils/url-validator';
 import { AuditService } from '../audit/audit.service';
+import { BillingUsageService } from '../billing/billing-usage.service';
 import { validateUtmValues, type UtmValues } from '../campaigns/utils/utm';
 import { DomainsService } from '../domains/domains.service';
 import { PublicUrlService } from '../domains/public-url.service';
@@ -58,6 +59,7 @@ export class LinksService {
     private readonly cache: LinkCacheService,
     private readonly domains: DomainsService,
     private readonly publicUrlService: PublicUrlService,
+    private readonly billingUsage: BillingUsageService,
   ) {}
 
   /** Validates a caller-supplied customDomainId (create/update): must
@@ -184,6 +186,8 @@ export class LinksService {
     if (expiresAt && expiresAt.getTime() <= Date.now()) {
       throw new BadRequestException('expiresAt must be in the future');
     }
+
+    await this.billingUsage.assertCanUse(workspaceId, 'MAX_LINKS', 'links');
 
     await this.resolveCustomDomainId(workspaceId, dto.customDomainId);
 

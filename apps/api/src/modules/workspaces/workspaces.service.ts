@@ -13,6 +13,8 @@ import {
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import { uniqueSlug } from '../../common/utils/slugify';
 import { AuditService } from '../audit/audit.service';
+import { BillingUsageService } from '../billing/billing-usage.service';
+import { SubscriptionsService } from '../billing/subscriptions.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 import type { CreateWorkspaceDto } from './dto/create-workspace.dto';
@@ -35,6 +37,8 @@ export class WorkspacesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly subscriptions: SubscriptionsService,
+    private readonly usage: BillingUsageService,
   ) {}
 
   async listForUser(userId: string) {
@@ -82,6 +86,10 @@ export class WorkspacesService {
           role: WorkspaceRole.OWNER,
         },
       });
+
+      // Same transaction as the workspace itself — see AuthService.register
+      // for why this must never be a separate, skippable step.
+      await this.subscriptions.createDefaultSubscription(tx, workspace.id);
 
       return workspace;
     });
@@ -187,6 +195,8 @@ export class WorkspacesService {
         'This user is already a member of the workspace',
       );
     }
+
+    await this.usage.assertCanUse(workspaceId, 'MAX_TEAM_MEMBERS', 'team members');
 
     const role = dto.role ?? WorkspaceRole.MEMBER;
 

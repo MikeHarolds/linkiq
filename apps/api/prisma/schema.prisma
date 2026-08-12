@@ -63,6 +63,75 @@ enum DomainStatus {
   DISABLED
 }
 
+/// Fixed pricing tiers (Sprint 7). Distinct from Plan.slug: slug is the
+/// unique lookup key for a specific priced offering, tier is the coarser
+/// "which bracket is this" identity code that application logic branches
+/// on (e.g. "is this workspace on the free tier"). Not final commercial
+/// pricing — see docs/architecture/billing.md.
+enum PlanTier {
+  FREE
+  STARTER
+  PROFESSIONAL
+  BUSINESS
+  ENTERPRISE
+}
+
+enum BillingInterval {
+  MONTHLY
+  ANNUAL
+}
+
+/// Keys for the structured plan-limit mechanism — see PlanLimit. Every
+/// module that gates a resource on a plan asks BillingUsageService about
+/// exactly one of these; no module hard-codes numeric limits itself.
+enum PlanLimitKey {
+  MAX_LINKS
+  MAX_QR_CODES
+  MAX_CAMPAIGNS
+  MAX_CUSTOM_DOMAINS
+  MAX_TEAM_MEMBERS
+  MONTHLY_CLICKS
+  ANALYTICS_RETENTION_DAYS
+}
+
+/// Lifecycle of a workspace's Subscription. Deliberately does NOT store
+/// "trial expired" or "cancellation reached" as distinct persisted
+/// transitions for their own sake — see getEffectiveStatus() in
+/// billing/utils/effective-status.ts, which derives those two cases from
+/// `trialEnd`/`cancelAt` at read time, the same principle LinkStatus (see
+/// above) and CampaignStatus already use, so no scheduler is needed to
+/// keep the system logically correct.
+/// TRIALING: on a plan's trial period, not yet charged.
+/// ACTIVE: normal paid (or free) access.
+/// PAST_DUE: provider reported a failed payment; access continues short-term.
+/// PAUSED: temporarily suspended (workspace- or provider-initiated).
+/// CANCELED: cancellation has taken effect (see cancelAt on Subscription).
+/// EXPIRED: a trial ended without converting to a paid/free subscription.
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  PAUSED
+  CANCELED
+  EXPIRED
+}
+
+/// Processing state for an inbound BillingEvent (webhook) row.
+enum BillingEventStatus {
+  PENDING
+  PROCESSED
+  FAILED
+  IGNORED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
 // ---------------------------------------------------------------------------
 // Identity & Multi-tenancy
 // ---------------------------------------------------------------------------
@@ -127,6 +196,8 @@ model Workspace {
   qrCodes       QrCode[]
   campaigns     Campaign[]
   customDomains CustomDomain[]
+  subscription  Subscription?
+  invoices      Invoice[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
@@ -569,4 +640,170 @@ model FeatureFlag {
   updatedAt   DateTime @updatedAt
 
   @@map("feature_flags")
+}
+
+// ---------------------------------------------------------------------------
+// Billing & Subscriptions (Sprint 7)
+// ---------------------------------------------------------------------------
+
+/// A purchasable pricing tier. Deliberately provider-agnostic — nothing
+/// here references Stripe/Paddle/etc.; see Subscription.provider* for
+/// where external-provider identifiers live. Pricing/limits are plain
+/// data (seeded, see prisma/seed.ts), never scattered across application
+/// code. Not final commercial pricing — see docs/architecture/billing.md.
+model Plan {
+  id              String          @id @default(uuid()) @db.Uuid
+  name            String
+  /// Canonical lookup key (e.g. "free", "professional") — unique the same
+  /// way Workspace/Organization slugs are, retired forever once used
+  /// (same shortCode/normalizedDomain convention as Links/Custom Domains).
+  slug            String          @unique
+  tier            PlanTier
+  description     String?
+  /// Smallest currency unit (cents) — 0 for FREE. Never a float, to avoid
+  /// rounding drift in a value that will eventually flow to a real
+  /// payment provider.
+  priceAmount     Int
+  currency        String          @default("USD")
+  billingInterval BillingInterval @default(MONTHLY)
+  /// Days of trial access granted on a fresh subscribe to this plan; null
+  /// = no trial offered (e.g. FREE, ENTERPRISE).
+  trialDays       Int?
+  isActive        Boolean         @default(true)
+  displayOrder    Int             @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  limits        PlanLimit[]
+  subscriptions Subscription[]
+
+  @@index([isActive])
+  @@map("plans")
+}
+
+/// One row per (plan, limit key). A missing row for a given key is
+/// treated as unlimited by BillingUsageService (fail-open) — see that
+/// service's docs for the rationale. `value: null` is the explicit,
+/// intentional way to mark a key unlimited; `value: 0` disables the
+/// feature entirely (e.g. MAX_CUSTOM_DOMAINS on the FREE plan).
+model PlanLimit {
+  id     String       @id @default(uuid()) @db.Uuid
+  planId String       @db.Uuid
+  plan   Plan         @relation(fields: [planId], references: [id], onDelete: Cascade)
+  key    PlanLimitKey
+  value  Int?
+
+  @@unique([planId, key])
+  @@map("plan_limits")
+}
+
+/// A workspace's current subscription — deliberately exactly one per
+/// workspace (`workspaceId` is unique), created transactionally alongside
+/// every workspace (see SubscriptionsService.createDefaultSubscription,
+/// called from both AuthService.register and WorkspacesService.create) so
+/// a workspace can never exist without one. See getEffectiveStatus() for
+/// how TRIALING/cancellation-pending states resolve to their eventual
+/// EXPIRED/CANCELED outcome without a background job.
+model Subscription {
+  id          String             @id @default(uuid()) @db.Uuid
+  workspaceId String             @unique @db.Uuid
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  planId      String             @db.Uuid
+  plan        Plan               @relation(fields: [planId], references: [id])
+  status      SubscriptionStatus @default(ACTIVE)
+
+  currentPeriodStart DateTime  @default(now())
+  currentPeriodEnd   DateTime?
+
+  trialStart DateTime?
+  trialEnd   DateTime?
+
+  /// When a pending cancellation takes effect — access continues normally
+  /// until this passes (spec: cancel at end of billing period, not
+  /// immediately). Null means no cancellation is pending.
+  cancelAt   DateTime?
+  /// When cancellation was requested — distinct from cancelAt (the
+  /// effective date); kept for an audit trail even after reactivation.
+  canceledAt DateTime?
+
+  /// Null = no external payment provider involved (dev-only / free
+  /// subscriptions, which is everything in this sprint). Generic
+  /// provider-agnostic naming throughout, deliberately not
+  /// Stripe-specific, so a real provider integration only ever needs to
+  /// populate these columns, never add new ones.
+  provider               String?
+  providerCustomerId     String?
+  providerSubscriptionId String?
+  providerPriceId        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoices Invoice[]
+
+  @@index([planId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+/// Idempotency ledger for inbound billing-provider events (webhooks). No
+/// real webhook HTTP endpoint exists yet in this sprint — this is the
+/// internal architecture a future receiver writes through — but the
+/// unique constraint below is what actually prevents a duplicate
+/// delivery from being processed twice, which is the part that has to
+/// exist before any receiver can be trusted.
+model BillingEvent {
+  id              String             @id @default(uuid()) @db.Uuid
+  provider        String
+  /// The provider's own event ID — this plus `provider` is the real
+  /// idempotency key; see @@unique below and BillingEventsService.
+  externalEventId String
+  eventType       String
+  status          BillingEventStatus @default(PENDING)
+  receivedAt      DateTime           @default(now())
+  processedAt     DateTime?
+  /// Reference metadata only — never card numbers/secrets. Providers
+  /// don't send those in webhook bodies, and nothing here re-derives or
+  /// stores payment-method details even if a payload happened to include
+  /// something sensitive-looking.
+  payload         Json?
+  errorMessage    String?
+
+  @@unique([provider, externalEventId])
+  @@index([status])
+  @@map("billing_events")
+}
+
+/// Billing-history/invoice record. Existing purely as architecture this
+/// sprint — no row is ever created with status PAID unless a real payment
+/// actually happened, and none does yet (see prisma/seed.ts, which seeds
+/// zero invoices for exactly this reason).
+model Invoice {
+  id             String        @id @default(uuid()) @db.Uuid
+  workspaceId    String        @db.Uuid
+  workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  subscriptionId String?       @db.Uuid
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  /// Human-readable reference, unique per workspace (e.g. "DEV-0001").
+  number   String
+  amount   Int
+  currency String        @default("USD")
+  status   InvoiceStatus @default(DRAFT)
+
+  issueDate DateTime  @default(now())
+  dueDate   DateTime?
+  paidAt    DateTime?
+
+  provider          String?
+  providerInvoiceId String?
+  hostedInvoiceUrl  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, number])
+  @@index([workspaceId])
+  @@map("invoices")
 }

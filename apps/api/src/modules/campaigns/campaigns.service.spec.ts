@@ -11,6 +11,7 @@ import {
   type MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
 import type { AuditService } from '../audit/audit.service';
+import type { BillingUsageService } from '../billing/billing-usage.service';
 
 import { CampaignsService } from './campaigns.service';
 
@@ -43,18 +44,30 @@ function makeCampaign(overrides: Partial<Record<string, unknown>> = {}) {
 describe('CampaignsService', () => {
   let prisma: MockPrismaService;
   let audit: { record: jest.Mock };
+  let billingUsage: { assertCanUse: jest.Mock };
   let service: CampaignsService;
 
   beforeEach(() => {
     prisma = createMockPrismaService();
     audit = { record: jest.fn().mockResolvedValue(undefined) };
+    billingUsage = { assertCanUse: jest.fn().mockResolvedValue(undefined) };
     service = new CampaignsService(
       prisma as unknown as never,
       audit as unknown as AuditService,
+      billingUsage as unknown as BillingUsageService,
     );
   });
 
   describe('create', () => {
+    it('rejects creation when the workspace has reached its campaign limit', async () => {
+      billingUsage.assertCanUse.mockRejectedValue(new Error('PLAN_LIMIT_REACHED'));
+
+      await expect(
+        service.create(WORKSPACE_ID, USER_ID, { name: 'Test Campaign' }, CTX),
+      ).rejects.toThrow('PLAN_LIMIT_REACHED');
+      expect(prisma.campaign.create).not.toHaveBeenCalled();
+    });
+
     it('creates a campaign and audits it', async () => {
       prisma.campaign.create.mockResolvedValue(makeCampaign());
 
