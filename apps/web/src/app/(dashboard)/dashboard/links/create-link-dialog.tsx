@@ -1,7 +1,7 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import type { CampaignDto, LinkDto } from '@linkiq/types';
+import type { CampaignDto, DomainDto, LinkDto } from '@linkiq/types';
 import {
   Button,
   Dialog,
@@ -25,6 +25,7 @@ import { toast } from 'sonner';
 
 import { UtmFields } from '@/components/campaigns/utm-fields';
 import { listCampaigns } from '@/lib/campaigns-api';
+import { listDomains } from '@/lib/domains-api';
 import { createLink } from '@/lib/links-api';
 import {
   createLinkSchema,
@@ -53,6 +54,7 @@ export function CreateLinkDialog({
   const [copied, setCopied] = React.useState(false);
   const [showTracking, setShowTracking] = React.useState(false);
   const [campaigns, setCampaigns] = React.useState<CampaignDto[]>([]);
+  const [domains, setDomains] = React.useState<DomainDto[]>([]);
 
   const form = useForm<CreateLinkFormValues>({
     resolver: zodResolver(createLinkSchema),
@@ -63,6 +65,7 @@ export function CreateLinkDialog({
       description: '',
       expiresAt: '',
       campaignId: '',
+      customDomainId: '',
       utmSource: '',
       utmMedium: '',
       utmCampaign: '',
@@ -78,6 +81,15 @@ export function CreateLinkDialog({
       .catch(() => {
         /* campaign selection is optional — a failed fetch just means an
          * empty picker, not a broken dialog */
+      });
+    // Only ACTIVE domains actually serve redirects (see
+    // DomainResolverService) — a VERIFIED-but-not-yet-activated domain
+    // would be selectable on the backend but silently 404 for visitors,
+    // so the picker only offers what will actually work right now.
+    listDomains(workspaceId, { status: 'ACTIVE', pageSize: 100 })
+      .then((res) => setDomains(res.items))
+      .catch(() => {
+        /* domain selection is optional — same reasoning as campaigns above */
       });
   }, [open, workspaceId]);
 
@@ -126,6 +138,7 @@ export function CreateLinkDialog({
           ? new Date(values.expiresAt).toISOString()
           : undefined,
         campaignId: values.campaignId || undefined,
+        customDomainId: values.customDomainId || undefined,
         utmSource: values.utmSource || undefined,
         utmMedium: values.utmMedium || undefined,
         utmCampaign: values.utmCampaign || undefined,
@@ -145,7 +158,9 @@ export function CreateLinkDialog({
 
   async function copyShortUrl() {
     if (!createdLink) return;
-    await navigator.clipboard.writeText(`${APP_URL}/${createdLink.shortCode}`);
+    await navigator.clipboard.writeText(
+      createdLink.publicUrl ?? `${APP_URL}/${createdLink.shortCode}`,
+    );
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -164,7 +179,8 @@ export function CreateLinkDialog({
               </p>
               <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
                 <code className="flex-1 truncate text-sm font-medium">
-                  {APP_URL}/{createdLink.shortCode}
+                  {createdLink.publicUrl ??
+                    `${APP_URL}/${createdLink.shortCode}`}
                 </code>
                 <Button
                   type="button"
@@ -225,6 +241,32 @@ export function CreateLinkDialog({
                     </FormItem>
                   )}
                 />
+                {domains.length > 0 && (
+                  <FormField
+                    control={form.control}
+                    name="customDomainId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Domain (optional)</FormLabel>
+                        <FormControl>
+                          <select
+                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                            {...field}
+                          >
+                            <option value="">LinkIQ default domain</option>
+                            {domains.map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.normalizedDomain}
+                                {d.isPrimary ? ' (primary)' : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
                 <FormField
                   control={form.control}
                   name="title"

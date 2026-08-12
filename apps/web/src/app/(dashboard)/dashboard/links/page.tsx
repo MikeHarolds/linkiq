@@ -133,7 +133,9 @@ export default function LinksPage() {
   }
 
   async function handleCopy(link: LinkDto) {
-    await navigator.clipboard.writeText(`${APP_URL}/${link.shortCode}`);
+    await navigator.clipboard.writeText(
+      link.publicUrl ?? `${APP_URL}/${link.shortCode}`,
+    );
     setCopiedId(link.id);
     setTimeout(() => setCopiedId(null), 2000);
   }

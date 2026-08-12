@@ -55,6 +55,14 @@ export class CreateLinkDto {
   campaignId?: string;
 
   @ApiPropertyOptional({
+    description:
+      'Optional custom (branded) domain to serve this link from, instead of the default LinkIQ domain. Must belong to this workspace and be VERIFIED or ACTIVE. Omit to use the default LinkIQ domain — existing behavior is unchanged.',
+  })
+  @IsOptional()
+  @IsUUID()
+  customDomainId?: string;
+
+  @ApiPropertyOptional({
     example: 'facebook',
     description: 'Overrides the campaign default, if any.',
   })

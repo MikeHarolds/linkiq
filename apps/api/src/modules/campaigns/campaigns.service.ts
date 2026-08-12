@@ -7,6 +7,7 @@ import {
 import { CampaignStatus, type Campaign } from '@prisma/client';
 
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
+import { isUniqueConstraintViolation } from '../../common/utils/prisma-errors';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -23,15 +24,6 @@ export interface PaginatedResult<T> {
     totalItems: number;
     totalPages: number;
   };
-}
-
-function isUniqueConstraintViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: string }).code === '23505'
-  );
 }
 
 /** Valid forward transitions. DRAFT/ACTIVE/PAUSED can all move to

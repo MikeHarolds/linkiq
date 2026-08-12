@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { CampaignStatus } from '@prisma/client';
 
+import { makeUniqueConstraintError } from '../../../test/mocks/prisma-error.mock';
 import {
   createMockPrismaService,
   type MockPrismaService,
@@ -37,10 +38,6 @@ function makeCampaign(overrides: Partial<Record<string, unknown>> = {}) {
     deletedAt: null,
     ...overrides,
   };
-}
-
-function isUniqueViolation() {
-  return Object.assign(new Error('duplicate key'), { code: '23505' });
 }
 
 describe('CampaignsService', () => {
@@ -119,7 +116,7 @@ describe('CampaignsService', () => {
     });
 
     it('surfaces a duplicate name (within the workspace) as 409 Conflict', async () => {
-      prisma.campaign.create.mockRejectedValue(isUniqueViolation());
+      prisma.campaign.create.mockRejectedValue(makeUniqueConstraintError());
 
       await expect(
         service.create(WORKSPACE_ID, USER_ID, { name: 'Duplicate' }, CTX),

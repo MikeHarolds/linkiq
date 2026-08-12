@@ -6,6 +6,7 @@ import {
   type MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
 import type { AuditService } from '../audit/audit.service';
+import { PublicUrlService } from '../domains/public-url.service';
 
 import { QrCodesService } from './qr-codes.service';
 import type { QrGeneratorService } from './qr-generator.service';
@@ -62,6 +63,7 @@ describe('QrCodesService', () => {
       prisma as unknown as never,
       audit as unknown as AuditService,
       generator as unknown as QrGeneratorService,
+      new PublicUrlService(),
     );
   });
 
@@ -286,6 +288,49 @@ describe('QrCodesService', () => {
       expect(encodedUrl).toContain('utm_source=qr_code');
       expect(encodedUrl).toContain('utm_medium=qr');
       expect(encodedUrl).toContain('utm_campaign=storefront-poster');
+    });
+
+    it('encodes the ACTIVE custom domain instead of the default LinkIQ URL (Sprint 6)', async () => {
+      prisma.qrCode.findUnique.mockResolvedValue(makeQrCode());
+      prisma.link.findUnique.mockResolvedValue(
+        makeLink({
+          shortCode: 'branded-code',
+          customDomain: { normalizedDomain: 'go.acme.com', status: 'ACTIVE' },
+        }),
+      );
+
+      await service.generateDownload(
+        WORKSPACE_ID,
+        'qr-1',
+        USER_ID,
+        undefined,
+        CTX,
+      );
+
+      const [encodedUrl] = generator.generatePng.mock.calls[0];
+      expect(encodedUrl).toContain('https://go.acme.com/branded-code');
+    });
+
+    it('falls back to the default LinkIQ URL when the custom domain is not ACTIVE', async () => {
+      prisma.qrCode.findUnique.mockResolvedValue(makeQrCode());
+      prisma.link.findUnique.mockResolvedValue(
+        makeLink({
+          shortCode: 'branded-code',
+          customDomain: { normalizedDomain: 'go.acme.com', status: 'DISABLED' },
+        }),
+      );
+
+      await service.generateDownload(
+        WORKSPACE_ID,
+        'qr-1',
+        USER_ID,
+        undefined,
+        CTX,
+      );
+
+      const [encodedUrl] = generator.generatePng.mock.calls[0];
+      expect(encodedUrl).not.toContain('go.acme.com');
+      expect(encodedUrl).toContain('/branded-code');
     });
 
     it('uses the stored format by default', async () => {

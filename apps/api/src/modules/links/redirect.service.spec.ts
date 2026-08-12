@@ -2,6 +2,7 @@ import {
   createMockPrismaService,
   type MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
+import type { DomainResolverService } from '../domains/domain-resolver.service';
 
 import type { LinkCacheService } from './link-cache.service';
 import type { ClickEventProducer } from './queue/click-event.producer';
@@ -15,6 +16,7 @@ function makeCachedLink(overrides: Partial<Record<string, unknown>> = {}) {
     status: 'ACTIVE',
     isActive: true,
     expiresAt: null,
+    customDomainId: null,
     ...overrides,
   };
 }
@@ -23,6 +25,7 @@ describe('RedirectService', () => {
   let prisma: MockPrismaService;
   let cache: { get: jest.Mock; set: jest.Mock; setNotFound: jest.Mock };
   let clickEvents: { enqueue: jest.Mock };
+  let domainResolver: { resolveHost: jest.Mock };
   let service: RedirectService;
 
   beforeEach(() => {
@@ -33,10 +36,17 @@ describe('RedirectService', () => {
       setNotFound: jest.fn().mockResolvedValue(undefined),
     };
     clickEvents = { enqueue: jest.fn() };
+    // Defaults to the default-host resolution — matches every existing
+    // test below, which calls resolve() with no `host` in its meta and
+    // expects Sprint 0-5 behavior completely unaffected by Sprint 6.
+    domainResolver = {
+      resolveHost: jest.fn().mockResolvedValue({ kind: 'default' }),
+    };
     service = new RedirectService(
       prisma as unknown as never,
       cache as unknown as LinkCacheService,
       clickEvents as unknown as ClickEventProducer,
+      domainResolver as unknown as DomainResolverService,
     );
   });
 
@@ -258,6 +268,71 @@ describe('RedirectService', () => {
       );
       const outcome = await service.resolve('code', {});
       expect(outcome).toEqual({ kind: 'archived' });
+    });
+  });
+
+  describe('custom-domain resolution (Sprint 6)', () => {
+    it('returns not_found for an unknown host, without ever reading the link cache', async () => {
+      domainResolver.resolveHost.mockResolvedValue({ kind: 'unknown' });
+
+      const outcome = await service.resolve('abc123', { host: 'evil.test' });
+
+      expect(outcome).toEqual({ kind: 'not_found' });
+      expect(cache.get).not.toHaveBeenCalled();
+    });
+
+    it('redirects when the link is associated with the resolved custom domain', async () => {
+      domainResolver.resolveHost.mockResolvedValue({
+        kind: 'custom',
+        domain: {
+          id: 'dom-1',
+          workspaceId: 'ws-1',
+          normalizedDomain: 'go.acme.com',
+          status: 'ACTIVE',
+        },
+      });
+      cache.get.mockResolvedValue(makeCachedLink({ customDomainId: 'dom-1' }));
+
+      const outcome = await service.resolve('abc123', { host: 'go.acme.com' });
+
+      expect(outcome).toEqual({
+        kind: 'redirect',
+        destinationUrl: 'https://example.com',
+      });
+    });
+
+    it('does not redirect when the link belongs to a different domain than the one resolved from the Host header', async () => {
+      domainResolver.resolveHost.mockResolvedValue({
+        kind: 'custom',
+        domain: {
+          id: 'dom-1',
+          workspaceId: 'ws-1',
+          normalizedDomain: 'go.acme.com',
+          status: 'ACTIVE',
+        },
+      });
+      cache.get.mockResolvedValue(makeCachedLink({ customDomainId: 'dom-2' }));
+
+      const outcome = await service.resolve('abc123', { host: 'go.acme.com' });
+
+      expect(outcome).toEqual({ kind: 'not_found' });
+    });
+
+    it("does not redirect a domain-less link accessed through someone else's custom domain", async () => {
+      domainResolver.resolveHost.mockResolvedValue({
+        kind: 'custom',
+        domain: {
+          id: 'dom-1',
+          workspaceId: 'ws-1',
+          normalizedDomain: 'go.acme.com',
+          status: 'ACTIVE',
+        },
+      });
+      cache.get.mockResolvedValue(makeCachedLink({ customDomainId: null }));
+
+      const outcome = await service.resolve('abc123', { host: 'go.acme.com' });
+
+      expect(outcome).toEqual({ kind: 'not_found' });
     });
   });
 });

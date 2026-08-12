@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import type { Job } from 'bullmq';
 
+import { isUniqueConstraintViolation } from '../../../common/utils/prisma-errors';
 import {
   CLICK_EVENT_QUEUE,
   type RecordClickJobData,
@@ -19,15 +20,6 @@ import {
 } from '../utils/referrer-classifier';
 import { parseUserAgent } from '../utils/user-agent-parser';
 import { computeVisitorHash } from '../utils/visitor-hash';
-
-function isUniqueConstraintViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: string }).code === '23505'
-  );
-}
 
 /**
  * Consumes click events off the queue, enriches them (bot detection, UA

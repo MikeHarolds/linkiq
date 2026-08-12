@@ -1,7 +1,7 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import type { LinkDto } from '@linkiq/types';
+import type { DomainDto, LinkDto } from '@linkiq/types';
 import {
   Button,
   Dialog,
@@ -22,6 +22,7 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 
+import { listDomains } from '@/lib/domains-api';
 import { updateLink } from '@/lib/links-api';
 import {
   updateLinkSchema,
@@ -54,6 +55,7 @@ export function EditLinkDialog({
   onUpdated,
 }: EditLinkDialogProps) {
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [domains, setDomains] = React.useState<DomainDto[]>([]);
 
   const form = useForm<UpdateLinkFormValues>({
     resolver: zodResolver(updateLinkSchema),
@@ -62,8 +64,19 @@ export function EditLinkDialog({
       title: link.title ?? '',
       description: link.description ?? '',
       expiresAt: toDatetimeLocal(link.expiresAt),
+      customDomainId: link.customDomainId ?? '',
     },
   });
+
+  React.useEffect(() => {
+    if (!open) return;
+    listDomains(workspaceId, { status: 'ACTIVE', pageSize: 100 })
+      .then((res) => setDomains(res.items))
+      .catch(() => {
+        /* domain selection is optional — a failed fetch just means an
+         * empty picker, not a broken dialog */
+      });
+  }, [open, workspaceId]);
 
   async function onSubmit(values: UpdateLinkFormValues) {
     setIsSubmitting(true);
@@ -75,6 +88,7 @@ export function EditLinkDialog({
         expiresAt: values.expiresAt
           ? new Date(values.expiresAt).toISOString()
           : null,
+        customDomainId: values.customDomainId || null,
       });
       toast.success('Link updated');
       onUpdated();
@@ -108,6 +122,32 @@ export function EditLinkDialog({
                 </FormItem>
               )}
             />
+            {domains.length > 0 && (
+              <FormField
+                control={form.control}
+                name="customDomainId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Domain</FormLabel>
+                    <FormControl>
+                      <select
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                        {...field}
+                      >
+                        <option value="">LinkIQ default domain</option>
+                        {domains.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.normalizedDomain}
+                            {d.isPrimary ? ' (primary)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
             <FormField
               control={form.control}
               name="title"

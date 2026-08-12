@@ -12,6 +12,11 @@ export interface CachedLink {
   status: string;
   isActive: boolean;
   expiresAt: string | null; // ISO string — Redis only stores strings
+  /** Custom-domain association (Sprint 6), null for a link that resolves
+   * only through the default LinkIQ host. See RedirectService, which
+   * requires this to match the domain resolved from the incoming Host
+   * header before allowing a custom-domain request to redirect. */
+  customDomainId: string | null;
   /** UTM values resolved onto this link at create/update time (Sprint 5)
    * — see RedirectService, which applies these onto destinationUrl at
    * redirect time. Absent/undefined fields mean "no UTM configured for
@@ -72,6 +77,7 @@ export class LinkCacheService {
       status: link.status,
       isActive: link.isActive,
       expiresAt: link.expiresAt ? link.expiresAt.toISOString() : null,
+      customDomainId: link.customDomainId,
       utmSource: link.utmSource,
       utmMedium: link.utmMedium,
       utmCampaign: link.utmCampaign,

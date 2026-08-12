@@ -4,9 +4,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { LinkStatus, type Link } from '@prisma/client';
+import { LinkStatus, type CustomDomain, type Link } from '@prisma/client';
 
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
+import { isUniqueConstraintViolation } from '../../common/utils/prisma-errors';
 import {
   generateShortCode,
   validateCustomSlug,
@@ -14,6 +15,8 @@ import {
 import { validateDestinationUrl } from '../../common/utils/url-validator';
 import { AuditService } from '../audit/audit.service';
 import { validateUtmValues, type UtmValues } from '../campaigns/utils/utm';
+import { DomainsService } from '../domains/domains.service';
+import { PublicUrlService } from '../domains/public-url.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 import type { CreateLinkDto } from './dto/create-link.dto';
@@ -31,6 +34,17 @@ export interface PaginatedResult<T> {
   };
 }
 
+/** A Link enriched with its resolved custom domain and public URL — what
+ * every LinksService method that returns a single link/list now returns.
+ * Additive over the raw Prisma Link shape (shortCode etc. are untouched),
+ * so existing clients that only read the old fields are unaffected. */
+export type LinkWithPublicUrl = Link & {
+  customDomain: CustomDomain | null;
+  publicUrl: string;
+};
+
+const LINK_INCLUDE_CUSTOM_DOMAIN = { customDomain: true } as const;
+
 /** How many times to retry auto-generated short codes on a collision
  * before giving up. Collision probability at 7 base62 chars is low enough
  * that hitting this ceiling would itself indicate a deeper problem. */
@@ -42,7 +56,29 @@ export class LinksService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly cache: LinkCacheService,
+    private readonly domains: DomainsService,
+    private readonly publicUrlService: PublicUrlService,
   ) {}
+
+  /** Validates a caller-supplied customDomainId (create/update): must
+   * belong to this workspace and be VERIFIED/ACTIVE — throws 404/400 via
+   * DomainsService.findSelectableOrThrow otherwise. */
+  private async resolveCustomDomainId(
+    workspaceId: string,
+    customDomainId: string | null | undefined,
+  ): Promise<void> {
+    if (!customDomainId) return;
+    await this.domains.findSelectableOrThrow(workspaceId, customDomainId);
+  }
+
+  private toResponse(
+    link: Link & { customDomain: CustomDomain | null },
+  ): LinkWithPublicUrl {
+    return {
+      ...link,
+      publicUrl: this.publicUrlService.build(link.shortCode, link.customDomain),
+    };
+  }
 
   /**
    * True "expired" status as observed by callers — derived from
@@ -135,7 +171,7 @@ export class LinksService {
     userId: string,
     dto: CreateLinkDto,
     ctx: RequestContext,
-  ): Promise<Link> {
+  ): Promise<LinkWithPublicUrl> {
     const urlResult = validateDestinationUrl(dto.destinationUrl);
     if (!urlResult.valid) {
       throw new BadRequestException(
@@ -148,6 +184,8 @@ export class LinksService {
     if (expiresAt && expiresAt.getTime() <= Date.now()) {
       throw new BadRequestException('expiresAt must be in the future');
     }
+
+    await this.resolveCustomDomainId(workspaceId, dto.customDomainId);
 
     const utm = await this.resolveUtmFields(workspaceId, dto.campaignId, dto);
 
@@ -181,7 +219,7 @@ export class LinksService {
       userAgent: ctx.userAgent,
     });
 
-    return link;
+    return this.toResponse(link);
   }
 
   private async createWithCustomSlug(
@@ -192,7 +230,7 @@ export class LinksService {
     dto: CreateLinkDto,
     expiresAt: Date | undefined,
     utm: UtmValues,
-  ): Promise<Link> {
+  ): Promise<Link & { customDomain: CustomDomain | null }> {
     const slugResult = validateCustomSlug(slug);
     if (!slugResult.valid) {
       throw new BadRequestException(slugResult.reason ?? 'Invalid slug');
@@ -209,14 +247,17 @@ export class LinksService {
           description: dto.description,
           expiresAt,
           campaignId: dto.campaignId,
+          customDomainId: dto.customDomainId,
           ...utm,
         },
+        include: LINK_INCLUDE_CUSTOM_DOMAIN,
       });
     } catch (error) {
       // The DB unique constraint on shortCode is the actual source of
       // truth for uniqueness — a prior findUnique-then-create check would
       // have a race window under concurrent requests for the same slug.
-      // Postgres's unique_violation (23505) is what we rely on instead.
+      // Prisma's unique-constraint violation (P2002) is what we rely on
+      // instead — see common/utils/prisma-errors.ts.
       if (isUniqueConstraintViolation(error)) {
         throw new ConflictException('This slug is already in use');
       }
@@ -231,7 +272,7 @@ export class LinksService {
     dto: CreateLinkDto,
     expiresAt: Date | undefined,
     utm: UtmValues,
-  ): Promise<Link> {
+  ): Promise<Link & { customDomain: CustomDomain | null }> {
     for (let attempt = 0; attempt < MAX_AUTO_CODE_ATTEMPTS; attempt++) {
       const shortCode = generateShortCode();
       try {
@@ -245,8 +286,10 @@ export class LinksService {
             description: dto.description,
             expiresAt,
             campaignId: dto.campaignId,
+            customDomainId: dto.customDomainId,
             ...utm,
           },
+          include: LINK_INCLUDE_CUSTOM_DOMAIN,
         });
       } catch (error) {
         if (isUniqueConstraintViolation(error)) {
@@ -263,7 +306,7 @@ export class LinksService {
   async findAll(
     workspaceId: string,
     query: QueryLinksDto,
-  ): Promise<PaginatedResult<Link>> {
+  ): Promise<PaginatedResult<LinkWithPublicUrl>> {
     const searchTerm = query.search?.trim();
 
     const where: Record<string, unknown> = {
@@ -302,12 +345,13 @@ export class LinksService {
         orderBy: { [query.sortBy ?? 'createdAt']: query.sortOrder ?? 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
+        include: LINK_INCLUDE_CUSTOM_DOMAIN,
       }),
       this.prisma.link.count({ where }),
     ]);
 
     return {
-      items,
+      items: items.map((item) => this.toResponse(item)),
       pagination: {
         page,
         pageSize,
@@ -359,8 +403,14 @@ export class LinksService {
     };
   }
 
-  async findByIdOrThrow(workspaceId: string, linkId: string): Promise<Link> {
-    const link = await this.prisma.link.findUnique({ where: { id: linkId } });
+  async findByIdOrThrow(
+    workspaceId: string,
+    linkId: string,
+  ): Promise<LinkWithPublicUrl> {
+    const link = await this.prisma.link.findUnique({
+      where: { id: linkId },
+      include: LINK_INCLUDE_CUSTOM_DOMAIN,
+    });
     if (!link || link.deletedAt !== null) {
       throw new NotFoundException('Link not found');
     }
@@ -370,7 +420,7 @@ export class LinksService {
       // as workspace access checks elsewhere in the app.
       throw new NotFoundException('Link not found');
     }
-    return link;
+    return this.toResponse(link);
   }
 
   async update(
@@ -379,8 +429,12 @@ export class LinksService {
     userId: string,
     dto: UpdateLinkDto,
     ctx: RequestContext,
-  ): Promise<Link> {
+  ): Promise<LinkWithPublicUrl> {
     const existing = await this.findByIdOrThrow(workspaceId, linkId);
+
+    if (dto.customDomainId !== undefined) {
+      await this.resolveCustomDomainId(workspaceId, dto.customDomainId);
+    }
 
     const data: Record<string, unknown> = {};
 
@@ -395,6 +449,9 @@ export class LinksService {
     }
     if (dto.title !== undefined) data.title = dto.title;
     if (dto.description !== undefined) data.description = dto.description;
+    if (dto.customDomainId !== undefined) {
+      data.customDomainId = dto.customDomainId;
+    }
     if (dto.expiresAt !== undefined) {
       const nextExpiresAt = dto.expiresAt ? new Date(dto.expiresAt) : null;
       if (nextExpiresAt && nextExpiresAt.getTime() <= Date.now()) {
@@ -442,6 +499,7 @@ export class LinksService {
     const updated = await this.prisma.link.update({
       where: { id: linkId },
       data,
+      include: LINK_INCLUDE_CUSTOM_DOMAIN,
     });
     await this.cache.invalidate(existing.shortCode);
 
@@ -456,7 +514,7 @@ export class LinksService {
       userAgent: ctx.userAgent,
     });
 
-    return updated;
+    return this.toResponse(updated);
   }
 
   async transitionStatus(
@@ -465,7 +523,7 @@ export class LinksService {
     userId: string,
     nextStatus: LinkStatus,
     ctx: RequestContext,
-  ): Promise<Link> {
+  ): Promise<LinkWithPublicUrl> {
     const existing = await this.findByIdOrThrow(workspaceId, linkId);
 
     this.assertValidTransition(existing.status, nextStatus);
@@ -473,6 +531,7 @@ export class LinksService {
     const updated = await this.prisma.link.update({
       where: { id: linkId },
       data: { status: nextStatus, isActive: nextStatus === LinkStatus.ACTIVE },
+      include: LINK_INCLUDE_CUSTOM_DOMAIN,
     });
     await this.cache.invalidate(existing.shortCode);
 
@@ -493,7 +552,7 @@ export class LinksService {
       userAgent: ctx.userAgent,
     });
 
-    return updated;
+    return this.toResponse(updated);
   }
 
   /** Reactivating a link is only meaningful from PAUSED or ARCHIVED — not
@@ -529,17 +588,4 @@ export class LinksService {
       userAgent: ctx.userAgent,
     });
   }
-}
-
-/** Prisma (and this codebase's local test shim) both surface Postgres's
- * unique_violation as an error carrying code '23505' — check for it
- * generically rather than importing Prisma's error class, which the shim
- * doesn't replicate. */
-function isUniqueConstraintViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: string }).code === '23505'
-  );
 }

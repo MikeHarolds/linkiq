@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import type { Job } from 'bullmq';
 
+import { makeUniqueConstraintError } from '../../../../test/mocks/prisma-error.mock';
 import type { RecordClickJobData } from '../../links/queue/click-event.types';
 
 import { ClickEventProcessor } from './click-event.processor';
@@ -23,15 +24,6 @@ function makeJob(
       ...data,
     },
   } as Job<RecordClickJobData>;
-}
-
-function isUniqueConstraintViolation() {
-  return Object.assign(
-    new Error('duplicate key value violates unique constraint'),
-    {
-      code: '23505',
-    },
-  );
 }
 
 describe('ClickEventProcessor', () => {
@@ -153,7 +145,7 @@ describe('ClickEventProcessor', () => {
 
   describe('idempotency', () => {
     it('treats a unique-constraint violation as a successful no-op (retried job)', async () => {
-      prisma.$transaction.mockRejectedValueOnce(isUniqueConstraintViolation());
+      prisma.$transaction.mockRejectedValueOnce(makeUniqueConstraintError());
 
       await expect(processor.process(makeJob())).resolves.toBeUndefined();
     });
@@ -163,7 +155,7 @@ describe('ClickEventProcessor', () => {
       // rollup step ran — the key behavioral guarantee is that process()
       // resolves successfully without throwing, so BullMQ does not retry
       // a job that already succeeded.
-      prisma.$transaction.mockRejectedValueOnce(isUniqueConstraintViolation());
+      prisma.$transaction.mockRejectedValueOnce(makeUniqueConstraintError());
 
       await processor.process(makeJob());
 

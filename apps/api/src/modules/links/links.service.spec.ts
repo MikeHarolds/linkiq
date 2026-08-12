@@ -5,11 +5,14 @@ import {
 } from '@nestjs/common';
 import type { LinkStatus } from '@prisma/client';
 
+import { makeUniqueConstraintError } from '../../../test/mocks/prisma-error.mock';
 import {
   createMockPrismaService,
   type MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
 import type { AuditService } from '../audit/audit.service';
+import type { DomainsService } from '../domains/domains.service';
+import { PublicUrlService } from '../domains/public-url.service';
 
 import type { LinkCacheService } from './link-cache.service';
 import { LinksService } from './links.service';
@@ -44,16 +47,22 @@ describe('LinksService', () => {
   let prisma: MockPrismaService;
   let audit: { record: jest.Mock };
   let cache: { invalidate: jest.Mock };
+  let domains: { findSelectableOrThrow: jest.Mock };
   let service: LinksService;
 
   beforeEach(() => {
     prisma = createMockPrismaService();
     audit = { record: jest.fn().mockResolvedValue(undefined) };
     cache = { invalidate: jest.fn().mockResolvedValue(undefined) };
+    // Not exercised by any test below (none pass customDomainId) —
+    // present so the constructor has a valid 4th argument.
+    domains = { findSelectableOrThrow: jest.fn() };
     service = new LinksService(
       prisma as unknown as never,
       audit as unknown as AuditService,
       cache as unknown as LinkCacheService,
+      domains as unknown as DomainsService,
+      new PublicUrlService(),
     );
   });
 
@@ -117,9 +126,7 @@ describe('LinksService', () => {
     });
 
     it('retries with a new code on a unique-constraint collision', async () => {
-      const collision = Object.assign(new Error('duplicate'), {
-        code: '23505',
-      });
+      const collision = makeUniqueConstraintError();
       prisma.link.create
         .mockRejectedValueOnce(collision)
         .mockResolvedValueOnce(makeLink());
@@ -136,9 +143,7 @@ describe('LinksService', () => {
     });
 
     it('gives up after repeated collisions rather than retrying forever', async () => {
-      const collision = Object.assign(new Error('duplicate'), {
-        code: '23505',
-      });
+      const collision = makeUniqueConstraintError();
       prisma.link.create.mockRejectedValue(collision);
 
       await expect(
@@ -209,9 +214,7 @@ describe('LinksService', () => {
     });
 
     it('surfaces a duplicate custom slug as 409 Conflict, not a retry', async () => {
-      const collision = Object.assign(new Error('duplicate'), {
-        code: '23505',
-      });
+      const collision = makeUniqueConstraintError();
       prisma.link.create.mockRejectedValue(collision);
 
       await expect(
@@ -259,7 +262,7 @@ describe('LinksService', () => {
       prisma.link.findUnique.mockResolvedValue(link);
       await expect(
         service.findByIdOrThrow(WORKSPACE_ID, 'link-1'),
-      ).resolves.toBe(link);
+      ).resolves.toMatchObject(link);
     });
   });
 
@@ -281,6 +284,7 @@ describe('LinksService', () => {
       expect(prisma.link.update).toHaveBeenCalledWith({
         where: { id: 'link-1' },
         data: { status: PAUSED, isActive: false },
+        include: { customDomain: true },
       });
       expect(cache.invalidate).toHaveBeenCalledWith('abc1234');
       expect(audit.record).toHaveBeenCalledWith(
@@ -307,6 +311,7 @@ describe('LinksService', () => {
       expect(prisma.link.update).toHaveBeenCalledWith({
         where: { id: 'link-1' },
         data: { status: ACTIVE, isActive: true },
+        include: { customDomain: true },
       });
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'link.activated' }),

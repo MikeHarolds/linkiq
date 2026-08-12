@@ -47,6 +47,7 @@ export function createMockPrismaService() {
       findUnique: jest.fn(),
       findMany: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
       count: jest.fn(),
     },
     clickEvent: {
@@ -75,6 +76,14 @@ export function createMockPrismaService() {
       findFirst: jest.fn(),
       findMany: jest.fn(),
       update: jest.fn(),
+      count: jest.fn(),
+    },
+    customDomain: {
+      create: jest.fn(),
+      findUnique: jest.fn(),
+      findMany: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
       count: jest.fn(),
     },
     $queryRawUnsafe: jest.fn(),

@@ -67,7 +67,9 @@ export default function LinkDetailPage() {
 
   async function handleCopy() {
     if (!link.data) return;
-    await navigator.clipboard.writeText(`${APP_URL}/${link.data.shortCode}`);
+    await navigator.clipboard.writeText(
+      link.data.publicUrl ?? `${APP_URL}/${link.data.shortCode}`,
+    );
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -114,7 +116,7 @@ export default function LinkDetailPage() {
           </div>
           <div className="flex items-center gap-1.5">
             <code className="text-sm font-medium">
-              {APP_URL}/{link.data.shortCode}
+              {link.data.publicUrl ?? `${APP_URL}/${link.data.shortCode}`}
             </code>
             <Button
               variant="ghost"

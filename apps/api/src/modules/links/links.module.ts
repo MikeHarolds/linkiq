@@ -1,6 +1,8 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 
+import { DomainsModule } from '../domains/domains.module';
+
 import { LinkCacheService } from './link-cache.service';
 import { LinksController } from './links.controller';
 import { LinksService } from './links.service';
@@ -31,7 +33,10 @@ import { RedirectService } from './redirect.service';
  * the standard BullMQ+Nest pattern rather than a workaround.
  */
 @Module({
-  imports: [BullModule.registerQueue({ name: CLICK_EVENT_QUEUE })],
+  imports: [
+    BullModule.registerQueue({ name: CLICK_EVENT_QUEUE }),
+    DomainsModule,
+  ],
   controllers: [LinksController],
   providers: [
     LinksService,

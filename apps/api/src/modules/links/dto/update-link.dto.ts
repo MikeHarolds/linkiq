@@ -43,6 +43,15 @@ export class UpdateLinkDto {
   @IsUUID()
   campaignId?: string | null;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Reassign to a different custom domain, or pass null to fall back to the default LinkIQ domain. Must belong to this workspace and be VERIFIED or ACTIVE.',
+  })
+  @IsOptional()
+  @IsUUID()
+  customDomainId?: string | null;
+
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()

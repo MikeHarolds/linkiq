@@ -73,6 +73,13 @@ export interface LinkDto {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+  /** Custom-domain association (Sprint 6). Null for a link served from
+   * the default LinkIQ host — see PublicUrlService on the API side. */
+  customDomainId: string | null;
+  customDomain: DomainDto | null;
+  /** The link's resolved public URL — the active custom domain's host
+   * if one is attached, else the default LinkIQ host. Always present. */
+  publicUrl: string;
 }
 
 export interface PaginationMeta {
@@ -232,6 +239,46 @@ export interface CampaignAnalyticsDto {
   topCountries: BreakdownItemDto[];
   devices: BreakdownItemDto[];
   referrers: BreakdownItemDto[];
+}
+
+export type DomainStatus =
+  'PENDING' | 'VERIFYING' | 'VERIFIED' | 'ACTIVE' | 'FAILED' | 'DISABLED';
+
+export interface DomainVerificationInstructions {
+  recordName: string;
+  recordType: 'TXT';
+  recordValue: string;
+}
+
+export interface DomainDto {
+  id: string;
+  workspaceId: string;
+  domain: string;
+  normalizedDomain: string;
+  status: DomainStatus;
+  verificationToken: string;
+  verificationCheckedAt: string | null;
+  verifiedAt: string | null;
+  isPrimary: boolean;
+  createdById: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Derived, not stored — the exact DNS TXT record the user must
+   * publish, matching the domain's current verificationToken. */
+  verification: DomainVerificationInstructions;
+}
+
+export interface PaginatedDomainsDto {
+  items: DomainDto[];
+  pagination: PaginationMeta;
+}
+
+export interface CreateDomainPayload {
+  domain: string;
+}
+
+export interface UpdateDomainPayload {
+  domain?: string;
 }
 
 // Billing DTOs are added as that backend module is implemented.

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import { applyUtmParams, hasAnyUtmValue } from '../campaigns/utils/utm';
+import { DomainResolverService } from '../domains/domain-resolver.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 import { LinkCacheService, type CachedLink } from './link-cache.service';
@@ -18,6 +19,11 @@ export interface RedirectRequestMeta {
   userAgent?: string;
   referer?: string;
   queryString?: string;
+  /** Raw incoming Host header (Sprint 6) — used to distinguish the
+   * default LinkIQ host from a workspace's custom domain. Undefined is
+   * treated as "unknown host", same as any host that resolves to
+   * neither. */
+  host?: string;
 }
 
 /**
@@ -35,12 +41,23 @@ export class RedirectService {
     private readonly prisma: PrismaService,
     private readonly cache: LinkCacheService,
     private readonly clickEvents: ClickEventProducer,
+    private readonly domainResolver: DomainResolverService,
   ) {}
 
   async resolve(
     shortCode: string,
     meta: RedirectRequestMeta,
   ): Promise<RedirectOutcome> {
+    // Resolved BEFORE any link lookup: an unknown host must never confirm
+    // or deny a shortCode's existence, and a link's customDomainId is
+    // checked against this below — that's what stops an arbitrary/stale
+    // Host header from being used to reach a link that was never
+    // associated with it (see docs on the custom-domain redirect flow).
+    const hostResolution = await this.domainResolver.resolveHost(meta.host);
+    if (hostResolution.kind === 'unknown') {
+      return { kind: 'not_found' };
+    }
+
     let link = await this.cache.get(shortCode);
 
     if (link === undefined) {
@@ -64,6 +81,7 @@ export class RedirectService {
         status: dbLink.status,
         isActive: dbLink.isActive,
         expiresAt: dbLink.expiresAt ? dbLink.expiresAt.toISOString() : null,
+        customDomainId: dbLink.customDomainId,
         utmSource: dbLink.utmSource,
         utmMedium: dbLink.utmMedium,
         utmCampaign: dbLink.utmCampaign,
@@ -74,6 +92,17 @@ export class RedirectService {
 
     if (link === null) {
       // Negatively cached — known not to exist as of the last check.
+      return { kind: 'not_found' };
+    }
+
+    if (
+      hostResolution.kind === 'custom' &&
+      link.customDomainId !== hostResolution.domain.id
+    ) {
+      // This link was never associated with the custom domain the request
+      // arrived on — do NOT redirect. shortCode is globally unique, so
+      // without this check a request on any workspace's custom domain
+      // could reach any other workspace's link by guessing its code.
       return { kind: 'not_found' };
     }
 

@@ -8,6 +8,7 @@ import { QrFormat, type QrCode } from '@prisma/client';
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import { slugify } from '../../common/utils/slugify';
 import { AuditService } from '../audit/audit.service';
+import { PublicUrlService } from '../domains/public-url.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 import type { CreateQrCodeDto } from './dto/create-qr-code.dto';
@@ -31,8 +32,6 @@ export interface QrDownload {
   filename: string;
 }
 
-const APP_URL = process.env.APP_URL ?? 'http://localhost:3000';
-
 /** Must stay in sync with the @default(...) values in schema.prisma's
  * QrCode model — duplicated here because effective-config validation
  * (see `create` and `update` below) needs to know what a field defaults
@@ -51,11 +50,15 @@ export class QrCodesService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly generator: QrGeneratorService,
+    private readonly publicUrl: PublicUrlService,
   ) {}
 
   /**
-   * The exact string every QR code encodes: the LinkIQ short URL, plus a
-   * fixed set of UTM parameters identifying the traffic as QR-originated.
+   * The exact string every QR code encodes: the link's resolved public
+   * URL (its active custom domain, if any — Sprint 6 — else the default
+   * LinkIQ short URL, via PublicUrlService, the single source of truth
+   * for that resolution shared with LinksService), plus a fixed set of
+   * UTM parameters identifying the traffic as QR-originated.
    *
    * This is the whole of Sprint 4's "QR attribution" mechanism — see
    * docs/architecture/qr-codes.md for the full rationale. In short: the
@@ -67,8 +70,12 @@ export class QrCodesService {
    * column, no redirect-path branching, no performance cost, and no
    * second analytics pipeline.
    */
-  private buildEncodedUrl(shortCode: string, qrName: string): string {
-    const url = new URL(`${APP_URL}/${shortCode}`);
+  private buildEncodedUrl(
+    shortCode: string,
+    qrName: string,
+    customDomain: Parameters<PublicUrlService['build']>[1],
+  ): string {
+    const url = new URL(this.publicUrl.build(shortCode, customDomain));
     url.searchParams.set('utm_source', 'qr_code');
     url.searchParams.set('utm_medium', 'qr');
     url.searchParams.set('utm_campaign', slugify(qrName) || 'qr-code');
@@ -301,6 +308,7 @@ export class QrCodesService {
     const qrCode = await this.findByIdOrThrow(workspaceId, qrId);
     const link = await this.prisma.link.findUnique({
       where: { id: qrCode.linkId },
+      include: { customDomain: true },
     });
     if (!link) {
       // The link was hard-deleted at the DB level (shouldn't happen in
@@ -313,7 +321,11 @@ export class QrCodesService {
     }
 
     const format = formatOverride ?? qrCode.format;
-    const encodedUrl = this.buildEncodedUrl(link.shortCode, qrCode.name);
+    const encodedUrl = this.buildEncodedUrl(
+      link.shortCode,
+      qrCode.name,
+      link.customDomain,
+    );
     const renderConfig = {
       size: qrCode.size,
       margin: qrCode.margin,

@@ -39,6 +39,7 @@ export function registerRedirectRoute(app: INestApplication): void {
       userAgent: req.headers['user-agent'],
       referer: req.headers['referer'],
       queryString: req.url.includes('?') ? req.url.split('?')[1] : undefined,
+      host: req.headers.host,
     });
 
     res.setHeader('Cache-Control', 'no-store');

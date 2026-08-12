@@ -58,6 +58,7 @@ export interface CreateLinkPayload {
   description?: string;
   expiresAt?: string;
   campaignId?: string;
+  customDomainId?: string;
   utmSource?: string;
   utmMedium?: string;
   utmCampaign?: string;
@@ -79,6 +80,7 @@ export interface UpdateLinkPayload {
   title?: string;
   description?: string;
   expiresAt?: string | null;
+  customDomainId?: string | null;
 }
 
 export function updateLink(

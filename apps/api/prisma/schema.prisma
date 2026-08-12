@@ -41,6 +41,28 @@ enum LinkStatus {
   ARCHIVED
 }
 
+/// Lifecycle of a workspace's custom (branded) domain. Only ACTIVE domains
+/// are eligible to serve redirects — see RedirectService/DomainResolverService.
+/// PENDING: created, token generated, no verification attempt made yet.
+/// VERIFYING: a verification check is in flight (transient — the current
+/// synchronous DNS-TXT provider passes through this immediately, but the
+/// state exists so an async provider can sit in it for longer).
+/// VERIFIED: ownership confirmed, not yet serving traffic.
+/// ACTIVE: verified AND explicitly activated — the only state that resolves
+/// redirects.
+/// FAILED: the last verification attempt didn't find the expected record;
+/// eligible for retry.
+/// DISABLED: previously ACTIVE, explicitly turned off — links keep their
+/// association but stop resolving until re-activated.
+enum DomainStatus {
+  PENDING
+  VERIFYING
+  VERIFIED
+  ACTIVE
+  FAILED
+  DISABLED
+}
+
 // ---------------------------------------------------------------------------
 // Identity & Multi-tenancy
 // ---------------------------------------------------------------------------
@@ -59,14 +81,15 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships         WorkspaceMember[]
-  ownedOrgs           Organization[]       @relation("OrganizationOwner")
-  auditLogs           AuditLog[]
-  refreshTokens       RefreshToken[]
-  passwordResetTokens PasswordResetToken[]
-  createdLinks        Link[]               @relation("LinkCreator")
-  createdQrCodes      QrCode[]             @relation("QrCodeCreator")
-  createdCampaigns    Campaign[]           @relation("CampaignCreator")
+  memberships          WorkspaceMember[]
+  ownedOrgs            Organization[]       @relation("OrganizationOwner")
+  auditLogs            AuditLog[]
+  refreshTokens        RefreshToken[]
+  passwordResetTokens  PasswordResetToken[]
+  createdLinks         Link[]               @relation("LinkCreator")
+  createdQrCodes       QrCode[]             @relation("QrCodeCreator")
+  createdCampaigns     Campaign[]           @relation("CampaignCreator")
+  createdCustomDomains CustomDomain[]       @relation("CustomDomainCreator")
 
   @@index([email])
   @@map("users")
@@ -98,11 +121,12 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members   WorkspaceMember[]
-  auditLogs AuditLog[]
-  links     Link[]
-  qrCodes   QrCode[]
-  campaigns Campaign[]
+  members       WorkspaceMember[]
+  auditLogs     AuditLog[]
+  links         Link[]
+  qrCodes       QrCode[]
+  campaigns     Campaign[]
+  customDomains CustomDomain[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
@@ -225,6 +249,61 @@ model Campaign {
 }
 
 // ---------------------------------------------------------------------------
+// Custom Domains (Sprint 6)
+// ---------------------------------------------------------------------------
+
+/// A workspace-owned branded domain (e.g. go.acme.com) that can serve as the
+/// public host for that workspace's links, as an alternative to the default
+/// LinkIQ host — see DomainResolverService/RedirectService for how an
+/// incoming Host header is resolved back to a workspace and, from there, to
+/// a Link. Verification is DNS-TXT based (see DomainVerificationProvider);
+/// LinkIQ never mutates DNS records itself.
+///
+/// `normalizedDomain` is globally `@unique` (not scoped, not partial),
+/// deliberately mirroring `Link.shortCode`'s convention: once a domain is
+/// registered, it's retired forever even after soft-delete, which is the
+/// simplest possible way to guarantee both "a workspace can't register the
+/// same domain twice" and "the same domain can never be attached to two
+/// workspaces at once" without a partial unique index.
+model CustomDomain {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  /// As entered by the user, preserved for display.
+  domain           String
+  /// Lowercased/trimmed form used for lookups and uniqueness.
+  normalizedDomain String       @unique
+  status           DomainStatus @default(PENDING)
+
+  /// Random per-domain secret the user publishes as a
+  /// `_linkiq-verification.<domain>` TXT record to prove ownership.
+  verificationToken     String
+  verificationCheckedAt DateTime?
+  verifiedAt            DateTime?
+
+  /// At most one non-deleted domain per workspace may have this set —
+  /// enforced in DomainsService.setPrimary via a transaction (unset the
+  /// previous primary, then set the new one), the same app-level-invariant
+  /// style as WorkspacesService.assertNotLastOwner, rather than a DB
+  /// constraint.
+  isPrimary Boolean @default(false)
+
+  createdById String? @db.Uuid
+  createdBy   User?   @relation("CustomDomainCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  links Link[]
+
+  @@index([workspaceId])
+  @@index([workspaceId, isPrimary])
+  @@map("custom_domains")
+}
+
+// ---------------------------------------------------------------------------
 // Link Management
 // ---------------------------------------------------------------------------
 
@@ -248,8 +327,8 @@ model Link {
   /// transition. Lets the redirect query and its supporting index avoid an
   /// enum comparison — a plain boolean partial index is the cheapest
   /// possible filter for the single highest-volume query in the system.
-  isActive  Boolean   @default(true)
-  expiresAt DateTime?
+  isActive       Boolean    @default(true)
+  expiresAt      DateTime?
 
   /// Optional campaign association (Sprint 5). A link belongs to zero or
   /// one campaign. Deliberately SetNull, not Cascade: deleting/archiving a
@@ -258,6 +337,16 @@ model Link {
   /// campaign-less again, exactly like it was before assignment.
   campaignId String?   @db.Uuid
   campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  /// Optional branded-domain association (Sprint 6). Nullable: a link with
+  /// no custom domain resolves through the default LinkIQ host exactly as
+  /// before this sprint. Deliberately SetNull, not Cascade, for the same
+  /// reason as `campaign` above — deleting/disabling a domain must never
+  /// delete or disable the links that reference it (DomainsService also
+  /// nulls this out explicitly at soft-delete time, since a soft delete
+  /// doesn't trigger the DB-level SetNull).
+  customDomainId String?       @db.Uuid
+  customDomain   CustomDomain? @relation(fields: [customDomainId], references: [id], onDelete: SetNull)
 
   /// UTM values resolved and stored on the link at create/update time —
   /// either explicit overrides or inherited from the campaign's defaults
@@ -288,6 +377,7 @@ model Link {
   @@index([expiresAt])
   @@index([createdAt])
   @@index([campaignId])
+  @@index([customDomainId])
   // Composite index for the redirect hot path: WHERE shortCode = ? AND
   // "deletedAt" IS NULL is the exact predicate the redirect resolver uses.
   @@index([shortCode, deletedAt])
@@ -309,21 +399,21 @@ model Link {
 /// one-way hash of (IP + User-Agent + calendar day) computed at ingestion
 /// time — see VisitorHashService for the full rationale and limitations.
 model ClickEvent {
-  id          String    @id @default(uuid()) @db.Uuid
-  linkId      String    @db.Uuid
-  link        Link      @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  id          String   @id @default(uuid()) @db.Uuid
+  linkId      String   @db.Uuid
+  link        Link     @relation(fields: [linkId], references: [id], onDelete: Cascade)
   /// Denormalized from the link at write time so workspace-scoped click
   /// queries don't need to join through Link.
-  workspaceId String    @db.Uuid
-  occurredAt  DateTime  @default(now())
+  workspaceId String   @db.Uuid
+  occurredAt  DateTime @default(now())
 
   /// Salted SHA-256 of (ip + userAgent + UTC day) — never the raw IP. Two
   /// events with the same hash on the same day are treated as one visitor.
   visitorHash String
 
-  country  String?
-  region   String?
-  city     String?
+  country String?
+  region  String?
+  city    String?
 
   deviceType String? // 'desktop' | 'mobile' | 'tablet' | 'bot' | 'unknown'
   os         String?
@@ -362,15 +452,15 @@ model ClickEvent {
 /// would move to a column store like ClickHouse — this rollup, being tiny
 /// by comparison, would likely stay in Postgres either way.
 model LinkDailyStat {
-  id             String   @id @default(uuid()) @db.Uuid
-  linkId         String   @db.Uuid
-  link           Link     @relation(fields: [linkId], references: [id], onDelete: Cascade)
-  workspaceId    String   @db.Uuid
+  id          String   @id @default(uuid()) @db.Uuid
+  linkId      String   @db.Uuid
+  link        Link     @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  workspaceId String   @db.Uuid
   /// Calendar day in UTC (stored at midnight UTC).
-  date           DateTime @db.Date
-  totalClicks    Int      @default(0)
-  humanClicks    Int      @default(0)
-  botClicks      Int      @default(0)
+  date        DateTime @db.Date
+  totalClicks Int      @default(0)
+  humanClicks Int      @default(0)
+  botClicks   Int      @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -413,25 +503,25 @@ enum QrErrorCorrectionLevel {
 /// fast and fully deterministic from these columns, so there is nothing
 /// to keep in sync if a color or size is edited.
 model QrCode {
-  id          String @id @default(uuid()) @db.Uuid
-  workspaceId String @db.Uuid
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  linkId      String @db.Uuid
-  link        Link   @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  linkId      String    @db.Uuid
+  link        Link      @relation(fields: [linkId], references: [id], onDelete: Cascade)
 
-  name  String
+  name   String
   format QrFormat @default(PNG)
 
   /// Pixel width/height of the (square) output image. SVG output uses
   /// this as its viewBox dimension too, for consistent preview sizing
   /// regardless of format.
-  size                  Int                    @default(512)
-  foregroundColor       String                 @default("#000000")
-  backgroundColor       String                 @default("#FFFFFF")
-  errorCorrectionLevel  QrErrorCorrectionLevel @default(M)
+  size                 Int                    @default(512)
+  foregroundColor      String                 @default("#000000")
+  backgroundColor      String                 @default("#FFFFFF")
+  errorCorrectionLevel QrErrorCorrectionLevel @default(M)
   /// Quiet-zone width in "modules" (QR code units), matching the
   /// `qrcode` library's own margin option — not pixels.
-  margin Int @default(4)
+  margin               Int                    @default(4)
 
   createdById String? @db.Uuid
   createdBy   User?   @relation("QrCodeCreator", fields: [createdById], references: [id], onDelete: SetNull)

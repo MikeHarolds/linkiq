@@ -44,6 +44,7 @@ export const createLinkSchema = z
     description: z.string().trim().max(1000).optional().or(z.literal('')),
     expiresAt: z.string().optional().or(z.literal('')),
     campaignId: z.string().optional().or(z.literal('')),
+    customDomainId: z.string().optional().or(z.literal('')),
   })
   .merge(utmDefaultsSchema);
 
@@ -54,6 +55,7 @@ export const updateLinkSchema = z.object({
   title: z.string().trim().max(200).optional().or(z.literal('')),
   description: z.string().trim().max(1000).optional().or(z.literal('')),
   expiresAt: z.string().optional().or(z.literal('')),
+  customDomainId: z.string().optional().or(z.literal('')),
 });
 
 export type UpdateLinkFormValues = z.infer<typeof updateLinkSchema>;
