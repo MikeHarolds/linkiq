@@ -6,6 +6,7 @@ import type {
   CheckoutSessionResult,
   CreateCheckoutSessionInput,
   ProviderSubscriptionSnapshot,
+  VerifyTransactionResult,
 } from './billing-provider.interface';
 
 /**
@@ -64,6 +65,14 @@ export class DevelopmentBillingProvider implements BillingProvider {
   ): Promise<BillingWebhookEvent> {
     throw new Error(
       'DevelopmentBillingProvider does not receive real webhooks — no payment provider is configured. Implement a real BillingProvider before wiring an inbound webhook route.',
+    );
+  }
+
+  async verifyTransaction(
+    _reference: string,
+  ): Promise<VerifyTransactionResult> {
+    throw new Error(
+      'DevelopmentBillingProvider has no checkout transactions to verify — createCheckoutSession never produces a real checkoutUrl/reference when no payment provider is configured.',
     );
   }
 }

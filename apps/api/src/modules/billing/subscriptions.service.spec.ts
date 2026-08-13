@@ -1,4 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
 import { BillingInterval, PlanTier, SubscriptionStatus } from '@prisma/client';
 
 import {
@@ -29,6 +30,7 @@ function makePlan(overrides: Partial<Record<string, unknown>> = {}) {
     trialDays: null,
     isActive: true,
     displayOrder: 0,
+    providerPlanId: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     limits: [],
@@ -61,29 +63,38 @@ describe('SubscriptionsService', () => {
   let prisma: MockPrismaService;
   let plans: jest.Mocked<Pick<PlansService, 'getBySlug' | 'getFreePlan'>>;
   let audit: AuditService;
+  let config: { get: jest.Mock };
   let provider: jest.Mocked<BillingProvider>;
   let webhookEvents: { emit: jest.Mock };
   let service: SubscriptionsService;
 
   beforeEach(() => {
     prisma = createMockPrismaService();
+    prisma.user.findUniqueOrThrow.mockResolvedValue({
+      email: 'user@example.com',
+    });
     plans = {
       getBySlug: jest.fn(),
       getFreePlan: jest.fn(),
     };
-    audit = { record: jest.fn().mockResolvedValue(undefined) } as unknown as AuditService;
+    audit = {
+      record: jest.fn().mockResolvedValue(undefined),
+    } as unknown as AuditService;
+    config = { get: jest.fn().mockReturnValue(undefined) };
     provider = {
       createCheckoutSession: jest.fn().mockResolvedValue({ devFlow: true }),
       cancelSubscription: jest.fn().mockResolvedValue(undefined),
       changeSubscription: jest.fn().mockResolvedValue(undefined),
       getSubscription: jest.fn(),
       handleWebhook: jest.fn(),
+      verifyTransaction: jest.fn(),
     };
     webhookEvents = { emit: jest.fn().mockResolvedValue(undefined) };
     service = new SubscriptionsService(
       prisma as unknown as PrismaService,
       plans as unknown as PlansService,
       audit,
+      config as unknown as ConfigService,
       provider,
       webhookEvents as unknown as WebhookEventsService,
     );
@@ -99,7 +110,11 @@ describe('SubscriptionsService', () => {
       );
 
       expect(prisma.subscription.create).toHaveBeenCalledWith({
-        data: { workspaceId: 'ws-1', planId: 'plan-free', status: SubscriptionStatus.ACTIVE },
+        data: {
+          workspaceId: 'ws-1',
+          planId: 'plan-free',
+          status: SubscriptionStatus.ACTIVE,
+        },
       });
     });
 
@@ -191,9 +206,41 @@ describe('SubscriptionsService', () => {
     });
   });
 
+  describe('verifyCheckout', () => {
+    it('reports success and the current subscription without mutating anything', async () => {
+      const sub = makeSubscription({ status: SubscriptionStatus.ACTIVE });
+      prisma.subscription.findUnique.mockResolvedValue(sub);
+      provider.verifyTransaction.mockResolvedValue({
+        success: true,
+        reference: 'txn-abc',
+      });
+
+      const result = await service.verifyCheckout('ws-1', 'txn-abc');
+
+      expect(result).toEqual({ success: true, subscription: sub });
+      expect(provider.verifyTransaction).toHaveBeenCalledWith('txn-abc');
+      expect(prisma.subscription.update).not.toHaveBeenCalled();
+      expect(prisma.subscription.upsert).not.toHaveBeenCalled();
+    });
+
+    it('reports failure without throwing when the transaction did not succeed', async () => {
+      prisma.subscription.findUnique.mockResolvedValue(null);
+      provider.verifyTransaction.mockResolvedValue({
+        success: false,
+        reference: 'txn-abc',
+      });
+
+      const result = await service.verifyCheckout('ws-1', 'txn-abc');
+
+      expect(result).toEqual({ success: false, subscription: null });
+    });
+  });
+
   describe('subscribe', () => {
     it('creates an ACTIVE subscription immediately when the plan has no trial', async () => {
-      plans.getBySlug.mockResolvedValue(makePlan({ slug: 'starter', trialDays: null }));
+      plans.getBySlug.mockResolvedValue(
+        makePlan({ slug: 'starter', trialDays: null }),
+      );
       prisma.subscription.upsert.mockResolvedValue(
         makeSubscription({ status: SubscriptionStatus.ACTIVE }),
       );
@@ -237,12 +284,55 @@ describe('SubscriptionsService', () => {
       ).rejects.toThrow(BadRequestException);
       expect(prisma.subscription.upsert).not.toHaveBeenCalled();
     });
+
+    it('never calls the provider for a trialing plan (zero Paystack interaction)', async () => {
+      plans.getBySlug.mockResolvedValue(
+        makePlan({ slug: 'starter', trialDays: 14 }),
+      );
+      prisma.subscription.upsert.mockResolvedValue(
+        makeSubscription({ status: SubscriptionStatus.TRIALING }),
+      );
+
+      await service.subscribe('ws-1', 'user-1', 'starter', ctx);
+
+      expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+      expect(prisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
+    });
+
+    it('returns a checkoutUrl and leaves the subscription untouched for a real-provider checkout', async () => {
+      const current = makeSubscription({ status: SubscriptionStatus.ACTIVE });
+      plans.getBySlug.mockResolvedValue(
+        makePlan({ slug: 'starter', trialDays: null }),
+      );
+      prisma.subscription.findUnique.mockResolvedValue(current);
+      provider.createCheckoutSession.mockResolvedValue({
+        devFlow: false,
+        checkoutUrl: 'https://checkout.paystack.com/xyz',
+      });
+
+      const result = await service.subscribe('ws-1', 'user-1', 'starter', ctx);
+
+      expect(result).toEqual({
+        subscription: current,
+        checkoutUrl: 'https://checkout.paystack.com/xyz',
+      });
+      expect(prisma.subscription.upsert).not.toHaveBeenCalled();
+      expect(provider.createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'user@example.com' }),
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'billing.checkout_initiated' }),
+      );
+      expect(webhookEvents.emit).not.toHaveBeenCalled();
+    });
   });
 
   describe('changePlan', () => {
     it('updates the plan and resets cancellation state', async () => {
       prisma.subscription.findUnique.mockResolvedValue(makeSubscription());
-      plans.getBySlug.mockResolvedValue(makePlan({ id: 'plan-pro', slug: 'professional' }));
+      plans.getBySlug.mockResolvedValue(
+        makePlan({ id: 'plan-pro', slug: 'professional' }),
+      );
       prisma.subscription.update.mockResolvedValue(
         makeSubscription({ planId: 'plan-pro' }),
       );
@@ -271,6 +361,40 @@ describe('SubscriptionsService', () => {
         service.changePlan('ws-1', 'user-1', 'professional', ctx),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('routes through a fresh checkout instead of an in-place swap when a real provider subscription exists', async () => {
+      const existing = makeSubscription({
+        providerSubscriptionId: 'SUB_abc:tok_abc',
+      });
+      prisma.subscription.findUnique.mockResolvedValue(existing);
+      plans.getBySlug.mockResolvedValue(
+        makePlan({ id: 'plan-pro', slug: 'professional' }),
+      );
+      provider.createCheckoutSession.mockResolvedValue({
+        devFlow: false,
+        checkoutUrl: 'https://checkout.paystack.com/xyz',
+      });
+
+      const result = await service.changePlan(
+        'ws-1',
+        'user-1',
+        'professional',
+        ctx,
+      );
+
+      expect(result).toEqual({
+        subscription: existing,
+        checkoutUrl: 'https://checkout.paystack.com/xyz',
+      });
+      expect(provider.changeSubscription).not.toHaveBeenCalled();
+      expect(prisma.subscription.update).not.toHaveBeenCalled();
+      expect(provider.createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          planSlug: 'professional',
+          email: 'user@example.com',
+        }),
+      );
+    });
   });
 
   describe('cancel', () => {
@@ -279,7 +403,10 @@ describe('SubscriptionsService', () => {
         currentPeriodEnd: new Date('2026-03-01'),
       });
       prisma.subscription.findUnique.mockResolvedValue(sub);
-      prisma.subscription.update.mockResolvedValue({ ...sub, cancelAt: sub.currentPeriodEnd });
+      prisma.subscription.update.mockResolvedValue({
+        ...sub,
+        cancelAt: sub.currentPeriodEnd,
+      });
 
       await service.cancel('ws-1', 'user-1', ctx);
 
@@ -307,7 +434,9 @@ describe('SubscriptionsService', () => {
 
   describe('reactivate', () => {
     it('clears a pending cancellation', async () => {
-      const sub = makeSubscription({ cancelAt: new Date(Date.now() + 86_400_000) });
+      const sub = makeSubscription({
+        cancelAt: new Date(Date.now() + 86_400_000),
+      });
       prisma.subscription.findUnique.mockResolvedValue(sub);
       prisma.subscription.update.mockResolvedValue({
         ...sub,
@@ -328,7 +457,9 @@ describe('SubscriptionsService', () => {
     });
 
     it('rejects when there is no pending cancellation', async () => {
-      prisma.subscription.findUnique.mockResolvedValue(makeSubscription({ cancelAt: null }));
+      prisma.subscription.findUnique.mockResolvedValue(
+        makeSubscription({ cancelAt: null }),
+      );
 
       await expect(service.reactivate('ws-1', 'user-1', ctx)).rejects.toThrow(
         BadRequestException,
@@ -342,6 +473,32 @@ describe('SubscriptionsService', () => {
 
       await expect(service.reactivate('ws-1', 'user-1', ctx)).rejects.toThrow(
         BadRequestException,
+      );
+    });
+
+    it('routes through a fresh checkout instead of a silent undo when a real provider subscription exists', async () => {
+      const existing = makeSubscription({
+        cancelAt: new Date(Date.now() + 86_400_000),
+        providerSubscriptionId: 'SUB_abc:tok_abc',
+      });
+      prisma.subscription.findUnique.mockResolvedValue(existing);
+      provider.createCheckoutSession.mockResolvedValue({
+        devFlow: false,
+        checkoutUrl: 'https://checkout.paystack.com/xyz',
+      });
+
+      const result = await service.reactivate('ws-1', 'user-1', ctx);
+
+      expect(result).toEqual({
+        subscription: existing,
+        checkoutUrl: 'https://checkout.paystack.com/xyz',
+      });
+      expect(prisma.subscription.update).not.toHaveBeenCalled();
+      expect(provider.createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          planSlug: existing.plan.slug,
+          email: 'user@example.com',
+        }),
       );
     });
   });

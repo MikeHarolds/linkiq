@@ -94,16 +94,20 @@ export function createMockPrismaService() {
     subscription: {
       create: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       update: jest.fn(),
       upsert: jest.fn(),
     },
     billingEvent: {
       create: jest.fn(),
+      findUnique: jest.fn(),
       findUniqueOrThrow: jest.fn(),
       update: jest.fn(),
     },
     invoice: {
       findMany: jest.fn(),
+      count: jest.fn(),
+      create: jest.fn(),
     },
     apiKey: {
       create: jest.fn(),

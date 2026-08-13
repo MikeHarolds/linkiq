@@ -1,13 +1,16 @@
 # Billing Architecture
 
-Sprint 7 introduces the billing _foundation_: plans, a per-workspace
-subscription, usage tracking, and limit enforcement. It deliberately does
-**not** integrate a real payment provider — no card is ever charged, no
-real webhook is ever received. Every mutation (`subscribe`, `change-plan`,
-`cancel`, `reactivate`) applies directly against LinkIQ's own database.
-This document explains the domain model, the enforcement mechanism, and
-exactly where the boundary to a real provider is meant to be crossed
-later.
+Sprint 7 introduced the billing _foundation_: plans, a per-workspace
+subscription, usage tracking, and limit enforcement, with no real payment
+provider — every mutation applied directly against LinkIQ's own database.
+Sprint 10 crossed that boundary: **Paystack is now a real, optional
+`BillingProvider` implementation** (`BILLING_PROVIDER=paystack`), covering
+real checkout, real recurring charges, and a real inbound webhook
+receiver. `BILLING_PROVIDER=development` (the default) remains completely
+unchanged from Sprint 7 — this document describes the domain model shared
+by both; see **[paystack-integration.md](./paystack-integration.md)** for
+everything specific to the real provider (checkout flow, webhook
+processing, state machine, security).
 
 ## 1. Core principle: billing enforcement is a gate in front of writes, never a dependency of reads or redirects
 
@@ -47,16 +50,24 @@ Subscription
   currentPeriodStart, currentPeriodEnd
   trialStart, trialEnd
   cancelAt, canceledAt
+  pastDueSince   (Sprint 10 — see paystack-integration.md §8)
   provider, providerCustomerId, providerSubscriptionId, providerPriceId
 
 BillingEvent   (webhook idempotency ledger — see §6)
   id, provider, externalEventId, eventType, status, payload
   @@unique([provider, externalEventId])
 
-Invoice        (read-only billing history — see §7)
-  id, workspaceId, subscriptionId?, number, amount, currency, status
+Invoice        (billing history — see §7)
+  id, workspaceId, subscriptionId?, number, amount, currency
+  status (DRAFT | OPEN | PAID | VOID | UNCOLLECTIBLE | REFUNDED)
+  failureReason   (Sprint 10 — why a charge/cycle failed)
   @@unique([workspaceId, number])
 ```
+
+Plan also gained `providerPlanId` (Sprint 10) — the corresponding
+Paystack `plan_code` for a purchasable plan; null for FREE/ENTERPRISE
+(neither is purchasable via automated checkout). See
+paystack-integration.md §5 for the full migration.
 
 `Workspace` gains `subscription Subscription?` and `invoices Invoice[]`.
 Migration: `20260812202020_add_billing_subscriptions` — the only migration
@@ -84,7 +95,13 @@ status, `getEffectiveStatus(subscription, now)`
 read:
 
 - `TRIALING` whose `trialEnd` has passed → `EXPIRED`
-- `cancelAt` set and already passed → `CANCELED`
+- `cancelAt` set and already passed → `CANCELED` (checked before the
+  `PAST_DUE` branch below, so an explicit cancellation always wins over a
+  passively-aged-out failed charge)
+- `PAST_DUE` whose `pastDueSince` is older than `pastDueGraceDays`
+  (default 7, `PAYSTACK_PAST_DUE_GRACE_DAYS`) → `EXPIRED` (Sprint 10 —
+  see paystack-integration.md §8; a LinkIQ-side compensating control,
+  since Paystack never auto-retries a failed recurring charge)
 - otherwise → the stored `status`, unchanged
 
 `isEffectivelyOnPlan(status)` is `true` for `ACTIVE`, `TRIALING`, and
@@ -155,44 +172,57 @@ so this changes nothing for them.
 ## 5. Provider abstraction
 
 `BillingProvider` (`billing/providers/billing-provider.interface.ts`) is
-the seam a real payment processor plugs into later — `createCheckoutSession`,
+the seam a real payment processor plugs into — `createCheckoutSession`,
 `cancelSubscription`, `changeSubscription`, `getSubscription`,
-`handleWebhook` — every method provider-agnostic, no Stripe/Paddle/etc.
-naming leaking into the interface. Selected via the `BILLING_PROVIDER` DI
-token, factory-chosen in `billing.module.ts` off the `BILLING_PROVIDER`
-env var, the same shape as Sprint 6's `DOMAIN_VERIFICATION_PROVIDER`.
+`handleWebhook`, `verifyTransaction` (Sprint 10) — every method
+provider-agnostic, no Paystack/Stripe/etc. naming leaking into the
+interface. Selected via the `BILLING_PROVIDER` DI token, factory-chosen
+in `billing.module.ts` off the `BILLING_PROVIDER` env var, the same
+shape as Sprint 6's `DOMAIN_VERIFICATION_PROVIDER`.
 
-This sprint ships exactly one implementation,
-`DevelopmentBillingProvider`: every method is a no-op or logs-only;
-`createCheckoutSession` returns `{ devFlow: true }` (no real checkout
-URL) — which is why `SubscriptionsService.subscribe`/`changePlan` apply
-the plan change directly against LinkIQ's own database instead of
-redirecting anywhere. A real provider later is a new class implementing
-the same interface plus one more branch in the factory — nothing in
-`PlansService`, `SubscriptionsService`, `BillingUsageService`, the
-controller, or the frontend needs to change.
+Two implementations now exist:
 
-## 6. Webhook idempotency (ready, not wired up)
+- **`DevelopmentBillingProvider`** (default, `BILLING_PROVIDER=development`
+  or unset): every method is a no-op or logs-only; `createCheckoutSession`
+  returns `{ devFlow: true }` (no real checkout URL) — which is why
+  `SubscriptionsService.subscribe`/`changePlan`/`reactivate` apply the
+  plan change directly against LinkIQ's own database instead of
+  redirecting anywhere. Behavior is byte-for-byte identical to Sprint 7.
+- **`PaystackBillingProvider`** (`BILLING_PROVIDER=paystack`, Sprint 10):
+  a real implementation backed by Paystack — see
+  [paystack-integration.md](./paystack-integration.md) for everything
+  provider-specific (checkout flow, webhook processing, state machine,
+  security). Nothing in `PlansService`, `BillingUsageService`, the
+  controller's read routes, or the frontend's usage/plans UI needed to
+  change for this — exactly the seam §5 was designed for.
+
+## 6. Webhook idempotency
 
 `BillingEventsService.recordEvent({ provider, externalEventId, eventType,
 payload })` relies on `BillingEvent`'s `@@unique([provider,
 externalEventId])` plus the shared `isUniqueConstraintViolation` helper
 (`common/utils/prisma-errors.ts`) to make a duplicate delivery a harmless
 no-op — it returns the existing row with `isNew: false` instead of
-throwing or creating a second record. **No HTTP webhook receiver exists
-yet** — there is nothing for a real provider to call, since integrating
-one is explicitly out of scope this sprint. The idempotency guarantee is
-proven directly by `billing-events.service.spec.ts` (calling `recordEvent`
-twice with the same `externalEventId`), ready for a future webhook
-controller to depend on.
+throwing or creating a second record. Proven directly by
+`billing-events.service.spec.ts` (calling `recordEvent` twice with the
+same `externalEventId`).
 
-## 7. Invoices — read-only, nothing fabricated
+**Sprint 10 wires this up to a real HTTP receiver**:
+`PaystackWebhookController` (`POST /webhooks/paystack`, public,
+signature-verified) is the first live caller — see
+paystack-integration.md §9 for the full inbound pipeline (signature
+verification → idempotency recording → async BullMQ processing → guarded
+state transitions).
 
-`InvoicesService.listForWorkspace` is the only method on the service —
-there is no write path in the API surface. No invoice is ever seeded as
-"paid": the demo workspace's billing history is an honest empty list,
-because no real payment has ever occurred in this system. Invoices only
-ever get created by a real provider's webhook events, once one exists.
+## 7. Invoices
+
+`InvoicesService.listForWorkspace` reads; `InvoicesService
+.recordProviderInvoice` (Sprint 10) is the one write path, called only by
+`PaystackWebhookProcessor` from a confirmed provider event — there is
+still no user-facing endpoint that can fabricate a PAID record. No
+invoice is ever seeded as "paid" — a workspace's billing history is an
+honest empty list until a real payment provider actually processes
+something.
 
 ## 8. RBAC — deliberately different from every other Sprint 6 module
 
@@ -226,41 +256,49 @@ period, trial window, pending-cancellation notice), a usage section (one
 progress row per metered key, "Unlimited" for `null` limits, a red bar
 plus upgrade prompt when exhausted), a plan-comparison grid (subscribe or
 switch, gated to `ADMIN`/`OWNER` — `MEMBER`/`VIEWER` see the same cards
-read-only), and a billing-history table with an honest empty state. The
-page states plainly that no payment provider is connected and no card is
-ever charged — see the banner at the top of the dashboard.
+read-only), and a billing-history table with an honest empty state.
+`/dashboard/billing/callback` (Sprint 10) is where the browser lands
+after a redirect-based Paystack checkout — see paystack-integration.md
+§11. Selecting a plan (or reactivating) redirects the browser to
+`checkoutUrl` when a real provider returns one; with no provider
+configured, `checkoutUrl` is always null and the change applies
+immediately, exactly as in Sprint 7.
 
 ## 11. API surface
 
 ```
-GET  /api/v1/workspaces/:workspaceId/billing            summary: subscription, effective plan, usage, invoice count
-GET  /api/v1/workspaces/:workspaceId/billing/usage       per-feature usage/limit/remaining
-GET  /api/v1/workspaces/:workspaceId/billing/plans       all active plans + limits
-GET  /api/v1/workspaces/:workspaceId/billing/invoices    billing history (may be empty)
-POST /api/v1/workspaces/:workspaceId/billing/subscribe   { planSlug }
-POST /api/v1/workspaces/:workspaceId/billing/change-plan { planSlug }
-POST /api/v1/workspaces/:workspaceId/billing/cancel      schedules cancelAt = currentPeriodEnd ?? now
-POST /api/v1/workspaces/:workspaceId/billing/reactivate  clears a pending, not-yet-effective cancellation
+GET  /api/v1/workspaces/:workspaceId/billing                    summary: subscription, effective plan, usage, invoice count
+GET  /api/v1/workspaces/:workspaceId/billing/usage               per-feature usage/limit/remaining
+GET  /api/v1/workspaces/:workspaceId/billing/plans                all active plans + limits
+GET  /api/v1/workspaces/:workspaceId/billing/invoices             billing history (may be empty)
+GET  /api/v1/workspaces/:workspaceId/billing/checkout/callback    Sprint 10 — fast-path checkout verification, ?reference=
+POST /api/v1/workspaces/:workspaceId/billing/subscribe            { planSlug } — may return { checkoutUrl }
+POST /api/v1/workspaces/:workspaceId/billing/change-plan          { planSlug } — may return { checkoutUrl }
+POST /api/v1/workspaces/:workspaceId/billing/cancel                schedules cancelAt = currentPeriodEnd ?? now
+POST /api/v1/workspaces/:workspaceId/billing/reactivate            clears a pending cancellation — may return { checkoutUrl }
+
+POST /api/v1/webhooks/paystack   Sprint 10 — public, inbound, signature-verified (see paystack-integration.md §9)
 ```
 
 Full request/response schemas are in Swagger at `/api/v1/docs`.
 
 ## 12. Known limitations
 
-- **No real payment provider.** `DevelopmentBillingProvider` is the only
-  implementation; every subscribe/change-plan/cancel/reactivate call
-  mutates LinkIQ's own database directly and never charges any money.
+- **`DevelopmentBillingProvider` remains the default** — a real
+  provider (Paystack) requires `BILLING_PROVIDER=paystack` and real
+  credentials to be configured; see paystack-integration.md §16 for env
+  vars and rollout order.
 - **Missing `PlanLimit` configuration fails open** (treated as
   unlimited), not closed — see §4.
-- **No proration, real invoicing, tax calculation, or dunning** — all of
-  these require a real provider and are out of scope.
+- **No proration.** Every plan change on a real provider is a fresh
+  checkout, applied immediately once confirmed — see
+  paystack-integration.md §13.
 - **`MONTHLY_CLICKS` is display-only.** It is tracked and shown on the
   usage dashboard but never blocks a redirect or a click from being
   recorded, by design (§1).
-- **Billing periods are a day-based approximation** (`addDays(now, 30)`
-  or `365`) rather than real calendar-month/provider-driven billing
-  cycles — there is no real provider yet to report an authoritative
-  period back.
-- **No webhook receiver.** `BillingEventsService`'s idempotency guarantee
-  is unit-tested directly; nothing calls it from a live HTTP endpoint
-  yet, since there is no real provider to send anything.
+- **Billing periods are a day-based approximation** for
+  `DevelopmentBillingProvider`/trials only (`addDays(now, 30)` or `365`)
+  — a real Paystack subscription uses the period Paystack itself reports
+  (`next_payment_date`).
+- **Currency and annual pricing are open product decisions**, not
+  invented — see paystack-integration.md §12.

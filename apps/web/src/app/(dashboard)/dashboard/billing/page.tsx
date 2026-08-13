@@ -74,8 +74,12 @@ export default function BillingDashboardPage() {
   });
 
   function invalidate() {
-    queryClient.invalidateQueries({ queryKey: ['billing', currentWorkspaceId] });
-    queryClient.invalidateQueries({ queryKey: ['billing-plans', currentWorkspaceId] });
+    queryClient.invalidateQueries({
+      queryKey: ['billing', currentWorkspaceId],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['billing-plans', currentWorkspaceId],
+    });
   }
 
   async function handleSelectPlan(plan: PlanDto) {
@@ -83,13 +87,21 @@ export default function BillingDashboardPage() {
     setBusyPlanSlug(plan.slug);
     try {
       const hasSubscription = Boolean(summaryQuery.data?.subscription);
-      if (hasSubscription) {
-        await changePlan(currentWorkspaceId, plan.slug);
-        toast.success(`Switched to the ${plan.name} plan`);
-      } else {
-        await subscribe(currentWorkspaceId, plan.slug);
-        toast.success(`Subscribed to the ${plan.name} plan`);
+      const result = hasSubscription
+        ? await changePlan(currentWorkspaceId, plan.slug)
+        : await subscribe(currentWorkspaceId, plan.slug);
+      if (result.checkoutUrl) {
+        // A real payment provider is configured — nothing is applied yet,
+        // the browser must complete checkout there. The inbound webhook
+        // (not this response) is what actually activates the plan.
+        window.location.href = result.checkoutUrl;
+        return;
       }
+      toast.success(
+        hasSubscription
+          ? `Switched to the ${plan.name} plan`
+          : `Subscribed to the ${plan.name} plan`,
+      );
       invalidate();
     } catch (error) {
       toast.error(
@@ -116,7 +128,9 @@ export default function BillingDashboardPage() {
       invalidate();
     } catch (error) {
       toast.error(
-        error instanceof ApiError ? error.message : 'Failed to cancel subscription',
+        error instanceof ApiError
+          ? error.message
+          : 'Failed to cancel subscription',
       );
     } finally {
       setCancelBusy(false);
@@ -127,12 +141,21 @@ export default function BillingDashboardPage() {
     if (!currentWorkspaceId) return;
     setCancelBusy(true);
     try {
-      await reactivateSubscription(currentWorkspaceId);
+      const result = await reactivateSubscription(currentWorkspaceId);
+      if (result.checkoutUrl) {
+        // The underlying provider subscription was already disabled at
+        // cancel()-time — reactivating requires a fresh checkout, same as
+        // an upgrade. See SubscriptionsService.reactivate's docs.
+        window.location.href = result.checkoutUrl;
+        return;
+      }
       toast.success('Subscription reactivated');
       invalidate();
     } catch (error) {
       toast.error(
-        error instanceof ApiError ? error.message : 'Failed to reactivate subscription',
+        error instanceof ApiError
+          ? error.message
+          : 'Failed to reactivate subscription',
       );
     } finally {
       setCancelBusy(false);
@@ -141,13 +164,19 @@ export default function BillingDashboardPage() {
 
   if (!currentWorkspaceId) {
     return (
-      <p className="text-muted-foreground">Select a workspace to view billing.</p>
+      <p className="text-muted-foreground">
+        Select a workspace to view billing.
+      </p>
     );
   }
 
   if (summaryQuery.isLoading) {
     return (
-      <div role="status" aria-live="polite" className="py-12 text-center text-muted-foreground">
+      <div
+        role="status"
+        aria-live="polite"
+        className="py-12 text-center text-muted-foreground"
+      >
         Loading billing…
       </div>
     );
@@ -173,8 +202,7 @@ export default function BillingDashboardPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
         <p className="text-muted-foreground">
-          No payment provider is connected yet — plan changes below apply
-          directly within LinkIQ and never charge any money.
+          Manage your plan, usage, and billing history.
         </p>
       </div>
 
@@ -182,7 +210,9 @@ export default function BillingDashboardPage() {
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-2">
             <span>{summary.plan.name}</span>
-            {subscription && <SubscriptionStatusBadge status={subscription.effectiveStatus} />}
+            {subscription && (
+              <SubscriptionStatusBadge status={subscription.effectiveStatus} />
+            )}
           </CardTitle>
           <CardDescription>
             {summary.plan.priceAmount === 0
@@ -202,23 +232,35 @@ export default function BillingDashboardPage() {
           )}
           {subscription?.trial && (
             <p className="text-muted-foreground">
-              Trial: {formatDate(subscription.trial.start)} – {formatDate(subscription.trial.end)}
+              Trial: {formatDate(subscription.trial.start)} –{' '}
+              {formatDate(subscription.trial.end)}
             </p>
           )}
           {subscription?.cancellation && (
             <p className="text-amber-600 dark:text-amber-400">
-              Scheduled to cancel on {formatDate(subscription.cancellation.cancelAt)} —
-              access continues until then.
+              Scheduled to cancel on{' '}
+              {formatDate(subscription.cancellation.cancelAt)} — access
+              continues until then.
             </p>
           )}
           {canManage && subscription && (
             <div className="pt-2">
               {hasPendingCancellation ? (
-                <Button variant="outline" size="sm" disabled={cancelBusy} onClick={handleReactivate}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={cancelBusy}
+                  onClick={handleReactivate}
+                >
                   {cancelBusy ? 'Reactivating…' : 'Reactivate subscription'}
                 </Button>
               ) : (
-                <Button variant="outline" size="sm" disabled={cancelBusy} onClick={handleCancel}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={cancelBusy}
+                  onClick={handleCancel}
+                >
                   {cancelBusy ? 'Canceling…' : 'Cancel subscription'}
                 </Button>
               )}
@@ -230,7 +272,9 @@ export default function BillingDashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle>Usage</CardTitle>
-          <CardDescription>Based on your current plan&apos;s limits.</CardDescription>
+          <CardDescription>
+            Based on your current plan&apos;s limits.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {USAGE_BAR_KEYS.map((key) => {
@@ -272,7 +316,9 @@ export default function BillingDashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle>Billing history</CardTitle>
-          <CardDescription>Invoices appear here once a payment provider is connected.</CardDescription>
+          <CardDescription>
+            Invoices appear here once a payment provider is connected.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {!invoicesQuery.data || invoicesQuery.data.length === 0 ? (

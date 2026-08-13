@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   PlanTier,
   Prisma,
@@ -27,6 +28,21 @@ import { getEffectiveStatus } from './utils/effective-status';
 
 export type SubscriptionWithPlan = Subscription & { plan: PlanWithLimits };
 
+/** Returned by subscribe/changePlan/reactivate instead of a bare
+ * SubscriptionWithPlan (Sprint 10) — `checkoutUrl` is non-null exactly
+ * when a real provider requires the user's browser to complete payment
+ * before anything changes. When it's set, `subscription` is the
+ * *unchanged* current subscription (nothing is applied yet — the
+ * inbound webhook is what actually activates it once payment is
+ * confirmed; see PaystackBillingProvider/docs/architecture/
+ * paystack-integration.md). When it's null, `subscription` already
+ * reflects the applied change, exactly as these methods behaved before
+ * Sprint 10. */
+export interface SubscriptionMutationResult {
+  subscription: SubscriptionWithPlan;
+  checkoutUrl: string | null;
+}
+
 const SUBSCRIPTION_WITH_PLAN_INCLUDE = {
   plan: { include: { limits: true } },
 } as const;
@@ -46,10 +62,23 @@ export class SubscriptionsService {
     private readonly prisma: PrismaService,
     private readonly plans: PlansService,
     private readonly audit: AuditService,
+    private readonly config: ConfigService,
     @Inject(BILLING_PROVIDER) private readonly provider: BillingProvider,
     @Inject(forwardRef(() => WebhookEventsService))
     private readonly webhookEvents: WebhookEventsService,
   ) {}
+
+  private get pastDueGraceDays(): number {
+    return this.config.get<number>('paystack.pastDueGraceDays') ?? 7;
+  }
+
+  private async getUserEmail(userId: string): Promise<string> {
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { email: true },
+    });
+    return user.email;
+  }
 
   /**
    * Creates the FREE subscription every workspace must have. Takes the
@@ -95,6 +124,26 @@ export class SubscriptionsService {
   }
 
   /**
+   * Fast-path UX check for the page the user's browser lands on after a
+   * redirect-based checkout — see BillingProvider.verifyTransaction's
+   * docs. Deliberately read-only: it never mutates the Subscription row
+   * itself, even when the provider confirms success. The inbound webhook
+   * (processed asynchronously, usually within seconds) remains the sole
+   * source of truth for actually activating anything — this only tells
+   * the frontend whether the payment itself succeeded, and returns
+   * whatever the Subscription row currently says (which may already
+   * reflect the webhook's own update if it landed first).
+   */
+  async verifyCheckout(
+    workspaceId: string,
+    reference: string,
+  ): Promise<{ success: boolean; subscription: SubscriptionWithPlan | null }> {
+    const result = await this.provider.verifyTransaction(reference);
+    const subscription = await this.getForWorkspace(workspaceId);
+    return { success: result.success, subscription };
+  }
+
+  /**
    * Resolves the plan a workspace's limits/access should actually be
    * evaluated against right now: the subscribed plan while effectively on
    * it (ACTIVE/TRIALING/PAST_DUE), otherwise the FREE plan — covering a
@@ -117,7 +166,11 @@ export class SubscriptionsService {
       };
     }
 
-    const effectiveStatus = getEffectiveStatus(subscription);
+    const effectiveStatus = getEffectiveStatus(
+      subscription,
+      new Date(),
+      this.pastDueGraceDays,
+    );
     const isOnPlan =
       effectiveStatus === SubscriptionStatus.ACTIVE ||
       effectiveStatus === SubscriptionStatus.TRIALING ||
@@ -131,32 +184,70 @@ export class SubscriptionsService {
   }
 
   /**
-   * Establishes a subscribe intent within LinkIQ's own billing domain —
-   * see BillingProvider.createCheckoutSession's docs: with no real
-   * payment provider configured, this applies directly rather than
-   * redirecting anywhere. Idempotent-ish: calling it again just updates
-   * the one-per-workspace Subscription row.
+   * Establishes a subscribe intent within LinkIQ's own billing domain.
+   * With no real payment provider configured (BillingProvider.
+   * createCheckoutSession's devFlow:true), this applies directly rather
+   * than redirecting anywhere — idempotent-ish, calling it again just
+   * updates the one-per-workspace Subscription row, exactly as before
+   * Sprint 10. With a real provider AND a trial-less plan, this instead
+   * returns a checkoutUrl and leaves the Subscription row untouched — see
+   * SubscriptionMutationResult's docs and §7/§8 of
+   * docs/architecture/paystack-integration.md. Trials remain entirely
+   * LinkIQ-side (no provider call at all) regardless of which provider is
+   * configured, since Paystack has no trial primitive to hand off to.
    */
   async subscribe(
     workspaceId: string,
     userId: string,
     planSlug: string,
     ctx: RequestContext,
-  ): Promise<SubscriptionWithPlan> {
+  ): Promise<SubscriptionMutationResult> {
     const plan = await this.plans.getBySlug(planSlug);
     if (!plan.isActive) {
       throw new BadRequestException('This plan is not currently available');
     }
 
-    await this.provider.createCheckoutSession({ workspaceId, planSlug });
+    const isTrialing = plan.trialDays != null && plan.trialDays > 0;
+
+    if (!isTrialing) {
+      const email = await this.getUserEmail(userId);
+      const session = await this.provider.createCheckoutSession({
+        workspaceId,
+        planSlug,
+        email,
+      });
+      if (!session.devFlow) {
+        const current = await this.getForWorkspace(workspaceId);
+        if (!current) {
+          throw new NotFoundException(
+            'No subscription found for this workspace',
+          );
+        }
+        await this.audit.record({
+          action: 'billing.checkout_initiated',
+          entity: 'Subscription',
+          entityId: current.id,
+          userId,
+          workspaceId,
+          metadata: { planSlug: plan.slug },
+          ipAddress: ctx.ipAddress,
+          userAgent: ctx.userAgent,
+        });
+        return {
+          subscription: current,
+          checkoutUrl: session.checkoutUrl ?? null,
+        };
+      }
+    }
 
     const now = new Date();
-    const isTrialing = plan.trialDays != null && plan.trialDays > 0;
     const periodDays = plan.billingInterval === 'ANNUAL' ? 365 : 30;
 
     const data = {
       planId: plan.id,
-      status: isTrialing ? SubscriptionStatus.TRIALING : SubscriptionStatus.ACTIVE,
+      status: isTrialing
+        ? SubscriptionStatus.TRIALING
+        : SubscriptionStatus.ACTIVE,
       currentPeriodStart: now,
       currentPeriodEnd: addDays(now, periodDays),
       trialStart: isTrialing ? now : null,
@@ -207,15 +298,27 @@ export class SubscriptionsService {
       },
     });
 
-    return subscription;
+    return { subscription, checkoutUrl: null };
   }
 
+  /**
+   * Upgrades/downgrades the current plan. When the existing subscription
+   * is backed by a real, already-confirmed provider subscription
+   * (providerSubscriptionId set), this routes through a fresh checkout
+   * instead of an in-place swap — no Paystack primitive for that exists
+   * (see PaystackBillingProvider.changeSubscription's docs and §13 of
+   * docs/architecture/paystack-integration.md: no proration, applied
+   * immediately once the new checkout confirms via webhook, the old
+   * subscription is left alone until then). DevelopmentBillingProvider
+   * subscriptions never have a providerSubscriptionId, so this branch
+   * never triggers in dev mode — identical to pre-Sprint-10 behavior.
+   */
   async changePlan(
     workspaceId: string,
     userId: string,
     planSlug: string,
     ctx: RequestContext,
-  ): Promise<SubscriptionWithPlan> {
+  ): Promise<SubscriptionMutationResult> {
     const existing = await this.getForWorkspace(workspaceId);
     if (!existing) {
       throw new NotFoundException('No subscription found for this workspace');
@@ -226,10 +329,28 @@ export class SubscriptionsService {
     }
 
     if (existing.providerSubscriptionId) {
-      await this.provider.changeSubscription(
-        existing.providerSubscriptionId,
-        plan.slug,
-      );
+      const email = await this.getUserEmail(userId);
+      const session = await this.provider.createCheckoutSession({
+        workspaceId,
+        planSlug: plan.slug,
+        email,
+      });
+      if (!session.devFlow) {
+        await this.audit.record({
+          action: 'billing.checkout_initiated',
+          entity: 'Subscription',
+          entityId: existing.id,
+          userId,
+          workspaceId,
+          metadata: { fromPlanSlug: existing.plan.slug, toPlanSlug: plan.slug },
+          ipAddress: ctx.ipAddress,
+          userAgent: ctx.userAgent,
+        });
+        return {
+          subscription: existing,
+          checkoutUrl: session.checkoutUrl ?? null,
+        };
+      }
     }
 
     const subscription = await this.prisma.subscription.update({
@@ -266,7 +387,7 @@ export class SubscriptionsService {
       },
     });
 
-    return subscription;
+    return { subscription, checkoutUrl: null };
   }
 
   /** Schedules cancellation for the end of the current billing period —
@@ -280,7 +401,10 @@ export class SubscriptionsService {
     if (!existing) {
       throw new NotFoundException('No subscription found for this workspace');
     }
-    if (getEffectiveStatus(existing) === SubscriptionStatus.CANCELED) {
+    if (
+      getEffectiveStatus(existing, new Date(), this.pastDueGraceDays) ===
+      SubscriptionStatus.CANCELED
+    ) {
       throw new BadRequestException('This subscription is already canceled');
     }
 
@@ -316,23 +440,61 @@ export class SubscriptionsService {
     return subscription;
   }
 
-  /** Reverses a pending (not-yet-effective) cancellation. */
+  /**
+   * Reverses a pending (not-yet-effective) cancellation. When the
+   * canceled subscription was backed by a real provider subscription,
+   * that subscription was already disabled at cancel()-time (Paystack has
+   * no "undo a disable" primitive) — silently clearing cancelAt here
+   * would leave LinkIQ granting access with no real subscription behind
+   * it, so this instead routes through a fresh checkout, same as an
+   * upgrade (see PaystackBillingProvider.cancelSubscription's docs).
+   * DevelopmentBillingProvider subscriptions never have a
+   * providerSubscriptionId, so this branch never triggers in dev mode —
+   * identical to pre-Sprint-10 behavior.
+   */
   async reactivate(
     workspaceId: string,
     userId: string,
     ctx: RequestContext,
-  ): Promise<SubscriptionWithPlan> {
+  ): Promise<SubscriptionMutationResult> {
     const existing = await this.getForWorkspace(workspaceId);
     if (!existing) {
       throw new NotFoundException('No subscription found for this workspace');
     }
     if (!existing.cancelAt) {
-      throw new BadRequestException('There is no pending cancellation to reverse');
+      throw new BadRequestException(
+        'There is no pending cancellation to reverse',
+      );
     }
     if (existing.cancelAt.getTime() <= Date.now()) {
       throw new BadRequestException(
         'This subscription has already been canceled — subscribe again to resume',
       );
+    }
+
+    if (existing.providerSubscriptionId) {
+      const email = await this.getUserEmail(userId);
+      const session = await this.provider.createCheckoutSession({
+        workspaceId,
+        planSlug: existing.plan.slug,
+        email,
+      });
+      if (!session.devFlow) {
+        await this.audit.record({
+          action: 'billing.checkout_initiated',
+          entity: 'Subscription',
+          entityId: existing.id,
+          userId,
+          workspaceId,
+          metadata: { planSlug: existing.plan.slug, reactivating: true },
+          ipAddress: ctx.ipAddress,
+          userAgent: ctx.userAgent,
+        });
+        return {
+          subscription: existing,
+          checkoutUrl: session.checkoutUrl ?? null,
+        };
+      }
     }
 
     const subscription = await this.prisma.subscription.update({
@@ -358,6 +520,6 @@ export class SubscriptionsService {
       data: { id: subscription.id, status: subscription.status },
     });
 
-    return subscription;
+    return { subscription, checkoutUrl: null };
   }
 }

@@ -6,6 +6,7 @@ import analyticsConfig from './config/analytics.config';
 import appConfig from './config/app.config';
 import authConfig from './config/auth.config';
 import databaseConfig from './config/database.config';
+import paystackConfig from './config/paystack.config';
 import redisConfig from './config/redis.config';
 import webhooksConfig from './config/webhooks.config';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
@@ -37,6 +38,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
         authConfig,
         analyticsConfig,
         webhooksConfig,
+        paystackConfig,
       ],
       envFilePath: ['.env'],
     }),

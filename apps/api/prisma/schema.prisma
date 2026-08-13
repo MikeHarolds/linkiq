@@ -161,6 +161,11 @@ enum InvoiceStatus {
   PAID
   VOID
   UNCOLLECTIBLE
+  /// Sprint 10 — a paid invoice whose charge was refunded (in full or in
+  /// part) via the payment provider. VOID means "never collected"; this
+  /// means "was collected, then given back" — a different, real state
+  /// the existing enum had no accurate value for.
+  REFUNDED
 }
 
 // ---------------------------------------------------------------------------
@@ -709,6 +714,15 @@ model Plan {
   isActive        Boolean         @default(true)
   displayOrder    Int             @default(0)
 
+  /// Sprint 10 — the corresponding Paystack (or future provider) plan
+  /// code, e.g. "PLN_xxxx". Null for plans that aren't purchasable
+  /// through automated checkout (FREE, ENTERPRISE — see
+  /// docs/architecture/paystack-integration.md). One new column here
+  /// rather than a join table: a plan has at most one active provider
+  /// plan code at a time, the same 1:1 shape Subscription's provider*
+  /// columns already use.
+  providerPlanId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -763,6 +777,14 @@ model Subscription {
   /// When cancellation was requested — distinct from cancelAt (the
   /// effective date); kept for an audit trail even after reactivation.
   canceledAt DateTime?
+
+  /// Sprint 10 — set when a recurring charge fails (status flips to
+  /// PAST_DUE), cleared on the next successful charge. Lets
+  /// getEffectiveStatus() derive PAST_DUE -> EXPIRED once this is older
+  /// than the configured grace period, the same lazy/no-cron pattern
+  /// already used for TRIALING -> EXPIRED and cancelAt -> CANCELED —
+  /// see effective-status.ts.
+  pastDueSince DateTime?
 
   /// Null = no external payment provider involved (dev-only / free
   /// subscriptions, which is everything in this sprint). Generic
@@ -836,6 +858,11 @@ model Invoice {
   provider          String?
   providerInvoiceId String?
   hostedInvoiceUrl  String?
+
+  /// Sprint 10 — why this invoice/charge failed (e.g. the provider's
+  /// gateway_response), surfaced on the dashboard and to support. Null
+  /// for anything that never failed.
+  failureReason String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

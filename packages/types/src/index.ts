@@ -300,7 +300,7 @@ export type SubscriptionStatus =
   'TRIALING' | 'ACTIVE' | 'PAST_DUE' | 'PAUSED' | 'CANCELED' | 'EXPIRED';
 
 export type InvoiceStatus =
-  'DRAFT' | 'OPEN' | 'PAID' | 'VOID' | 'UNCOLLECTIBLE';
+  'DRAFT' | 'OPEN' | 'PAID' | 'VOID' | 'UNCOLLECTIBLE' | 'REFUNDED';
 
 export interface PlanLimitDto {
   key: PlanLimitKey;
@@ -355,6 +355,23 @@ export interface BillingSummaryDto {
   plan: PlanDto;
   usage: UsageSnapshotDto[];
   invoiceCount: number;
+}
+
+/**
+ * subscribe/change-plan/reactivate all return this shape (Sprint 10).
+ * `checkoutUrl` non-null means the frontend must redirect there instead
+ * of treating `subscription` as the new state — nothing has been
+ * applied yet, the inbound provider webhook is what actually activates
+ * it. `cancel` still returns a bare SubscriptionDto (never produces a
+ * checkout).
+ */
+export interface SubscriptionMutationResultDto extends SubscriptionDto {
+  checkoutUrl: string | null;
+}
+
+export interface CheckoutCallbackResultDto {
+  success: boolean;
+  subscription: SubscriptionDto | null;
 }
 
 export interface InvoiceDto {
@@ -512,11 +529,7 @@ export type WebhookEventTypeName =
 export type WebhookEndpointStatus = 'ACTIVE' | 'PAUSED' | 'DISABLED';
 
 export type WebhookDeliveryStatus =
-  | 'PENDING'
-  | 'PROCESSING'
-  | 'DELIVERED'
-  | 'FAILED'
-  | 'EXHAUSTED';
+  'PENDING' | 'PROCESSING' | 'DELIVERED' | 'FAILED' | 'EXHAUSTED';
 
 export interface WebhookEndpointDto {
   id: string;

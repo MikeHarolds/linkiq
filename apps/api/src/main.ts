@@ -10,7 +10,15 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { registerRedirectRoute } from './modules/links/redirect-route';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // rawBody: true preserves the exact request bytes on req.rawBody
+  // alongside Nest's normal parsed req.body — needed by
+  // PaystackWebhookController to verify the x-paystack-signature header
+  // against the true raw bytes (see paystack-signature.service.ts's docs
+  // on why a re-JSON.stringify'd body isn't safe to sign/verify against).
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    rawBody: true,
+  });
 
   app.useLogger(app.get(Logger));
 

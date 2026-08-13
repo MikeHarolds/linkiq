@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -6,9 +7,16 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { WorkspaceRole } from '@prisma/client';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -26,6 +34,7 @@ import { InvoicesService } from './invoices.service';
 import { PlansService, type PlanWithLimits } from './plans.service';
 import {
   SubscriptionsService,
+  type SubscriptionMutationResult,
   type SubscriptionWithPlan,
 } from './subscriptions.service';
 import { getEffectiveStatus } from './utils/effective-status';
@@ -47,8 +56,15 @@ function planResponse(plan: PlanWithLimits) {
   };
 }
 
-function subscriptionResponse(subscription: SubscriptionWithPlan) {
-  const effectiveStatus = getEffectiveStatus(subscription);
+function subscriptionResponse(
+  subscription: SubscriptionWithPlan,
+  pastDueGraceDays?: number,
+) {
+  const effectiveStatus = getEffectiveStatus(
+    subscription,
+    new Date(),
+    pastDueGraceDays,
+  );
   return {
     id: subscription.id,
     workspaceId: subscription.workspaceId,
@@ -72,6 +88,20 @@ function subscriptionResponse(subscription: SubscriptionWithPlan) {
   };
 }
 
+/** subscribe/changePlan/reactivate all return this shape (Sprint 10):
+ * `checkoutUrl` non-null means the frontend must redirect there instead
+ * of treating `subscription` as the new state — see
+ * SubscriptionMutationResult's docs. */
+function mutationResponse(
+  result: SubscriptionMutationResult,
+  pastDueGraceDays: number,
+) {
+  return {
+    ...subscriptionResponse(result.subscription, pastDueGraceDays),
+    checkoutUrl: result.checkoutUrl,
+  };
+}
+
 /**
  * Nested under /workspaces/:workspaceId/billing, matching
  * DomainsController's pattern. RBAC deliberately does NOT follow the
@@ -89,11 +119,18 @@ export class BillingController {
     private readonly usage: BillingUsageService,
     private readonly plans: PlansService,
     private readonly invoices: InvoicesService,
+    private readonly config: ConfigService,
   ) {}
+
+  private get pastDueGraceDays(): number {
+    return this.config.get<number>('paystack.pastDueGraceDays') ?? 7;
+  }
 
   @Get()
   @Roles(WorkspaceRole.VIEWER)
-  @ApiOperation({ summary: 'Current plan, subscription status, and usage summary' })
+  @ApiOperation({
+    summary: 'Current plan, subscription status, and usage summary',
+  })
   @ApiResponse({ status: 200, description: 'Billing summary' })
   async getSummary(@Param('workspaceId') workspaceId: string) {
     const { subscription, plan } =
@@ -102,7 +139,9 @@ export class BillingController {
     const invoiceHistory = await this.invoices.listForWorkspace(workspaceId);
 
     return {
-      subscription: subscription ? subscriptionResponse(subscription) : null,
+      subscription: subscription
+        ? subscriptionResponse(subscription, this.pastDueGraceDays)
+        : null,
       plan: planResponse(plan),
       usage: usageSnapshot,
       invoiceCount: invoiceHistory.length,
@@ -111,7 +150,9 @@ export class BillingController {
 
   @Get('usage')
   @Roles(WorkspaceRole.VIEWER)
-  @ApiOperation({ summary: 'Current usage and limits for every metered resource' })
+  @ApiOperation({
+    summary: 'Current usage and limits for every metered resource',
+  })
   @ApiResponse({ status: 200, description: 'Usage snapshot' })
   async getUsage(@Param('workspaceId') workspaceId: string) {
     return this.usage.getUsage(workspaceId);
@@ -134,6 +175,41 @@ export class BillingController {
     return this.invoices.listForWorkspace(workspaceId);
   }
 
+  /**
+   * Where the user's browser lands after a redirect-based Paystack
+   * checkout (?reference=...). Fast-path UX only — see
+   * SubscriptionsService.verifyCheckout's docs: the inbound webhook is
+   * what actually activates the subscription, this just reports whether
+   * the payment itself succeeded and returns whatever state the
+   * Subscription row currently holds.
+   */
+  @Get('checkout/callback')
+  @Roles(WorkspaceRole.VIEWER)
+  @ApiOperation({
+    summary: 'Fast-path verification after redirect-based checkout',
+    description:
+      'Read-only — does not activate anything itself. The inbound Paystack webhook remains the source of truth.',
+  })
+  @ApiResponse({ status: 200, description: 'Verification result' })
+  async checkoutCallback(
+    @Param('workspaceId') workspaceId: string,
+    @Query('reference') reference: string,
+  ) {
+    if (!reference) {
+      throw new BadRequestException('reference is required');
+    }
+    const result = await this.subscriptions.verifyCheckout(
+      workspaceId,
+      reference,
+    );
+    return {
+      success: result.success,
+      subscription: result.subscription
+        ? subscriptionResponse(result.subscription, this.pastDueGraceDays)
+        : null,
+    };
+  }
+
   @Post('subscribe')
   @HttpCode(HttpStatus.OK)
   @Roles(WorkspaceRole.ADMIN)
@@ -149,19 +225,21 @@ export class BillingController {
     @Ctx() ctx: RequestContext,
     @Body() dto: PlanSlugDto,
   ) {
-    const subscription = await this.subscriptions.subscribe(
+    const result = await this.subscriptions.subscribe(
       workspaceId,
       user.id,
       dto.planSlug,
       ctx,
     );
-    return subscriptionResponse(subscription);
+    return mutationResponse(result, this.pastDueGraceDays);
   }
 
   @Post('change-plan')
   @HttpCode(HttpStatus.OK)
   @Roles(WorkspaceRole.ADMIN)
-  @ApiOperation({ summary: 'Upgrade or downgrade the current plan (ADMIN or OWNER)' })
+  @ApiOperation({
+    summary: 'Upgrade or downgrade the current plan (ADMIN or OWNER)',
+  })
   @ApiResponse({ status: 200, description: 'Plan changed' })
   async changePlan(
     @Param('workspaceId') workspaceId: string,
@@ -169,13 +247,13 @@ export class BillingController {
     @Ctx() ctx: RequestContext,
     @Body() dto: PlanSlugDto,
   ) {
-    const subscription = await this.subscriptions.changePlan(
+    const result = await this.subscriptions.changePlan(
       workspaceId,
       user.id,
       dto.planSlug,
       ctx,
     );
-    return subscriptionResponse(subscription);
+    return mutationResponse(result, this.pastDueGraceDays);
   }
 
   @Post('cancel')
@@ -195,7 +273,7 @@ export class BillingController {
       user.id,
       ctx,
     );
-    return subscriptionResponse(subscription);
+    return subscriptionResponse(subscription, this.pastDueGraceDays);
   }
 
   @Post('reactivate')
@@ -203,17 +281,20 @@ export class BillingController {
   @Roles(WorkspaceRole.ADMIN)
   @ApiOperation({ summary: 'Reverse a pending cancellation (ADMIN or OWNER)' })
   @ApiResponse({ status: 200, description: 'Subscription reactivated' })
-  @ApiResponse({ status: 400, description: 'No pending cancellation to reverse' })
+  @ApiResponse({
+    status: 400,
+    description: 'No pending cancellation to reverse',
+  })
   async reactivate(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: AuthenticatedUser,
     @Ctx() ctx: RequestContext,
   ) {
-    const subscription = await this.subscriptions.reactivate(
+    const result = await this.subscriptions.reactivate(
       workspaceId,
       user.id,
       ctx,
     );
-    return subscriptionResponse(subscription);
+    return mutationResponse(result, this.pastDueGraceDays);
   }
 }

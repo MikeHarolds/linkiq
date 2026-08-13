@@ -1,6 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { Test, type TestingModuleBuilder } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import type Redis from 'ioredis';
 
@@ -27,16 +27,30 @@ import { REDIS_CLIENT } from '../src/modules/redis/redis.module';
  * limiting itself is verified separately, with the real guard fully active,
  * in test/rate-limit.e2e-spec.ts (its own Jest config, no env override).
  */
-export async function createTestApp(): Promise<{
+export async function createTestApp(
+  /** Optional hook to override providers before compiling — e.g.
+   * substituting PaystackApiClient with a fake so a checkout-flow e2e
+   * test never makes a real network call (see
+   * paystack-checkout.e2e-spec.ts). Rarely needed; every other e2e file
+   * omits it. */
+  configureModule?: (builder: TestingModuleBuilder) => TestingModuleBuilder,
+): Promise<{
   app: INestApplication;
   prisma: PrismaService;
   redis: Redis;
 }> {
-  const moduleRef = await Test.createTestingModule({
+  let builder = Test.createTestingModule({
     imports: [AppModule],
-  }).compile();
+  });
+  if (configureModule) {
+    builder = configureModule(builder);
+  }
+  const moduleRef = await builder.compile();
 
-  const app = moduleRef.createNestApplication();
+  // rawBody: true mirrors main.ts's bootstrap — required for
+  // PaystackWebhookController's signature verification (see
+  // paystack-webhooks.e2e-spec.ts), which reads req.rawBody.
+  const app = moduleRef.createNestApplication({ rawBody: true });
   registerRedirectRoute(app);
   app.setGlobalPrefix('api/v1');
   app.use(cookieParser());

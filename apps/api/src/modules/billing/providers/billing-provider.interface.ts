@@ -5,6 +5,10 @@ export const BILLING_PROVIDER = 'BILLING_PROVIDER';
 export interface CreateCheckoutSessionInput {
   workspaceId: string;
   planSlug: string;
+  /** The payer's email — required by every real payment provider to
+   * create a customer/checkout session. Unused by
+   * DevelopmentBillingProvider. */
+  email: string;
   successUrl?: string;
   cancelUrl?: string;
 }
@@ -28,6 +32,18 @@ export interface BillingWebhookEvent {
   externalEventId: string;
   eventType: string;
   payload: unknown;
+}
+
+export interface VerifyTransactionResult {
+  /** True when the provider confirms this transaction/checkout
+   * succeeded. This is a fast-path UX signal only, used by the
+   * checkout-callback route the user's browser lands on after
+   * redirect-based checkout — the inbound webhook (handleWebhook,
+   * processed asynchronously) remains the source of truth for
+   * actually mutating subscription state. Callers must not treat a
+   * true result here as license to activate anything themselves. */
+  success: boolean;
+  reference: string;
 }
 
 /**
@@ -56,4 +72,8 @@ export interface BillingProvider {
     rawPayload: Buffer | string,
     signature: string | undefined,
   ): Promise<BillingWebhookEvent>;
+  /** Called from the checkout-callback route the user's browser lands
+   * on after a redirect-based checkout (see CheckoutSessionResult).
+   * Fast-path UX only — see VerifyTransactionResult. */
+  verifyTransaction(reference: string): Promise<VerifyTransactionResult>;
 }
