@@ -8,6 +8,7 @@ export const FEATURE_LABELS: Record<PlanLimitKey, string> = {
   MAX_TEAM_MEMBERS: 'Team members',
   MONTHLY_CLICKS: 'Monthly clicks',
   ANALYTICS_RETENTION_DAYS: 'Analytics retention (days)',
+  MONTHLY_API_REQUESTS: 'API requests (this month)',
 };
 
 /** The subset shown as progress bars in the Usage section — matches
@@ -20,4 +21,5 @@ export const USAGE_BAR_KEYS: PlanLimitKey[] = [
   'MAX_CUSTOM_DOMAINS',
   'MAX_TEAM_MEMBERS',
   'MONTHLY_CLICKS',
+  'MONTHLY_API_REQUESTS',
 ];

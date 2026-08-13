@@ -32,6 +32,7 @@ const METERED_KEYS: PlanLimitKey[] = [
   PlanLimitKey.MAX_CUSTOM_DOMAINS,
   PlanLimitKey.MAX_TEAM_MEMBERS,
   PlanLimitKey.MONTHLY_CLICKS,
+  PlanLimitKey.MONTHLY_API_REQUESTS,
 ];
 
 /**
@@ -58,7 +59,10 @@ export class BillingUsageService {
     private readonly audit: AuditService,
   ) {}
 
-  async getLimit(workspaceId: string, key: PlanLimitKey): Promise<number | null> {
+  async getLimit(
+    workspaceId: string,
+    key: PlanLimitKey,
+  ): Promise<number | null> {
     const { plan } = await this.subscriptions.getEffectivePlan(workspaceId);
     return this.limitFromPlan(plan, key);
   }
@@ -119,6 +123,25 @@ export class BillingUsageService {
     return Math.max(0, limit - usage);
   }
 
+  /**
+   * A single-pass (limit, usage) read with no opinion on what to do about
+   * it — unlike assertCanUse, which throws billing's own
+   * PlanLimitExceededException. Exists for callers outside the billing
+   * domain that need to enforce a limit with their own error shape; today
+   * that's only ApiUsageInterceptor (MONTHLY_API_REQUESTS), which throws
+   * ApiPlanLimitExceededException instead. `limit: null` means unlimited.
+   */
+  async getUsageAndLimit(
+    workspaceId: string,
+    key: PlanLimitKey,
+  ): Promise<{ limit: number | null; usage: number }> {
+    const { plan, subscription } =
+      await this.subscriptions.getEffectivePlan(workspaceId);
+    const limit = this.limitFromPlan(plan, key);
+    const usage = await this.usageFor(workspaceId, key, subscription);
+    return { limit, usage };
+  }
+
   async getUsage(workspaceId: string): Promise<UsageSnapshot[]> {
     const { plan, subscription } =
       await this.subscriptions.getEffectivePlan(workspaceId);
@@ -138,7 +161,10 @@ export class BillingUsageService {
     );
   }
 
-  private limitFromPlan(plan: PlanWithLimits, key: PlanLimitKey): number | null {
+  private limitFromPlan(
+    plan: PlanWithLimits,
+    key: PlanLimitKey,
+  ): number | null {
     const row = plan.limits.find((l) => l.key === key);
     // No row configured for this key -> unlimited (fail-open), not a
     // thrown error and not zero — see class docs.
@@ -171,6 +197,8 @@ export class BillingUsageService {
         return this.prisma.workspaceMember.count({ where: { workspaceId } });
       case PlanLimitKey.MONTHLY_CLICKS:
         return this.monthlyClickUsage(workspaceId, subscription);
+      case PlanLimitKey.MONTHLY_API_REQUESTS:
+        return this.monthlyApiRequestUsage(workspaceId, subscription);
       case PlanLimitKey.ANALYTICS_RETENTION_DAYS:
         return 0;
       default:
@@ -197,12 +225,31 @@ export class BillingUsageService {
     return result._sum.totalClicks ?? 0;
   }
 
+  /**
+   * Counts ApiUsageEvent rows (Sprint 8) over the current billing period
+   * — same period-resolution helper as monthlyClickUsage, no separate
+   * counting mechanism. Unlike clicks, this number IS enforced, but only
+   * against API-key-authenticated requests — see
+   * modules/api-keys/interceptors/api-usage.interceptor.ts, the only
+   * caller that turns this into a block.
+   */
+  private async monthlyApiRequestUsage(
+    workspaceId: string,
+    subscription: SubscriptionWithPlan | null,
+  ): Promise<number> {
+    const { start, end } = this.resolveUsagePeriod(subscription);
+    return this.prisma.apiUsageEvent.count({
+      where: { workspaceId, createdAt: { gte: start, lt: end } },
+    });
+  }
+
   /** The subscription's own billing period when it has one; otherwise
    * calendar-month-to-date (FREE plans and workspaces with no
    * subscription row have no billing cycle of their own). */
-  private resolveUsagePeriod(
-    subscription: SubscriptionWithPlan | null,
-  ): { start: Date; end: Date } {
+  private resolveUsagePeriod(subscription: SubscriptionWithPlan | null): {
+    start: Date;
+    end: Date;
+  } {
     if (subscription?.currentPeriodStart && subscription?.currentPeriodEnd) {
       return {
         start: subscription.currentPeriodStart,
@@ -210,8 +257,12 @@ export class BillingUsageService {
       };
     }
     const now = new Date();
-    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    const start = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+    );
+    const end = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
+    );
     return { start, end };
   }
 }

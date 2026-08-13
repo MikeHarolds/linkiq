@@ -126,4 +126,168 @@ describe('WorkspaceRolesGuard', () => {
       },
     });
   });
+
+  describe('API-key branch (Sprint 8)', () => {
+    const apiKeyAuth = {
+      authenticationType: 'api_key' as const,
+      apiKeyId: 'key-1',
+      workspaceId: 'ws-1',
+      createdById: 'user-1',
+      permissions: ['LINKS_READ'],
+    };
+
+    function makeApiKeyContext(
+      overrides: Partial<{
+        params: Record<string, string>;
+        rolesMeta: unknown;
+        permissionMeta: unknown;
+      }> = {},
+    ) {
+      reflector.getAllAndOverride.mockImplementation((key: string) => {
+        if (key === 'workspaceRoles') return overrides.rolesMeta ?? [VIEWER];
+        if (key === 'apiPermission')
+          return 'permissionMeta' in overrides
+            ? overrides.permissionMeta
+            : 'LINKS_READ';
+        return undefined;
+      });
+
+      const request = {
+        params: overrides.params ?? {},
+        headers: {},
+        user: { id: 'user-1' },
+        apiKeyAuth,
+      };
+
+      return {
+        context: {
+          switchToHttp: () => ({ getRequest: () => request }),
+          getHandler: () => undefined,
+          getClass: () => undefined,
+        } as unknown as ExecutionContext,
+        request,
+      };
+    }
+
+    it('grants access when the key has the required permission', async () => {
+      const { context } = makeApiKeyContext();
+      prisma.workspaceMember.findUnique.mockResolvedValue({
+        id: 'member-1',
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+        role: OWNER,
+      });
+
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+    });
+
+    it('denies access when the key lacks the required permission', async () => {
+      const { context } = makeApiKeyContext({ permissionMeta: 'LINKS_WRITE' });
+
+      await expect(guard.canActivate(context)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.workspaceMember.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('denies access when the route has no @ApiPermission at all (fails closed)', async () => {
+      const { context } = makeApiKeyContext({ permissionMeta: undefined });
+
+      await expect(guard.canActivate(context)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it("rejects when a route :workspaceId param disagrees with the key's own workspace", async () => {
+      const { context } = makeApiKeyContext({
+        params: { workspaceId: 'ws-DIFFERENT' },
+      });
+
+      await expect(guard.canActivate(context)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.workspaceMember.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('allows a matching :workspaceId route param', async () => {
+      const { context } = makeApiKeyContext({
+        params: { workspaceId: 'ws-1' },
+      });
+      prisma.workspaceMember.findUnique.mockResolvedValue({
+        id: 'member-1',
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+        role: OWNER,
+      });
+
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+    });
+
+    it('ignores any X-Workspace-Id header entirely — the key is the only source of truth', async () => {
+      reflector.getAllAndOverride.mockImplementation((key: string) =>
+        key === 'workspaceRoles' ? [VIEWER] : 'LINKS_READ',
+      );
+      const request = {
+        params: {},
+        headers: { 'x-workspace-id': 'ws-attacker-supplied' },
+        user: { id: 'user-1' },
+        apiKeyAuth,
+      };
+      const context = {
+        switchToHttp: () => ({ getRequest: () => request }),
+        getHandler: () => undefined,
+        getClass: () => undefined,
+      } as unknown as ExecutionContext;
+      prisma.workspaceMember.findUnique.mockResolvedValue({
+        id: 'member-1',
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+        role: OWNER,
+      });
+
+      await guard.canActivate(context);
+
+      expect(prisma.workspaceMember.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            workspaceId_userId: expect.objectContaining({
+              workspaceId: 'ws-1',
+            }),
+          }),
+        }),
+      );
+    });
+
+    it("attaches the key creator's real membership to the request when it still exists", async () => {
+      const { context, request } = makeApiKeyContext();
+      const membership = {
+        id: 'member-1',
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+        role: OWNER,
+      };
+      prisma.workspaceMember.findUnique.mockResolvedValue(membership);
+
+      await guard.canActivate(context);
+
+      expect(
+        (request as unknown as { workspaceMember: unknown }).workspaceMember,
+      ).toBe(membership);
+    });
+
+    it('synthesizes a minimal membership when the creator has left the workspace', async () => {
+      const { context, request } = makeApiKeyContext();
+      prisma.workspaceMember.findUnique.mockResolvedValue(null);
+
+      await guard.canActivate(context);
+
+      const synthesized = (
+        request as unknown as {
+          workspaceMember: { workspaceId: string; userId: string };
+        }
+      ).workspaceMember;
+      expect(synthesized.workspaceId).toBe('ws-1');
+      expect(synthesized.userId).toBe('user-1');
+    });
+  });
 });

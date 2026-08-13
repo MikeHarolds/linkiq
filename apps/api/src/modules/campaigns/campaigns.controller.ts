@@ -21,6 +21,7 @@ import {
 } from '@nestjs/swagger';
 import { CampaignStatus, type WorkspaceMember } from '@prisma/client';
 
+import { ApiPermission } from '../../common/decorators/api-permission.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentWorkspace } from '../../common/decorators/current-workspace.decorator';
 import {
@@ -61,6 +62,7 @@ export class CampaignsController {
 
   @Post()
   @Roles('MEMBER')
+  @ApiPermission('CAMPAIGNS_WRITE')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a campaign (MEMBER, ADMIN, or OWNER)' })
   @ApiResponse({ status: 201, description: 'Campaign created' })
@@ -88,6 +90,7 @@ export class CampaignsController {
 
   @Get()
   @Roles('VIEWER')
+  @ApiPermission('CAMPAIGNS_READ')
   @ApiOperation({
     summary: 'List campaigns (paginated, searchable, filterable)',
   })
@@ -104,6 +107,7 @@ export class CampaignsController {
 
   @Get(':id')
   @Roles('VIEWER')
+  @ApiPermission('CAMPAIGNS_READ')
   @ApiOperation({ summary: 'Get a single campaign' })
   @ApiResponse({ status: 200, description: 'Campaign details' })
   @ApiResponse({
@@ -119,6 +123,7 @@ export class CampaignsController {
 
   @Get(':id/links')
   @Roles('VIEWER')
+  @ApiPermission('CAMPAIGNS_READ')
   @ApiOperation({
     summary: "List links assigned to this campaign, with each link's QR codes",
   })
@@ -135,6 +140,7 @@ export class CampaignsController {
 
   @Get(':id/analytics')
   @Roles('VIEWER')
+  @ApiPermission('CAMPAIGNS_READ')
   @ApiOperation({
     summary:
       'Full campaign analytics: overview, click trend, top links/sources/mediums/countries, device and referrer breakdowns',
@@ -161,6 +167,7 @@ export class CampaignsController {
 
   @Patch(':id')
   @Roles('MEMBER')
+  @ApiPermission('CAMPAIGNS_WRITE')
   @ApiOperation({ summary: 'Update a campaign (MEMBER, ADMIN, or OWNER)' })
   @ApiResponse({ status: 200, description: 'Campaign updated' })
   async update(
@@ -181,6 +188,7 @@ export class CampaignsController {
 
   @Delete(':id')
   @Roles('MEMBER')
+  @ApiPermission('CAMPAIGNS_WRITE')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary:
@@ -203,6 +211,7 @@ export class CampaignsController {
 
   @Post(':id/activate')
   @Roles('MEMBER')
+  @ApiPermission('CAMPAIGNS_WRITE')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Activate a campaign (from DRAFT or PAUSED)' })
   @ApiResponse({ status: 200, description: 'Campaign activated' })
@@ -224,6 +233,7 @@ export class CampaignsController {
 
   @Post(':id/pause')
   @Roles('MEMBER')
+  @ApiPermission('CAMPAIGNS_WRITE')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Pause a campaign (from ACTIVE)' })
   @ApiResponse({ status: 200, description: 'Campaign paused' })
@@ -245,6 +255,7 @@ export class CampaignsController {
 
   @Post(':id/archive')
   @Roles('MEMBER')
+  @ApiPermission('CAMPAIGNS_WRITE')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:

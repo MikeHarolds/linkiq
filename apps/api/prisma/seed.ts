@@ -44,13 +44,7 @@ import {
   SubscriptionStatus,
   WorkspaceRole,
 } from '@prisma/client';
-import type {
-  Plan,
-  PlanLimitKey,
-  Workspace,
-  User,
-  Link,
-} from '@prisma/client';
+import type { Plan, PlanLimitKey, Workspace, User, Link } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 import { computeVisitorHash } from '../src/modules/analytics/utils/visitor-hash';
@@ -98,6 +92,7 @@ const PLAN_CONFIGS: PlanSeedConfig[] = [
       MAX_TEAM_MEMBERS: 3,
       MONTHLY_CLICKS: 1000,
       ANALYTICS_RETENTION_DAYS: 30,
+      MONTHLY_API_REQUESTS: 1_000,
     },
   },
   {
@@ -118,6 +113,7 @@ const PLAN_CONFIGS: PlanSeedConfig[] = [
       MAX_TEAM_MEMBERS: 5,
       MONTHLY_CLICKS: 25_000,
       ANALYTICS_RETENTION_DAYS: 90,
+      MONTHLY_API_REQUESTS: 10_000,
     },
   },
   {
@@ -138,6 +134,7 @@ const PLAN_CONFIGS: PlanSeedConfig[] = [
       MAX_TEAM_MEMBERS: 20,
       MONTHLY_CLICKS: 250_000,
       ANALYTICS_RETENTION_DAYS: 365,
+      MONTHLY_API_REQUESTS: 100_000,
     },
   },
   {
@@ -158,6 +155,7 @@ const PLAN_CONFIGS: PlanSeedConfig[] = [
       MAX_TEAM_MEMBERS: 100,
       MONTHLY_CLICKS: 2_000_000,
       ANALYTICS_RETENTION_DAYS: 730,
+      MONTHLY_API_REQUESTS: 1_000_000,
     },
   },
   {
@@ -178,6 +176,7 @@ const PLAN_CONFIGS: PlanSeedConfig[] = [
       MAX_TEAM_MEMBERS: null,
       MONTHLY_CLICKS: null,
       ANALYTICS_RETENTION_DAYS: null,
+      MONTHLY_API_REQUESTS: null,
     },
   },
 ];
@@ -243,7 +242,11 @@ export async function seedPlans(
               planId_key: { planId: plan.id, key: key as PlanLimitKey },
             },
             update: { value: value ?? null },
-            create: { planId: plan.id, key: key as PlanLimitKey, value: value ?? null },
+            create: {
+              planId: plan.id,
+              key: key as PlanLimitKey,
+              value: value ?? null,
+            },
           }),
         ),
       );
@@ -339,7 +342,9 @@ async function seedDemoSubscription(
     where: { workspaceId: workspace.id },
   });
   if (existing) {
-    console.log('Demo workspace subscription already exists — skipping (idempotent)');
+    console.log(
+      'Demo workspace subscription already exists — skipping (idempotent)',
+    );
     return;
   }
 

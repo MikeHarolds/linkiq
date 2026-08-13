@@ -293,12 +293,14 @@ export type PlanLimitKey =
   | 'MAX_CUSTOM_DOMAINS'
   | 'MAX_TEAM_MEMBERS'
   | 'MONTHLY_CLICKS'
-  | 'ANALYTICS_RETENTION_DAYS';
+  | 'ANALYTICS_RETENTION_DAYS'
+  | 'MONTHLY_API_REQUESTS';
 
 export type SubscriptionStatus =
   'TRIALING' | 'ACTIVE' | 'PAST_DUE' | 'PAUSED' | 'CANCELED' | 'EXPIRED';
 
-export type InvoiceStatus = 'DRAFT' | 'OPEN' | 'PAID' | 'VOID' | 'UNCOLLECTIBLE';
+export type InvoiceStatus =
+  'DRAFT' | 'OPEN' | 'PAID' | 'VOID' | 'UNCOLLECTIBLE';
 
 export interface PlanLimitDto {
   key: PlanLimitKey;
@@ -381,5 +383,87 @@ export interface PlanLimitReachedError {
   limit: number;
   usage: number;
   remaining: number;
+  message: string;
+}
+
+// ---------------------------------------------------------------------
+// API Keys & Developer API (Sprint 8)
+// ---------------------------------------------------------------------
+
+export type ApiKeyPermission =
+  | 'LINKS_READ'
+  | 'LINKS_WRITE'
+  | 'CAMPAIGNS_READ'
+  | 'CAMPAIGNS_WRITE'
+  | 'QRCODES_READ'
+  | 'QRCODES_WRITE'
+  | 'ANALYTICS_READ'
+  | 'DOMAINS_READ'
+  | 'DOMAINS_WRITE'
+  | 'WORKSPACE_READ';
+
+/** Derived, not stored — see docs/architecture/api-keys.md. */
+export type ApiKeyStatus = 'ACTIVE' | 'EXPIRED' | 'REVOKED';
+
+export interface ApiKeyDto {
+  id: string;
+  workspaceId: string;
+  name: string;
+  /** Safe to display, e.g. "lk_live_ab12cd34" — never the full secret. */
+  keyPrefix: string;
+  permissions: ApiKeyPermission[];
+  status: ApiKeyStatus;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  createdById: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Only the create response ever carries `key` — the full secret, shown
+ * exactly once. Every other read of an API key returns ApiKeyDto. */
+export interface CreatedApiKeyDto extends ApiKeyDto {
+  key: string;
+}
+
+export interface CreateApiKeyPayload {
+  name: string;
+  /** Explicit, non-empty — there is no implicit "all access" default. */
+  permissions: ApiKeyPermission[];
+  expiresAt?: string;
+}
+
+/** Structured API-auth/authorization error bodies — see
+ * docs/architecture/api-keys.md §Errors. Each `code` maps to exactly one
+ * of these shapes; the frontend can switch on `code` to show a tailored
+ * message instead of a generic error toast. */
+export interface InvalidApiKeyError {
+  code: 'INVALID_API_KEY' | 'API_KEY_REVOKED' | 'API_KEY_EXPIRED';
+  message: string;
+}
+
+export interface ApiPermissionDeniedError {
+  code: 'API_PERMISSION_DENIED';
+  permission: string;
+  message: string;
+}
+
+export interface WorkspaceAccessDeniedError {
+  code: 'WORKSPACE_ACCESS_DENIED';
+  message: string;
+}
+
+export interface ApiPlanLimitReachedError {
+  code: 'API_PLAN_LIMIT_REACHED';
+  feature: string;
+  limit: number;
+  usage: number;
+  remaining: number;
+  message: string;
+}
+
+export interface ApiRateLimitExceededError {
+  code: 'API_RATE_LIMIT_EXCEEDED';
   message: string;
 }

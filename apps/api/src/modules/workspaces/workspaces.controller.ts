@@ -19,6 +19,7 @@ import {
 } from '@nestjs/swagger';
 import { WorkspaceRole } from '@prisma/client';
 
+import { ApiPermission } from '../../common/decorators/api-permission.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import {
   Ctx,
@@ -65,6 +66,7 @@ export class WorkspacesController {
   @Get(':workspaceId')
   @UseGuards(WorkspaceRolesGuard)
   @Roles(WorkspaceRole.VIEWER)
+  @ApiPermission('WORKSPACE_READ')
   @ApiHeader({
     name: 'X-Workspace-Id',
     required: false,

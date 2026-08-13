@@ -1,7 +1,10 @@
 # API Documentation
 
-> **Status:** Foundation milestone — only `/health` exists. The full public
-> REST API surface is introduced starting with the Authentication milestone.
+> **Status:** Sprints 0–8 complete. This file is the original Sprint 0
+> placeholder and is stale for anything past `/health` — see
+> [`developer-guide.md`](./developer-guide.md) for API-key authentication,
+> permissions, endpoints, pagination, rate limiting, and error codes, or
+> `/api/v1/docs` for the live, always-current Swagger reference.
 
 ## Interactive documentation
 

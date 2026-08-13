@@ -92,6 +92,27 @@ enum PlanLimitKey {
   MAX_TEAM_MEMBERS
   MONTHLY_CLICKS
   ANALYTICS_RETENTION_DAYS
+  /// Sprint 8 — monthly quota for API-key-authenticated requests. Never
+  /// enforced against browser JWT traffic or the public redirect path,
+  /// see docs/architecture/api-keys.md.
+  MONTHLY_API_REQUESTS
+}
+
+/// Scoped capabilities an API key can be granted at creation (Sprint 8).
+/// Deliberately independent of WorkspaceRole — an API key's authority is
+/// this list, never the creator's ongoing workspace role. See
+/// docs/architecture/api-keys.md.
+enum ApiKeyPermission {
+  LINKS_READ
+  LINKS_WRITE
+  CAMPAIGNS_READ
+  CAMPAIGNS_WRITE
+  QRCODES_READ
+  QRCODES_WRITE
+  ANALYTICS_READ
+  DOMAINS_READ
+  DOMAINS_WRITE
+  WORKSPACE_READ
 }
 
 /// Lifecycle of a workspace's Subscription. Deliberately does NOT store
@@ -159,6 +180,7 @@ model User {
   createdQrCodes       QrCode[]             @relation("QrCodeCreator")
   createdCampaigns     Campaign[]           @relation("CampaignCreator")
   createdCustomDomains CustomDomain[]       @relation("CustomDomainCreator")
+  createdApiKeys       ApiKey[]             @relation("ApiKeyCreator")
 
   @@index([email])
   @@map("users")
@@ -190,14 +212,16 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members       WorkspaceMember[]
-  auditLogs     AuditLog[]
-  links         Link[]
-  qrCodes       QrCode[]
-  campaigns     Campaign[]
-  customDomains CustomDomain[]
-  subscription  Subscription?
-  invoices      Invoice[]
+  members        WorkspaceMember[]
+  auditLogs      AuditLog[]
+  links          Link[]
+  qrCodes        QrCode[]
+  campaigns      Campaign[]
+  customDomains  CustomDomain[]
+  subscription   Subscription?
+  invoices       Invoice[]
+  apiKeys        ApiKey[]
+  apiUsageEvents ApiUsageEvent[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
@@ -806,4 +830,77 @@ model Invoice {
   @@unique([workspaceId, number])
   @@index([workspaceId])
   @@map("invoices")
+}
+
+// ---------------------------------------------------------------------------
+// API Keys & Developer API Access (Sprint 8)
+// ---------------------------------------------------------------------------
+
+/// A workspace-scoped credential external applications use in place of a
+/// browser JWT session — see docs/architecture/api-keys.md. Only the
+/// one-way hash of the secret is ever persisted; the raw secret exists
+/// only in the response of the single request that created it.
+model ApiKey {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+
+  /// Non-secret display prefix (e.g. "lk_live_ab12cd34") — safe to show
+  /// in the UI/logs/audit metadata. Unique because it's derived from the
+  /// unique secret, not because uniqueness is itself required for lookup
+  /// (keyHash is the actual lookup key).
+  keyPrefix String @unique
+  /// sha256(full raw key) — see common/utils/api-key.ts. Never the raw
+  /// key, never reversible.
+  keyHash   String @unique
+
+  /// Fixed-vocabulary scopes this key was granted at creation time.
+  /// Independent of the creator's ongoing WorkspaceRole — see
+  /// WorkspaceRolesGuard's API-key branch.
+  permissions ApiKeyPermission[]
+
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+
+  createdById String? @db.Uuid
+  createdBy   User?   @relation("ApiKeyCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  usageEvents ApiUsageEvent[]
+
+  @@index([workspaceId])
+  @@map("api_keys")
+}
+
+/// One row per API request made with an API key — written asynchronously
+/// off the request path (see modules/api-keys/queue/), the same
+/// producer/processor pattern as ClickEvent. Powers both the
+/// MONTHLY_API_REQUESTS billing check (an aggregate count, mirroring
+/// BillingUsageService's MONTHLY_CLICKS) and future usage analytics.
+/// Deliberately never records the key secret, the Authorization header,
+/// or request/response bodies.
+model ApiUsageEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// SetNull (not Cascade): a deleted key's historical usage stays
+  /// available for billing history, the same way a workspace's billing
+  /// history isn't erased by unrelated cleanup elsewhere.
+  apiKeyId    String?   @db.Uuid
+  apiKey      ApiKey?   @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  endpoint   String
+  method     String
+  statusCode Int
+  durationMs Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([apiKeyId])
+  @@map("api_usage_events")
 }

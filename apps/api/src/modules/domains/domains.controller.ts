@@ -19,6 +19,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
+import { ApiPermission } from '../../common/decorators/api-permission.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import {
   Ctx,
@@ -55,6 +56,7 @@ export class DomainsController {
 
   @Post()
   @Roles('MEMBER')
+  @ApiPermission('DOMAINS_WRITE')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Register a custom domain (MEMBER, ADMIN, or OWNER)',
@@ -81,6 +83,7 @@ export class DomainsController {
 
   @Get()
   @Roles('VIEWER')
+  @ApiPermission('DOMAINS_READ')
   @ApiOperation({ summary: 'List custom domains in the workspace' })
   @ApiResponse({ status: 200, description: 'Paginated domain list' })
   async findAll(
@@ -93,6 +96,7 @@ export class DomainsController {
 
   @Get(':id')
   @Roles('VIEWER')
+  @ApiPermission('DOMAINS_READ')
   @ApiOperation({ summary: 'Get a single custom domain' })
   @ApiResponse({ status: 200, description: 'Domain details' })
   @ApiResponse({ status: 404, description: 'Not found' })
@@ -106,6 +110,7 @@ export class DomainsController {
 
   @Patch(':id')
   @Roles('MEMBER')
+  @ApiPermission('DOMAINS_WRITE')
   @ApiOperation({ summary: 'Update a custom domain (MEMBER, ADMIN, or OWNER)' })
   @ApiResponse({ status: 200, description: 'Domain updated' })
   async update(
@@ -127,6 +132,7 @@ export class DomainsController {
 
   @Delete(':id')
   @Roles('MEMBER')
+  @ApiPermission('DOMAINS_WRITE')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Soft-delete a custom domain (MEMBER, ADMIN, or OWNER)',
@@ -144,6 +150,7 @@ export class DomainsController {
   @Post(':id/verify')
   @HttpCode(HttpStatus.OK)
   @Roles('MEMBER')
+  @ApiPermission('DOMAINS_WRITE')
   @ApiOperation({
     summary:
       'Attempt DNS TXT verification for a domain (MEMBER, ADMIN, or OWNER)',
@@ -172,6 +179,7 @@ export class DomainsController {
   @Post(':id/activate')
   @HttpCode(HttpStatus.OK)
   @Roles('MEMBER')
+  @ApiPermission('DOMAINS_WRITE')
   @ApiOperation({
     summary: 'Activate a verified domain (MEMBER, ADMIN, or OWNER)',
   })
@@ -195,6 +203,7 @@ export class DomainsController {
   @Post(':id/disable')
   @HttpCode(HttpStatus.OK)
   @Roles('MEMBER')
+  @ApiPermission('DOMAINS_WRITE')
   @ApiOperation({
     summary: 'Disable an active domain (MEMBER, ADMIN, or OWNER)',
   })
@@ -218,6 +227,7 @@ export class DomainsController {
   @Post(':id/primary')
   @HttpCode(HttpStatus.OK)
   @Roles('MEMBER')
+  @ApiPermission('DOMAINS_WRITE')
   @ApiOperation({
     summary:
       'Set this domain as the workspace primary (MEMBER, ADMIN, or OWNER)',

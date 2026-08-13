@@ -18,6 +18,7 @@ import {
 } from '@nestjs/swagger';
 import type { WorkspaceMember } from '@prisma/client';
 
+import { ApiPermission } from '../../common/decorators/api-permission.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentWorkspace } from '../../common/decorators/current-workspace.decorator';
 import {
@@ -54,6 +55,7 @@ export class LinkQrCodesController {
   @Post()
   @UseGuards(WorkspaceRolesGuard)
   @Roles('MEMBER')
+  @ApiPermission('QRCODES_WRITE')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Create a QR code for a link (MEMBER, ADMIN, or OWNER)',
@@ -80,6 +82,7 @@ export class LinkQrCodesController {
   @Get()
   @UseGuards(WorkspaceRolesGuard)
   @Roles('VIEWER')
+  @ApiPermission('QRCODES_READ')
   @ApiOperation({ summary: 'List QR codes for a link' })
   @ApiResponse({ status: 200, description: 'QR codes for the link' })
   @ApiResponse({ status: 404, description: 'Link not found' })

@@ -21,6 +21,7 @@ import {
 } from '@nestjs/swagger';
 import { LinkStatus, type WorkspaceMember } from '@prisma/client';
 
+import { ApiPermission } from '../../common/decorators/api-permission.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentWorkspace } from '../../common/decorators/current-workspace.decorator';
 import {
@@ -58,6 +59,7 @@ export class LinksController {
   @Post()
   @UseGuards(WorkspaceRolesGuard)
   @Roles('MEMBER')
+  @ApiPermission('LINKS_WRITE')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a short link (MEMBER, ADMIN, or OWNER)' })
   @ApiResponse({ status: 201, description: 'Link created' })
@@ -78,6 +80,7 @@ export class LinksController {
   @Get()
   @UseGuards(WorkspaceRolesGuard)
   @Roles('VIEWER')
+  @ApiPermission('LINKS_READ')
   @ApiOperation({
     summary: 'List links in the active workspace',
     description:
@@ -94,6 +97,7 @@ export class LinksController {
   @Get('stats')
   @UseGuards(WorkspaceRolesGuard)
   @Roles('VIEWER')
+  @ApiPermission('LINKS_READ')
   @ApiOperation({
     summary: 'Structural link counts for the dashboard',
     description:
@@ -107,6 +111,7 @@ export class LinksController {
   @Get(':id')
   @UseGuards(WorkspaceRolesGuard)
   @Roles('VIEWER')
+  @ApiPermission('LINKS_READ')
   @ApiOperation({ summary: 'Get a single link' })
   @ApiResponse({ status: 200, description: 'Link details' })
   @ApiResponse({
@@ -123,6 +128,7 @@ export class LinksController {
   @Patch(':id')
   @UseGuards(WorkspaceRolesGuard)
   @Roles('MEMBER')
+  @ApiPermission('LINKS_WRITE')
   @ApiOperation({ summary: 'Update a link (MEMBER, ADMIN, or OWNER)' })
   @ApiResponse({ status: 200, description: 'Link updated' })
   async update(
@@ -144,6 +150,7 @@ export class LinksController {
   @Delete(':id')
   @UseGuards(WorkspaceRolesGuard)
   @Roles('MEMBER')
+  @ApiPermission('LINKS_WRITE')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Soft-delete a link (MEMBER, ADMIN, or OWNER)' })
   @ApiResponse({ status: 204, description: 'Link deleted' })
@@ -160,6 +167,7 @@ export class LinksController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(WorkspaceRolesGuard)
   @Roles('MEMBER')
+  @ApiPermission('LINKS_WRITE')
   @ApiOperation({
     summary: 'Pause a link — blocks redirects, preserves history',
   })
@@ -184,6 +192,7 @@ export class LinksController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(WorkspaceRolesGuard)
   @Roles('MEMBER')
+  @ApiPermission('LINKS_WRITE')
   @ApiOperation({
     summary: 'Activate (or reactivate) a link — from PAUSED or ARCHIVED',
   })
@@ -208,6 +217,7 @@ export class LinksController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(WorkspaceRolesGuard)
   @Roles('MEMBER')
+  @ApiPermission('LINKS_WRITE')
   @ApiOperation({
     summary: 'Archive a link — retained for history, cannot redirect',
   })

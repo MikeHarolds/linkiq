@@ -23,6 +23,7 @@ import {
 import type { QrFormat, WorkspaceMember } from '@prisma/client';
 import type { Response } from 'express';
 
+import { ApiPermission } from '../../common/decorators/api-permission.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentWorkspace } from '../../common/decorators/current-workspace.decorator';
 import {
@@ -51,6 +52,7 @@ export class QrCodesController {
   @Get()
   @UseGuards(WorkspaceRolesGuard)
   @Roles('VIEWER')
+  @ApiPermission('QRCODES_READ')
   @ApiOperation({
     summary: 'List QR codes across the workspace (paginated, searchable)',
   })
@@ -68,6 +70,7 @@ export class QrCodesController {
   @Get(':id')
   @UseGuards(WorkspaceRolesGuard)
   @Roles('VIEWER')
+  @ApiPermission('QRCODES_READ')
   @ApiOperation({ summary: 'Get a single QR code' })
   @ApiResponse({ status: 200, description: 'QR code details' })
   @ApiResponse({
@@ -84,6 +87,7 @@ export class QrCodesController {
   @Patch(':id')
   @UseGuards(WorkspaceRolesGuard)
   @Roles('MEMBER')
+  @ApiPermission('QRCODES_WRITE')
   @ApiOperation({
     summary: 'Update a QR code appearance (MEMBER, ADMIN, or OWNER)',
   })
@@ -108,6 +112,7 @@ export class QrCodesController {
   @Delete(':id')
   @UseGuards(WorkspaceRolesGuard)
   @Roles('MEMBER')
+  @ApiPermission('QRCODES_WRITE')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a QR code (MEMBER, ADMIN, or OWNER)' })
   @ApiResponse({ status: 204, description: 'QR code deleted' })
@@ -128,6 +133,7 @@ export class QrCodesController {
   @Get(':id/download')
   @UseGuards(WorkspaceRolesGuard)
   @Roles('VIEWER')
+  @ApiPermission('QRCODES_READ')
   @ApiQuery({ name: 'format', enum: ['PNG', 'SVG'], required: false })
   @ApiOperation({
     summary: 'Download the generated QR image (VIEWER and above)',

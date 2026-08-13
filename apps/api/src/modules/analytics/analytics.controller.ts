@@ -15,6 +15,7 @@ import {
 } from '@nestjs/swagger';
 import type { WorkspaceMember } from '@prisma/client';
 
+import { ApiPermission } from '../../common/decorators/api-permission.decorator';
 import { CurrentWorkspace } from '../../common/decorators/current-workspace.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { WorkspaceRolesGuard } from '../../common/guards/workspace-roles.guard';
@@ -40,6 +41,7 @@ import {
 })
 @UseGuards(WorkspaceRolesGuard)
 @Roles('VIEWER')
+@ApiPermission('ANALYTICS_READ')
 @Controller('analytics')
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}

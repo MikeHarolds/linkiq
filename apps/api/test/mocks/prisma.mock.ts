@@ -105,6 +105,18 @@ export function createMockPrismaService() {
     invoice: {
       findMany: jest.fn(),
     },
+    apiKey: {
+      create: jest.fn(),
+      findUnique: jest.fn(),
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+    },
+    apiUsageEvent: {
+      create: jest.fn(),
+      count: jest.fn(),
+    },
     $queryRawUnsafe: jest.fn(),
     $queryRaw: jest.fn(),
     // Executes the callback with `this` (the mock itself) standing in for
