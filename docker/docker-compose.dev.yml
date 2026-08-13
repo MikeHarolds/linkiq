@@ -72,7 +72,18 @@ services:
     env_file:
       - ../apps/web/.env
     environment:
+      # Browser-facing — the browser runs on the host, so it reaches the
+      # api container through the published host port, not Docker's
+      # internal network.
       NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-4000}/api/v1
+      # Server-side only (next.config.js's short-link rewrite) — the web
+      # container itself reaches the api container over the Docker
+      # network, via the service name, on the api container's own
+      # internal port (always 4000 regardless of API_PORT, which only
+      # controls the host-side publish mapping — same reasoning as the
+      # api service's own DATABASE_URL/REDIS_HOST overrides above).
+      # "localhost" here would mean the web container itself, not api.
+      API_ORIGIN: http://api:4000
     volumes:
       - ../:/workspace
       - linkiq_web_node_modules:/workspace/node_modules
