@@ -4,13 +4,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CampaignStatus, type Campaign } from '@prisma/client';
+import { CampaignStatus, WebhookEventType, type Campaign } from '@prisma/client';
 
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import { isUniqueConstraintViolation } from '../../common/utils/prisma-errors';
 import { AuditService } from '../audit/audit.service';
 import { BillingUsageService } from '../billing/billing-usage.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertCanUseOrEmitLimitReached } from '../webhooks/utils/assert-can-use-or-emit';
+import { WebhookEventsService } from '../webhooks/webhook-events.service';
 
 import type { CreateCampaignDto } from './dto/create-campaign.dto';
 import type { QueryCampaignsDto } from './dto/query-campaigns.dto';
@@ -46,6 +48,7 @@ export class CampaignsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly billingUsage: BillingUsageService,
+    private readonly webhookEvents: WebhookEventsService,
   ) {}
 
   /**
@@ -98,7 +101,13 @@ export class CampaignsService {
       );
     }
 
-    await this.billingUsage.assertCanUse(workspaceId, 'MAX_CAMPAIGNS', 'campaigns');
+    await assertCanUseOrEmitLimitReached(
+      this.billingUsage,
+      this.webhookEvents,
+      workspaceId,
+      'MAX_CAMPAIGNS',
+      'campaigns',
+    );
 
     try {
       const campaign = await this.prisma.campaign.create({
@@ -126,6 +135,19 @@ export class CampaignsService {
         metadata: { name: campaign.name },
         ipAddress: ctx.ipAddress,
         userAgent: ctx.userAgent,
+      });
+
+      await this.webhookEvents.emit({
+        type: WebhookEventType.CAMPAIGN_CREATED,
+        workspaceId,
+        resourceId: campaign.id,
+        data: {
+          id: campaign.id,
+          name: campaign.name,
+          status: campaign.status,
+          startDate: campaign.startDate,
+          endDate: campaign.endDate,
+        },
       });
 
       return campaign;
@@ -300,6 +322,18 @@ export class CampaignsService {
       userAgent: ctx.userAgent,
     });
 
+    await this.webhookEvents.emit({
+      type: WebhookEventType.CAMPAIGN_UPDATED,
+      workspaceId,
+      resourceId: campaignId,
+      data: {
+        id: updated.id,
+        name: updated.name,
+        status: updated.status,
+        fields: Object.keys(data),
+      },
+    });
+
     return updated;
   }
 
@@ -329,6 +363,11 @@ export class CampaignsService {
       [CampaignStatus.PAUSED]: 'campaign.paused',
       [CampaignStatus.ARCHIVED]: 'campaign.archived',
     };
+    const eventByStatus: Partial<Record<CampaignStatus, WebhookEventType>> = {
+      [CampaignStatus.ACTIVE]: WebhookEventType.CAMPAIGN_ACTIVATED,
+      [CampaignStatus.PAUSED]: WebhookEventType.CAMPAIGN_PAUSED,
+      [CampaignStatus.ARCHIVED]: WebhookEventType.CAMPAIGN_ARCHIVED,
+    };
 
     await this.audit.record({
       action: actionByStatus[nextStatus] ?? 'campaign.updated',
@@ -340,6 +379,21 @@ export class CampaignsService {
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
     });
+
+    const webhookEventType = eventByStatus[nextStatus];
+    if (webhookEventType) {
+      await this.webhookEvents.emit({
+        type: webhookEventType,
+        workspaceId,
+        resourceId: campaignId,
+        data: {
+          id: updated.id,
+          name: updated.name,
+          previousStatus: existing.status,
+          status: updated.status,
+        },
+      });
+    }
 
     return updated;
   }
@@ -368,6 +422,13 @@ export class CampaignsService {
       workspaceId,
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
+    });
+
+    await this.webhookEvents.emit({
+      type: WebhookEventType.CAMPAIGN_DELETED,
+      workspaceId,
+      resourceId: campaignId,
+      data: { id: campaignId },
     });
   }
 

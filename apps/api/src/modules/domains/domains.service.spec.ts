@@ -13,6 +13,7 @@ import {
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import type { AuditService } from '../audit/audit.service';
 import type { BillingUsageService } from '../billing/billing-usage.service';
+import type { WebhookEventsService } from '../webhooks/webhook-events.service';
 
 import type { DomainCacheService } from './domain-cache.service';
 import type { DomainResolverService } from './domain-resolver.service';
@@ -49,6 +50,7 @@ describe('DomainsService', () => {
   let resolver: { isDefaultHost: jest.Mock };
   let verificationProvider: { check: jest.Mock };
   let billingUsage: { assertCanUse: jest.Mock };
+  let webhookEvents: { emit: jest.Mock };
   let service: DomainsService;
 
   beforeEach(() => {
@@ -58,6 +60,7 @@ describe('DomainsService', () => {
     resolver = { isDefaultHost: jest.fn().mockReturnValue(false) };
     verificationProvider = { check: jest.fn() };
     billingUsage = { assertCanUse: jest.fn().mockResolvedValue(undefined) };
+    webhookEvents = { emit: jest.fn().mockResolvedValue(undefined) };
     service = new DomainsService(
       prisma as unknown as never,
       audit as unknown as AuditService,
@@ -65,6 +68,7 @@ describe('DomainsService', () => {
       resolver as unknown as DomainResolverService,
       verificationProvider as unknown as DomainVerificationProvider,
       billingUsage as unknown as BillingUsageService,
+      webhookEvents as unknown as WebhookEventsService,
     );
   });
 

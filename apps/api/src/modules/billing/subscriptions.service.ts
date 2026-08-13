@@ -1,14 +1,22 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  forwardRef,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   PlanTier,
   Prisma,
   SubscriptionStatus,
+  WebhookEventType,
   type Subscription,
 } from '@prisma/client';
 
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { WebhookEventsService } from '../webhooks/webhook-events.service';
 
 import { PlansService, type PlanWithLimits } from './plans.service';
 import {
@@ -39,6 +47,8 @@ export class SubscriptionsService {
     private readonly plans: PlansService,
     private readonly audit: AuditService,
     @Inject(BILLING_PROVIDER) private readonly provider: BillingProvider,
+    @Inject(forwardRef(() => WebhookEventsService))
+    private readonly webhookEvents: WebhookEventsService,
   ) {}
 
   /**
@@ -185,6 +195,18 @@ export class SubscriptionsService {
       });
     }
 
+    await this.webhookEvents.emit({
+      type: WebhookEventType.SUBSCRIPTION_CREATED,
+      workspaceId,
+      resourceId: subscription.id,
+      data: {
+        id: subscription.id,
+        planSlug: plan.slug,
+        status: subscription.status,
+        trialing: isTrialing,
+      },
+    });
+
     return subscription;
   }
 
@@ -232,6 +254,18 @@ export class SubscriptionsService {
       userAgent: ctx.userAgent,
     });
 
+    await this.webhookEvents.emit({
+      type: WebhookEventType.SUBSCRIPTION_PLAN_CHANGED,
+      workspaceId,
+      resourceId: subscription.id,
+      data: {
+        id: subscription.id,
+        fromPlanSlug: existing.plan.slug,
+        toPlanSlug: plan.slug,
+        status: subscription.status,
+      },
+    });
+
     return subscription;
   }
 
@@ -272,6 +306,13 @@ export class SubscriptionsService {
       userAgent: ctx.userAgent,
     });
 
+    await this.webhookEvents.emit({
+      type: WebhookEventType.SUBSCRIPTION_CANCELED,
+      workspaceId,
+      resourceId: subscription.id,
+      data: { id: subscription.id, cancelAt: cancelAt.toISOString() },
+    });
+
     return subscription;
   }
 
@@ -308,6 +349,13 @@ export class SubscriptionsService {
       workspaceId,
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
+    });
+
+    await this.webhookEvents.emit({
+      type: WebhookEventType.SUBSCRIPTION_REACTIVATED,
+      workspaceId,
+      resourceId: subscription.id,
+      data: { id: subscription.id, status: subscription.status },
     });
 
     return subscription;

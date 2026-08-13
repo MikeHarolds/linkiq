@@ -8,6 +8,7 @@ import {
 import type { AuditService } from '../audit/audit.service';
 import type { BillingUsageService } from '../billing/billing-usage.service';
 import { PublicUrlService } from '../domains/public-url.service';
+import type { WebhookEventsService } from '../webhooks/webhook-events.service';
 
 import { QrCodesService } from './qr-codes.service';
 import type { QrGeneratorService } from './qr-generator.service';
@@ -52,6 +53,7 @@ describe('QrCodesService', () => {
   let audit: { record: jest.Mock };
   let generator: { generatePng: jest.Mock; generateSvg: jest.Mock };
   let billingUsage: { assertCanUse: jest.Mock };
+  let webhookEvents: { emit: jest.Mock };
   let service: QrCodesService;
 
   beforeEach(() => {
@@ -62,12 +64,14 @@ describe('QrCodesService', () => {
       generateSvg: jest.fn().mockResolvedValue('<svg>fake</svg>'),
     };
     billingUsage = { assertCanUse: jest.fn().mockResolvedValue(undefined) };
+    webhookEvents = { emit: jest.fn().mockResolvedValue(undefined) };
     service = new QrCodesService(
       prisma as unknown as never,
       audit as unknown as AuditService,
       generator as unknown as QrGeneratorService,
       new PublicUrlService(),
       billingUsage as unknown as BillingUsageService,
+      webhookEvents as unknown as WebhookEventsService,
     );
   });
 

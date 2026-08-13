@@ -8,6 +8,7 @@ import {
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import type { AuditService } from '../audit/audit.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { WebhookEventsService } from '../webhooks/webhook-events.service';
 
 import type { PlansService } from './plans.service';
 import type { BillingProvider } from './providers/billing-provider.interface';
@@ -61,6 +62,7 @@ describe('SubscriptionsService', () => {
   let plans: jest.Mocked<Pick<PlansService, 'getBySlug' | 'getFreePlan'>>;
   let audit: AuditService;
   let provider: jest.Mocked<BillingProvider>;
+  let webhookEvents: { emit: jest.Mock };
   let service: SubscriptionsService;
 
   beforeEach(() => {
@@ -77,11 +79,13 @@ describe('SubscriptionsService', () => {
       getSubscription: jest.fn(),
       handleWebhook: jest.fn(),
     };
+    webhookEvents = { emit: jest.fn().mockResolvedValue(undefined) };
     service = new SubscriptionsService(
       prisma as unknown as PrismaService,
       plans as unknown as PlansService,
       audit,
       provider,
+      webhookEvents as unknown as WebhookEventsService,
     );
   });
 

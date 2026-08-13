@@ -7,6 +7,7 @@ import appConfig from './config/app.config';
 import authConfig from './config/auth.config';
 import databaseConfig from './config/database.config';
 import redisConfig from './config/redis.config';
+import webhooksConfig from './config/webhooks.config';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { AuditModule } from './modules/audit/audit.module';
@@ -22,6 +23,7 @@ import { QrCodesModule } from './modules/qr-codes/qr-codes.module';
 import { QueueModule } from './modules/queue/queue.module';
 import { RedisModule } from './modules/redis/redis.module';
 import { UsersModule } from './modules/users/users.module';
+import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module';
 
 @Module({
@@ -34,6 +36,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
         redisConfig,
         authConfig,
         analyticsConfig,
+        webhooksConfig,
       ],
       envFilePath: ['.env'],
     }),
@@ -66,7 +69,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
     QrCodesModule,
     CampaignsModule,
     DomainsModule,
-    // Webhooks and Admin modules are added in subsequent milestones.
+    WebhooksModule,
   ],
 })
 export class AppModule {}

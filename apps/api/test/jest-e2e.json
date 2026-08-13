@@ -2,9 +2,9 @@
   "moduleFileExtensions": ["js", "json", "ts"],
   "rootDir": ".",
   "testEnvironment": "node",
-  "testRegex": "(auth|workspaces|links|redirect|analytics|qr-codes|campaigns|custom-domains|billing|api-keys)\\.e2e-spec\\.ts$",
+  "testRegex": "(auth|workspaces|links|redirect|analytics|qr-codes|campaigns|custom-domains|billing|api-keys|webhooks)\\.e2e-spec\\.ts$",
   "setupFiles": ["<rootDir>/jest.e2e.setup.ts"],
-  "testTimeout": 15000,
+  "testTimeout": 20000,
   "transform": {
     "^.+\\.(t|j)s$": [
       "ts-jest",

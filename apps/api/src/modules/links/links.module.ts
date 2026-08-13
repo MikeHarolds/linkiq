@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 
 import { BillingModule } from '../billing/billing.module';
 import { DomainsModule } from '../domains/domains.module';
+import { WebhooksModule } from '../webhooks/webhooks.module';
 
 import { LinkCacheService } from './link-cache.service';
 import { LinksController } from './links.controller';
@@ -43,6 +44,7 @@ import { RedirectService } from './redirect.service';
     BullModule.registerQueue({ name: CLICK_EVENT_QUEUE }),
     BillingModule,
     DomainsModule,
+    WebhooksModule,
   ],
   controllers: [LinksController],
   providers: [

@@ -12,6 +12,7 @@ import {
 } from '../../../test/mocks/prisma.mock';
 import type { AuditService } from '../audit/audit.service';
 import type { BillingUsageService } from '../billing/billing-usage.service';
+import type { WebhookEventsService } from '../webhooks/webhook-events.service';
 
 import { CampaignsService } from './campaigns.service';
 
@@ -45,16 +46,19 @@ describe('CampaignsService', () => {
   let prisma: MockPrismaService;
   let audit: { record: jest.Mock };
   let billingUsage: { assertCanUse: jest.Mock };
+  let webhookEvents: { emit: jest.Mock };
   let service: CampaignsService;
 
   beforeEach(() => {
     prisma = createMockPrismaService();
     audit = { record: jest.fn().mockResolvedValue(undefined) };
     billingUsage = { assertCanUse: jest.fn().mockResolvedValue(undefined) };
+    webhookEvents = { emit: jest.fn().mockResolvedValue(undefined) };
     service = new CampaignsService(
       prisma as unknown as never,
       audit as unknown as AuditService,
       billingUsage as unknown as BillingUsageService,
+      webhookEvents as unknown as WebhookEventsService,
     );
   });
 

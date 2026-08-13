@@ -14,6 +14,7 @@ import type { AuditService } from '../audit/audit.service';
 import type { BillingUsageService } from '../billing/billing-usage.service';
 import type { DomainsService } from '../domains/domains.service';
 import { PublicUrlService } from '../domains/public-url.service';
+import type { WebhookEventsService } from '../webhooks/webhook-events.service';
 
 import type { LinkCacheService } from './link-cache.service';
 import { LinksService } from './links.service';
@@ -50,6 +51,7 @@ describe('LinksService', () => {
   let cache: { invalidate: jest.Mock };
   let domains: { findSelectableOrThrow: jest.Mock };
   let billingUsage: { assertCanUse: jest.Mock };
+  let webhookEvents: { emit: jest.Mock };
   let service: LinksService;
 
   beforeEach(() => {
@@ -63,6 +65,7 @@ describe('LinksService', () => {
     // which expects Sprint 0-6 create behavior completely unaffected by
     // Sprint 7's limit enforcement unless a test explicitly overrides it.
     billingUsage = { assertCanUse: jest.fn().mockResolvedValue(undefined) };
+    webhookEvents = { emit: jest.fn().mockResolvedValue(undefined) };
     service = new LinksService(
       prisma as unknown as never,
       audit as unknown as AuditService,
@@ -70,6 +73,7 @@ describe('LinksService', () => {
       domains as unknown as DomainsService,
       new PublicUrlService(),
       billingUsage as unknown as BillingUsageService,
+      webhookEvents as unknown as WebhookEventsService,
     );
   });
 
@@ -143,6 +147,7 @@ describe('LinksService', () => {
         WORKSPACE_ID,
         'MAX_LINKS',
         'links',
+        1,
       );
     });
   });

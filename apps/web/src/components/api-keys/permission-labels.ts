@@ -11,6 +11,8 @@ export const PERMISSION_LABELS: Record<ApiKeyPermission, string> = {
   DOMAINS_READ: 'Read custom domains',
   DOMAINS_WRITE: 'Create & manage custom domains',
   WORKSPACE_READ: 'Read workspace info',
+  WEBHOOKS_READ: 'Read webhook endpoints',
+  WEBHOOKS_WRITE: 'Create & manage webhook endpoints',
 };
 
 /** Grouped for the create-key dialog's checkbox list — presented by
@@ -24,5 +26,6 @@ export const PERMISSION_GROUPS: {
   { label: 'QR codes', permissions: ['QRCODES_READ', 'QRCODES_WRITE'] },
   { label: 'Custom domains', permissions: ['DOMAINS_READ', 'DOMAINS_WRITE'] },
   { label: 'Analytics', permissions: ['ANALYTICS_READ'] },
+  { label: 'Webhooks', permissions: ['WEBHOOKS_READ', 'WEBHOOKS_WRITE'] },
   { label: 'Workspace', permissions: ['WORKSPACE_READ'] },
 ];

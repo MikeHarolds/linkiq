@@ -34,6 +34,7 @@ describe('ClickEventProcessor', () => {
   };
   let config: { get: jest.Mock };
   let geoProvider: { lookup: jest.Mock };
+  let webhookEvents: { emit: jest.Mock };
   let processor: ClickEventProcessor;
 
   beforeEach(() => {
@@ -48,10 +49,12 @@ describe('ClickEventProcessor', () => {
     geoProvider = {
       lookup: jest.fn(() => ({ country: 'US', region: null, city: null })),
     };
+    webhookEvents = { emit: jest.fn().mockResolvedValue(undefined) };
     processor = new ClickEventProcessor(
       prisma as unknown as never,
       config as unknown as never,
       geoProvider as unknown as never,
+      webhookEvents as unknown as never,
     );
   });
 

@@ -33,6 +33,8 @@ const METERED_KEYS: PlanLimitKey[] = [
   PlanLimitKey.MAX_TEAM_MEMBERS,
   PlanLimitKey.MONTHLY_CLICKS,
   PlanLimitKey.MONTHLY_API_REQUESTS,
+  PlanLimitKey.MAX_WEBHOOK_ENDPOINTS,
+  PlanLimitKey.MONTHLY_WEBHOOK_DELIVERIES,
 ];
 
 /**
@@ -199,6 +201,12 @@ export class BillingUsageService {
         return this.monthlyClickUsage(workspaceId, subscription);
       case PlanLimitKey.MONTHLY_API_REQUESTS:
         return this.monthlyApiRequestUsage(workspaceId, subscription);
+      case PlanLimitKey.MAX_WEBHOOK_ENDPOINTS:
+        return this.prisma.webhookEndpoint.count({
+          where: { workspaceId, deletedAt: null },
+        });
+      case PlanLimitKey.MONTHLY_WEBHOOK_DELIVERIES:
+        return this.monthlyWebhookDeliveryUsage(workspaceId, subscription);
       case PlanLimitKey.ANALYTICS_RETENTION_DAYS:
         return 0;
       default:
@@ -240,6 +248,27 @@ export class BillingUsageService {
     const { start, end } = this.resolveUsagePeriod(subscription);
     return this.prisma.apiUsageEvent.count({
       where: { workspaceId, createdAt: { gte: start, lt: end } },
+    });
+  }
+
+  /**
+   * Counts WebhookDelivery rows created over the current billing period
+   * (Sprint 9) — same period-resolution helper as the other monthly
+   * counters. Informational only, like monthlyClickUsage: never turned
+   * into a block by any caller. Silently dropping a real webhook
+   * delivery because a counter ticked over would defeat the point of a
+   * production-ready delivery system.
+   */
+  private async monthlyWebhookDeliveryUsage(
+    workspaceId: string,
+    subscription: SubscriptionWithPlan | null,
+  ): Promise<number> {
+    const { start, end } = this.resolveUsagePeriod(subscription);
+    return this.prisma.webhookDelivery.count({
+      where: {
+        webhookEndpoint: { workspaceId },
+        createdAt: { gte: start, lt: end },
+      },
     });
   }
 

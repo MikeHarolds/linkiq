@@ -22,7 +22,9 @@ import {
   Plus,
   ShieldOff,
   Trash2,
+  Webhook,
 } from 'lucide-react';
+import Link from 'next/link';
 import * as React from 'react';
 import { toast } from 'sonner';
 
@@ -153,6 +155,21 @@ export default function DevelopersDashboardPage() {
           <ExternalLink className="h-3.5 w-3.5" />
         </a>
       </div>
+
+      <Link
+        href="/dashboard/developers/webhooks"
+        className="flex items-center justify-between rounded-lg border p-4 transition-colors hover:bg-accent"
+      >
+        <div className="flex items-center gap-3">
+          <Webhook className="h-5 w-5 text-muted-foreground" />
+          <div>
+            <p className="font-medium">Webhooks</p>
+            <p className="text-sm text-muted-foreground">
+              Manage endpoints and view delivery history for LinkIQ events.
+            </p>
+          </div>
+        </div>
+      </Link>
 
       {isLoading && (
         <div

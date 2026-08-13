@@ -96,6 +96,13 @@ enum PlanLimitKey {
   /// enforced against browser JWT traffic or the public redirect path,
   /// see docs/architecture/api-keys.md.
   MONTHLY_API_REQUESTS
+  /// Sprint 9 — enforced at webhook endpoint creation, see
+  /// docs/architecture/webhooks.md.
+  MAX_WEBHOOK_ENDPOINTS
+  /// Sprint 9 — tracked on the usage dashboard only, never enforced
+  /// (same "informational, never blocking" treatment as MONTHLY_CLICKS)
+  /// — see docs/architecture/billing.md and docs/architecture/webhooks.md.
+  MONTHLY_WEBHOOK_DELIVERIES
 }
 
 /// Scoped capabilities an API key can be granted at creation (Sprint 8).
@@ -113,6 +120,9 @@ enum ApiKeyPermission {
   DOMAINS_READ
   DOMAINS_WRITE
   WORKSPACE_READ
+  /// Sprint 9 — see docs/architecture/webhooks.md.
+  WEBHOOKS_READ
+  WEBHOOKS_WRITE
 }
 
 /// Lifecycle of a workspace's Subscription. Deliberately does NOT store
@@ -171,16 +181,17 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships          WorkspaceMember[]
-  ownedOrgs            Organization[]       @relation("OrganizationOwner")
-  auditLogs            AuditLog[]
-  refreshTokens        RefreshToken[]
-  passwordResetTokens  PasswordResetToken[]
-  createdLinks         Link[]               @relation("LinkCreator")
-  createdQrCodes       QrCode[]             @relation("QrCodeCreator")
-  createdCampaigns     Campaign[]           @relation("CampaignCreator")
-  createdCustomDomains CustomDomain[]       @relation("CustomDomainCreator")
-  createdApiKeys       ApiKey[]             @relation("ApiKeyCreator")
+  memberships             WorkspaceMember[]
+  ownedOrgs               Organization[]       @relation("OrganizationOwner")
+  auditLogs               AuditLog[]
+  refreshTokens           RefreshToken[]
+  passwordResetTokens     PasswordResetToken[]
+  createdLinks            Link[]               @relation("LinkCreator")
+  createdQrCodes          QrCode[]             @relation("QrCodeCreator")
+  createdCampaigns        Campaign[]           @relation("CampaignCreator")
+  createdCustomDomains    CustomDomain[]       @relation("CustomDomainCreator")
+  createdApiKeys          ApiKey[]             @relation("ApiKeyCreator")
+  createdWebhookEndpoints WebhookEndpoint[]    @relation("WebhookEndpointCreator")
 
   @@index([email])
   @@map("users")
@@ -212,16 +223,18 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members        WorkspaceMember[]
-  auditLogs      AuditLog[]
-  links          Link[]
-  qrCodes        QrCode[]
-  campaigns      Campaign[]
-  customDomains  CustomDomain[]
-  subscription   Subscription?
-  invoices       Invoice[]
-  apiKeys        ApiKey[]
-  apiUsageEvents ApiUsageEvent[]
+  members          WorkspaceMember[]
+  auditLogs        AuditLog[]
+  links            Link[]
+  qrCodes          QrCode[]
+  campaigns        Campaign[]
+  customDomains    CustomDomain[]
+  subscription     Subscription?
+  invoices         Invoice[]
+  apiKeys          ApiKey[]
+  apiUsageEvents   ApiUsageEvent[]
+  webhookEndpoints WebhookEndpoint[]
+  webhookEvents    WebhookEvent[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
@@ -903,4 +916,169 @@ model ApiUsageEvent {
   @@index([workspaceId, createdAt])
   @@index([apiKeyId])
   @@map("api_usage_events")
+}
+
+// ---------------------------------------------------------------------------
+// Webhooks & Event Delivery (Sprint 9)
+// ---------------------------------------------------------------------------
+
+enum WebhookEndpointStatus {
+  ACTIVE
+  PAUSED
+  DISABLED
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  PROCESSING
+  DELIVERED
+  FAILED
+  EXHAUSTED
+}
+
+/// The webhook event catalog. SCREAMING_SNAKE Prisma values map 1:1 to
+/// dotted wire strings ("link.created") via the lookup table in
+/// webhooks/event-catalog.ts — a Prisma enum (not a plain string) so
+/// WebhookEndpoint.events can be a native Postgres array with the same
+/// query shape ApiKeyPermission[] already established in Sprint 8, and so
+/// WebhookEvent.type stays indexable/exhaustively-checkable. WEBHOOK_TEST
+/// is never a real domain event — see docs/architecture/webhooks.md §Test.
+enum WebhookEventType {
+  LINK_CREATED
+  LINK_UPDATED
+  LINK_DELETED
+  LINK_PAUSED
+  LINK_ACTIVATED
+  LINK_ARCHIVED
+  LINK_CLICKED
+  QRCODE_CREATED
+  QRCODE_UPDATED
+  QRCODE_DELETED
+  CAMPAIGN_CREATED
+  CAMPAIGN_UPDATED
+  CAMPAIGN_DELETED
+  CAMPAIGN_ACTIVATED
+  CAMPAIGN_PAUSED
+  CAMPAIGN_ARCHIVED
+  DOMAIN_CREATED
+  DOMAIN_VERIFIED
+  DOMAIN_ACTIVATED
+  DOMAIN_DISABLED
+  DOMAIN_DELETED
+  SUBSCRIPTION_CREATED
+  SUBSCRIPTION_PLAN_CHANGED
+  SUBSCRIPTION_CANCELED
+  SUBSCRIPTION_REACTIVATED
+  BILLING_LIMIT_REACHED
+  API_KEY_CREATED
+  API_KEY_REVOKED
+  API_KEY_DELETED
+  WEBHOOK_TEST
+}
+
+/// A workspace-scoped destination for signed HTTP event notifications.
+/// Unlike an API key (which only ever needs to be *verified* against a
+/// caller-supplied value, so a one-way hash suffices), a webhook secret
+/// must be *used* by LinkIQ itself, repeatedly, to HMAC-sign every future
+/// delivery — a one-way hash cannot support that. secretCiphertext is
+/// therefore AES-256-GCM ciphertext (WebhookSecretCipherService), not a
+/// hash, decrypted only inside the delivery worker at the moment of
+/// signing. Soft-deleted (not hard-deleted) so delivery history survives
+/// "deletion", matching Link/Campaign/CustomDomain's convention.
+model WebhookEndpoint {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  url         String
+
+  /// Non-secret display prefix (e.g. "whsec_ab12cd34") — safe to show in
+  /// the UI/audit metadata. secretCiphertext is the encrypted full
+  /// secret — never logged, never returned from any GET endpoint, never
+  /// included in audit metadata. See class docs above.
+  secretPrefix     String
+  secretCiphertext String
+
+  /// Subscribed event types — see WebhookEventType. A delivery is only
+  /// ever created for an ACTIVE endpoint whose events[] contains the
+  /// emitted type (see WebhookEventsService.emit).
+  events WebhookEventType[]
+
+  status WebhookEndpointStatus @default(ACTIVE)
+
+  /// Drives automatic disablement (docs/architecture/webhooks.md §21) —
+  /// incremented once per delivery that reaches a terminal failure
+  /// (EXHAUSTED), reset to 0 on any successful delivery. Not a count of
+  /// individual retry attempts.
+  consecutiveFailures Int @default(0)
+
+  lastDeliveryAt DateTime?
+  lastSuccessAt  DateTime?
+  lastFailureAt  DateTime?
+
+  createdById String? @db.Uuid
+  createdBy   User?   @relation("WebhookEndpointCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deliveries WebhookDelivery[]
+
+  @@index([workspaceId])
+  @@map("webhook_endpoints")
+}
+
+/// One immutable record of "this thing happened" — created exactly once
+/// per logical occurrence, with a globally unique, application-generated
+/// id ("evt_..."). Multiple WebhookDelivery rows can reference the same
+/// WebhookEvent (one per subscribed endpoint), so every endpoint
+/// receiving the same event gets byte-identical payload data and the
+/// exact same event id on every retry — see docs/architecture/webhooks.md.
+model WebhookEvent {
+  id          String           @id
+  workspaceId String           @db.Uuid
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  type        WebhookEventType
+  resourceId  String?
+  payload     Json
+
+  createdAt DateTime @default(now())
+
+  deliveries WebhookDelivery[]
+
+  @@index([workspaceId, createdAt])
+  @@map("webhook_events")
+}
+
+/// One endpoint's attempt(s) to receive one WebhookEvent. Unique on
+/// (webhookEndpointId, eventId) so a retry (automatic or manual) can
+/// never create a second logical delivery row — every retry increments
+/// attemptCount on this same row instead. See
+/// webhooks/queue/webhook-delivery.processor.ts.
+model WebhookDelivery {
+  id                String           @id @default(uuid()) @db.Uuid
+  webhookEndpointId String           @db.Uuid
+  webhookEndpoint   WebhookEndpoint  @relation(fields: [webhookEndpointId], references: [id], onDelete: Cascade)
+  eventId           String
+  event             WebhookEvent     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventType         WebhookEventType
+
+  attemptCount   Int                   @default(0)
+  status         WebhookDeliveryStatus @default(PENDING)
+  responseStatus Int?
+  responseTimeMs Int?
+  lastAttemptAt  DateTime?
+  nextAttemptAt  DateTime?
+  deliveredAt    DateTime?
+  failureReason  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([webhookEndpointId, eventId])
+  @@index([webhookEndpointId, createdAt])
+  @@index([status])
+  @@map("webhook_deliveries")
 }

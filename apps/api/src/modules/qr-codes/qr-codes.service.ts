@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { QrFormat, type QrCode } from '@prisma/client';
+import { QrFormat, WebhookEventType, type QrCode } from '@prisma/client';
 
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import { slugify } from '../../common/utils/slugify';
@@ -11,6 +11,8 @@ import { AuditService } from '../audit/audit.service';
 import { BillingUsageService } from '../billing/billing-usage.service';
 import { PublicUrlService } from '../domains/public-url.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertCanUseOrEmitLimitReached } from '../webhooks/utils/assert-can-use-or-emit';
+import { WebhookEventsService } from '../webhooks/webhook-events.service';
 
 import type { CreateQrCodeDto } from './dto/create-qr-code.dto';
 import type { UpdateQrCodeDto } from './dto/update-qr-code.dto';
@@ -53,6 +55,7 @@ export class QrCodesService {
     private readonly generator: QrGeneratorService,
     private readonly publicUrl: PublicUrlService,
     private readonly billingUsage: BillingUsageService,
+    private readonly webhookEvents: WebhookEventsService,
   ) {}
 
   /**
@@ -103,7 +106,13 @@ export class QrCodesService {
     ctx: RequestContext,
   ): Promise<QrCode> {
     await this.findLinkOrThrow(workspaceId, linkId);
-    await this.billingUsage.assertCanUse(workspaceId, 'MAX_QR_CODES', 'QR codes');
+    await assertCanUseOrEmitLimitReached(
+      this.billingUsage,
+      this.webhookEvents,
+      workspaceId,
+      'MAX_QR_CODES',
+      'QR codes',
+    );
 
     // Validate the EFFECTIVE config (explicit values merged with the same
     // defaults schema.prisma/the migration apply) — not just whatever the
@@ -148,6 +157,18 @@ export class QrCodesService {
       metadata: { linkId, name: qrCode.name },
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
+    });
+
+    await this.webhookEvents.emit({
+      type: WebhookEventType.QRCODE_CREATED,
+      workspaceId,
+      resourceId: qrCode.id,
+      data: {
+        id: qrCode.id,
+        linkId,
+        name: qrCode.name,
+        format: qrCode.format,
+      },
     });
 
     return qrCode;
@@ -274,6 +295,13 @@ export class QrCodesService {
       userAgent: ctx.userAgent,
     });
 
+    await this.webhookEvents.emit({
+      type: WebhookEventType.QRCODE_UPDATED,
+      workspaceId,
+      resourceId: qrId,
+      data: { id: updated.id, name: updated.name, fields: Object.keys(data) },
+    });
+
     return updated;
   }
 
@@ -298,6 +326,13 @@ export class QrCodesService {
       workspaceId,
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
+    });
+
+    await this.webhookEvents.emit({
+      type: WebhookEventType.QRCODE_DELETED,
+      workspaceId,
+      resourceId: qrId,
+      data: { id: qrId },
     });
   }
 

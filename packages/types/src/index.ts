@@ -400,7 +400,9 @@ export type ApiKeyPermission =
   | 'ANALYTICS_READ'
   | 'DOMAINS_READ'
   | 'DOMAINS_WRITE'
-  | 'WORKSPACE_READ';
+  | 'WORKSPACE_READ'
+  | 'WEBHOOKS_READ'
+  | 'WEBHOOKS_WRITE';
 
 /** Derived, not stored — see docs/architecture/api-keys.md. */
 export type ApiKeyStatus = 'ACTIVE' | 'EXPIRED' | 'REVOKED';
@@ -466,4 +468,127 @@ export interface ApiPlanLimitReachedError {
 export interface ApiRateLimitExceededError {
   code: 'API_RATE_LIMIT_EXCEEDED';
   message: string;
+}
+
+// ---------------------------------------------------------------------
+// Webhooks & Event Delivery (Sprint 9)
+// ---------------------------------------------------------------------
+
+/** Dotted wire-format event type strings — see event-catalog.ts (the
+ * source of truth) and docs/api/webhooks.md's full event catalog table.
+ * `webhook.test` is deliberately excluded: it is never subscribable,
+ * only ever sent by the "send test event" action. */
+export type WebhookEventTypeName =
+  | 'link.created'
+  | 'link.updated'
+  | 'link.deleted'
+  | 'link.paused'
+  | 'link.activated'
+  | 'link.archived'
+  | 'link.clicked'
+  | 'qrcode.created'
+  | 'qrcode.updated'
+  | 'qrcode.deleted'
+  | 'campaign.created'
+  | 'campaign.updated'
+  | 'campaign.deleted'
+  | 'campaign.activated'
+  | 'campaign.paused'
+  | 'campaign.archived'
+  | 'domain.created'
+  | 'domain.verified'
+  | 'domain.activated'
+  | 'domain.disabled'
+  | 'domain.deleted'
+  | 'subscription.created'
+  | 'subscription.plan_changed'
+  | 'subscription.canceled'
+  | 'subscription.reactivated'
+  | 'billing.limit_reached'
+  | 'api_key.created'
+  | 'api_key.revoked'
+  | 'api_key.deleted';
+
+export type WebhookEndpointStatus = 'ACTIVE' | 'PAUSED' | 'DISABLED';
+
+export type WebhookDeliveryStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'DELIVERED'
+  | 'FAILED'
+  | 'EXHAUSTED';
+
+export interface WebhookEndpointDto {
+  id: string;
+  workspaceId: string;
+  name: string;
+  url: string;
+  /** Safe to display, e.g. "whsec_ab12cd34" — never the full secret. */
+  secretPrefix: string;
+  events: WebhookEventTypeName[];
+  status: WebhookEndpointStatus;
+  consecutiveFailures: number;
+  lastDeliveryAt: string | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  createdById: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Only create and rotate-secret responses ever carry `secret` — the
+ * full signing secret, shown exactly once. Every other read returns
+ * WebhookEndpointDto. */
+export interface CreatedWebhookEndpointDto extends WebhookEndpointDto {
+  secret: string;
+}
+
+export interface CreateWebhookEndpointPayload {
+  name: string;
+  url: string;
+  /** Explicit, non-empty — there is no implicit "subscribe to everything". */
+  events: WebhookEventTypeName[];
+}
+
+export interface UpdateWebhookEndpointPayload {
+  name?: string;
+  url?: string;
+  events?: WebhookEventTypeName[];
+}
+
+export interface WebhookDeliveryDto {
+  id: string;
+  webhookEndpointId: string;
+  eventId: string;
+  eventType: WebhookEventTypeName;
+  attemptCount: number;
+  status: WebhookDeliveryStatus;
+  responseStatus: number | null;
+  responseTimeMs: number | null;
+  lastAttemptAt: string | null;
+  nextAttemptAt: string | null;
+  deliveredAt: string | null;
+  failureReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Returned only by the single-delivery detail endpoint — includes the
+ * event envelope for inspection, still never the endpoint's secret. */
+export interface WebhookDeliveryDetailDto extends WebhookDeliveryDto {
+  event: {
+    id: string;
+    type: WebhookEventTypeName | 'webhook.test';
+    createdAt: string;
+    data: Record<string, unknown>;
+  };
+}
+
+/** The exact JSON body signed and POSTed to every webhook endpoint. */
+export interface WebhookEventEnvelope {
+  id: string;
+  type: WebhookEventTypeName | 'webhook.test';
+  createdAt: string;
+  workspaceId: string;
+  data: Record<string, unknown>;
 }

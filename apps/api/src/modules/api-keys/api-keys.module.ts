@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 
 import { BillingModule } from '../billing/billing.module';
+import { WebhooksModule } from '../webhooks/webhooks.module';
 
 import { ApiKeysAuthService } from './api-keys-auth.service';
 import { ApiKeysController } from './api-keys.controller';
@@ -29,7 +30,11 @@ import { API_USAGE_QUEUE } from './queue/api-usage.types';
  * in WorkspaceRolesGuard, which those modules already depend on.
  */
 @Module({
-  imports: [BillingModule, BullModule.registerQueue({ name: API_USAGE_QUEUE })],
+  imports: [
+    BillingModule,
+    WebhooksModule,
+    BullModule.registerQueue({ name: API_USAGE_QUEUE }),
+  ],
   controllers: [ApiKeysController],
   providers: [
     ApiKeysService,

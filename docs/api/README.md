@@ -1,9 +1,10 @@
 # API Documentation
 
-> **Status:** Sprints 0–8 complete. This file is the original Sprint 0
+> **Status:** Sprints 0–9 complete. This file is the original Sprint 0
 > placeholder and is stale for anything past `/health` — see
 > [`developer-guide.md`](./developer-guide.md) for API-key authentication,
-> permissions, endpoints, pagination, rate limiting, and error codes, or
+> permissions, endpoints, pagination, rate limiting, and error codes,
+> [`webhooks.md`](./webhooks.md) for outbound event delivery, or
 > `/api/v1/docs` for the live, always-current Swagger reference.
 
 ## Interactive documentation

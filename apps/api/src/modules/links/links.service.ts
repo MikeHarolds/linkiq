@@ -4,7 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { LinkStatus, type CustomDomain, type Link } from '@prisma/client';
+import {
+  LinkStatus,
+  WebhookEventType,
+  type CustomDomain,
+  type Link,
+} from '@prisma/client';
 
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import { isUniqueConstraintViolation } from '../../common/utils/prisma-errors';
@@ -19,6 +24,8 @@ import { validateUtmValues, type UtmValues } from '../campaigns/utils/utm';
 import { DomainsService } from '../domains/domains.service';
 import { PublicUrlService } from '../domains/public-url.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertCanUseOrEmitLimitReached } from '../webhooks/utils/assert-can-use-or-emit';
+import { WebhookEventsService } from '../webhooks/webhook-events.service';
 
 import type { CreateLinkDto } from './dto/create-link.dto';
 import type { QueryLinksDto } from './dto/query-links.dto';
@@ -60,6 +67,7 @@ export class LinksService {
     private readonly domains: DomainsService,
     private readonly publicUrlService: PublicUrlService,
     private readonly billingUsage: BillingUsageService,
+    private readonly webhookEvents: WebhookEventsService,
   ) {}
 
   /** Validates a caller-supplied customDomainId (create/update): must
@@ -187,7 +195,13 @@ export class LinksService {
       throw new BadRequestException('expiresAt must be in the future');
     }
 
-    await this.billingUsage.assertCanUse(workspaceId, 'MAX_LINKS', 'links');
+    await assertCanUseOrEmitLimitReached(
+      this.billingUsage,
+      this.webhookEvents,
+      workspaceId,
+      'MAX_LINKS',
+      'links',
+    );
 
     await this.resolveCustomDomainId(workspaceId, dto.customDomainId);
 
@@ -223,7 +237,23 @@ export class LinksService {
       userAgent: ctx.userAgent,
     });
 
-    return this.toResponse(link);
+    const response = this.toResponse(link);
+    await this.webhookEvents.emit({
+      type: WebhookEventType.LINK_CREATED,
+      workspaceId,
+      resourceId: link.id,
+      data: {
+        id: link.id,
+        shortCode: link.shortCode,
+        publicUrl: response.publicUrl,
+        destinationUrl: link.destinationUrl,
+        status: link.status,
+        campaignId: link.campaignId,
+        customDomainId: link.customDomainId,
+      },
+    });
+
+    return response;
   }
 
   private async createWithCustomSlug(
@@ -518,7 +548,22 @@ export class LinksService {
       userAgent: ctx.userAgent,
     });
 
-    return this.toResponse(updated);
+    const response = this.toResponse(updated);
+    await this.webhookEvents.emit({
+      type: WebhookEventType.LINK_UPDATED,
+      workspaceId,
+      resourceId: linkId,
+      data: {
+        id: updated.id,
+        shortCode: updated.shortCode,
+        publicUrl: response.publicUrl,
+        destinationUrl: updated.destinationUrl,
+        status: updated.status,
+        fields: Object.keys(dto),
+      },
+    });
+
+    return response;
   }
 
   async transitionStatus(
@@ -544,6 +589,11 @@ export class LinksService {
       [LinkStatus.PAUSED]: 'link.paused',
       [LinkStatus.ARCHIVED]: 'link.archived',
     };
+    const eventByStatus: Record<LinkStatus, WebhookEventType> = {
+      [LinkStatus.ACTIVE]: WebhookEventType.LINK_ACTIVATED,
+      [LinkStatus.PAUSED]: WebhookEventType.LINK_PAUSED,
+      [LinkStatus.ARCHIVED]: WebhookEventType.LINK_ARCHIVED,
+    };
 
     await this.audit.record({
       action: actionByStatus[nextStatus],
@@ -554,6 +604,18 @@ export class LinksService {
       metadata: { previousStatus: existing.status, newStatus: nextStatus },
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
+    });
+
+    await this.webhookEvents.emit({
+      type: eventByStatus[nextStatus],
+      workspaceId,
+      resourceId: linkId,
+      data: {
+        id: updated.id,
+        shortCode: updated.shortCode,
+        previousStatus: existing.status,
+        status: updated.status,
+      },
     });
 
     return this.toResponse(updated);
@@ -590,6 +652,13 @@ export class LinksService {
       workspaceId,
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
+    });
+
+    await this.webhookEvents.emit({
+      type: WebhookEventType.LINK_DELETED,
+      workspaceId,
+      resourceId: linkId,
+      data: { id: linkId, shortCode: existing.shortCode },
     });
   }
 }

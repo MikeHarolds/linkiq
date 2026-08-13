@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { BillingModule } from '../billing/billing.module';
+import { WebhooksModule } from '../webhooks/webhooks.module';
 
 import { DomainCacheService } from './domain-cache.service';
 import { DomainResolverService } from './domain-resolver.service';
@@ -29,7 +30,7 @@ import {
  * integration would be wired in.
  */
 @Module({
-  imports: [BillingModule],
+  imports: [BillingModule, WebhooksModule],
   controllers: [DomainsController],
   providers: [
     DomainsService,

@@ -1,7 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
+import { Prisma, WebhookEventType } from '@prisma/client';
 import type { Job } from 'bullmq';
 
 import { isUniqueConstraintViolation } from '../../../common/utils/prisma-errors';
@@ -10,6 +10,7 @@ import {
   type RecordClickJobData,
 } from '../../links/queue/click-event.types';
 import { PrismaService } from '../../prisma/prisma.service';
+import { WebhookEventsService } from '../../webhooks/webhook-events.service';
 import {
   GEO_IP_PROVIDER,
   type GeoIpProvider,
@@ -50,6 +51,7 @@ export class ClickEventProcessor extends WorkerHost {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     @Inject(GEO_IP_PROVIDER) private readonly geoProvider: GeoIpProvider,
+    private readonly webhookEvents: WebhookEventsService,
   ) {
     super();
   }
@@ -158,6 +160,31 @@ export class ClickEventProcessor extends WorkerHost {
         { eventId, linkId, isBot: ua.isBot, country: geo.country },
         'Click event processed',
       );
+
+      // Fully off the redirect hot path — this runs inside the async
+      // click-processing worker, well after RedirectService has already
+      // responded. Only privacy-filtered fields already used for
+      // analytics display (never the raw IP or visitorHash) — see
+      // docs/architecture/webhooks.md's click-event privacy section.
+      await this.webhookEvents.emit({
+        type: WebhookEventType.LINK_CLICKED,
+        workspaceId,
+        resourceId: linkId,
+        data: {
+          eventId,
+          linkId,
+          occurredAt: occurredAtDate.toISOString(),
+          country: geo.country,
+          region: geo.region,
+          city: geo.city,
+          deviceType: ua.deviceType,
+          os: ua.os,
+          browser: ua.browser,
+          referrerDomain: referrer.domain,
+          referrerCategory: referrer.category,
+          isBot: ua.isBot,
+        },
+      });
     } catch (error) {
       if (isUniqueConstraintViolation(error)) {
         // Already processed by a prior attempt at this same job — a

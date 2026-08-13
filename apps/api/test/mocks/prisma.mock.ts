@@ -117,6 +117,25 @@ export function createMockPrismaService() {
       create: jest.fn(),
       count: jest.fn(),
     },
+    webhookEndpoint: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      count: jest.fn(),
+    },
+    webhookEvent: {
+      create: jest.fn(),
+    },
+    webhookDelivery: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      count: jest.fn(),
+    },
     $queryRawUnsafe: jest.fn(),
     $queryRaw: jest.fn(),
     // Executes the callback with `this` (the mock itself) standing in for

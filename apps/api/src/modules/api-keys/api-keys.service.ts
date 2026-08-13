@@ -1,10 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { ApiKey } from '@prisma/client';
+import { WebhookEventType, type ApiKey } from '@prisma/client';
 
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import { generateApiKey } from '../../common/utils/api-key';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { WebhookEventsService } from '../webhooks/webhook-events.service';
 
 import type { CreateApiKeyDto } from './dto/create-api-key.dto';
 
@@ -32,6 +33,7 @@ export class ApiKeysService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly webhookEvents: WebhookEventsService,
   ) {}
 
   /**
@@ -73,6 +75,18 @@ export class ApiKeysService {
       },
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
+    });
+
+    await this.webhookEvents.emit({
+      type: WebhookEventType.API_KEY_CREATED,
+      workspaceId,
+      resourceId: apiKey.id,
+      data: {
+        id: apiKey.id,
+        name: apiKey.name,
+        keyPrefix: apiKey.keyPrefix,
+        permissions: apiKey.permissions,
+      },
     });
 
     return { ...apiKey, key: rawKey };
@@ -128,6 +142,13 @@ export class ApiKeysService {
       userAgent: ctx.userAgent,
     });
 
+    await this.webhookEvents.emit({
+      type: WebhookEventType.API_KEY_REVOKED,
+      workspaceId,
+      resourceId: apiKey.id,
+      data: { id: apiKey.id, name: apiKey.name, keyPrefix: apiKey.keyPrefix },
+    });
+
     return apiKey;
   }
 
@@ -150,6 +171,13 @@ export class ApiKeysService {
       metadata: { name: existing.name, keyPrefix: existing.keyPrefix },
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
+    });
+
+    await this.webhookEvents.emit({
+      type: WebhookEventType.API_KEY_DELETED,
+      workspaceId,
+      resourceId: existing.id,
+      data: { id: existing.id, name: existing.name, keyPrefix: existing.keyPrefix },
     });
   }
 }

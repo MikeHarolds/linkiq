@@ -8,6 +8,7 @@ import {
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import type { AuditService } from '../audit/audit.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { WebhookEventsService } from '../webhooks/webhook-events.service';
 
 import { ApiKeysService } from './api-keys.service';
 import type { CreateApiKeyDto } from './dto/create-api-key.dto';
@@ -34,6 +35,7 @@ function makeApiKeyRow(overrides: Partial<Record<string, unknown>> = {}) {
 describe('ApiKeysService', () => {
   let prisma: MockPrismaService;
   let audit: AuditService;
+  let webhookEvents: { emit: jest.Mock };
   let service: ApiKeysService;
 
   beforeEach(() => {
@@ -41,7 +43,12 @@ describe('ApiKeysService', () => {
     audit = {
       record: jest.fn().mockResolvedValue(undefined),
     } as unknown as AuditService;
-    service = new ApiKeysService(prisma as unknown as PrismaService, audit);
+    webhookEvents = { emit: jest.fn().mockResolvedValue(undefined) };
+    service = new ApiKeysService(
+      prisma as unknown as PrismaService,
+      audit,
+      webhookEvents as unknown as WebhookEventsService,
+    );
   });
 
   describe('create', () => {

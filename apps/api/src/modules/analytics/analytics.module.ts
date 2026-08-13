@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 
 import { CLICK_EVENT_QUEUE } from '../links/queue/click-event.types';
+import { WebhooksModule } from '../webhooks/webhooks.module';
 
 import { AnalyticsCacheService } from './analytics-cache.service';
 import { AnalyticsController } from './analytics.controller';
@@ -25,7 +26,10 @@ import { ClickEventProcessor } from './processors/click-event.processor';
  * geo/geo-ip-provider.interface.ts.
  */
 @Module({
-  imports: [BullModule.registerQueue({ name: CLICK_EVENT_QUEUE })],
+  imports: [
+    BullModule.registerQueue({ name: CLICK_EVENT_QUEUE }),
+    WebhooksModule,
+  ],
   controllers: [AnalyticsController],
   providers: [
     AnalyticsService,

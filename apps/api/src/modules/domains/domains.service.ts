@@ -5,13 +5,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DomainStatus, type CustomDomain } from '@prisma/client';
+import { DomainStatus, WebhookEventType, type CustomDomain } from '@prisma/client';
 
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import { isUniqueConstraintViolation } from '../../common/utils/prisma-errors';
 import { AuditService } from '../audit/audit.service';
 import { BillingUsageService } from '../billing/billing-usage.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertCanUseOrEmitLimitReached } from '../webhooks/utils/assert-can-use-or-emit';
+import { WebhookEventsService } from '../webhooks/webhook-events.service';
 
 import { DomainCacheService } from './domain-cache.service';
 import { DomainResolverService } from './domain-resolver.service';
@@ -52,6 +54,7 @@ export class DomainsService {
     @Inject(DOMAIN_VERIFICATION_PROVIDER)
     private readonly verificationProvider: DomainVerificationProvider,
     private readonly billingUsage: BillingUsageService,
+    private readonly webhookEvents: WebhookEventsService,
   ) {}
 
   private assertNotReservedHost(normalizedDomain: string): void {
@@ -74,7 +77,9 @@ export class DomainsService {
     }
     const normalizedDomain = validation.normalized!;
     this.assertNotReservedHost(normalizedDomain);
-    await this.billingUsage.assertCanUse(
+    await assertCanUseOrEmitLimitReached(
+      this.billingUsage,
+      this.webhookEvents,
       workspaceId,
       'MAX_CUSTOM_DOMAINS',
       'custom domains',
@@ -100,6 +105,13 @@ export class DomainsService {
         metadata: { domain: normalizedDomain },
         ipAddress: ctx.ipAddress,
         userAgent: ctx.userAgent,
+      });
+
+      await this.webhookEvents.emit({
+        type: WebhookEventType.DOMAIN_CREATED,
+        workspaceId,
+        resourceId: domain.id,
+        data: { id: domain.id, domain: domain.domain, status: domain.status },
       });
 
       return domain;
@@ -304,6 +316,15 @@ export class DomainsService {
       userAgent: ctx.userAgent,
     });
 
+    if (verified) {
+      await this.webhookEvents.emit({
+        type: WebhookEventType.DOMAIN_VERIFIED,
+        workspaceId,
+        resourceId: domainId,
+        data: { id: domainId, domain: existing.normalizedDomain },
+      });
+    }
+
     return updated;
   }
 
@@ -340,6 +361,13 @@ export class DomainsService {
       userAgent: ctx.userAgent,
     });
 
+    await this.webhookEvents.emit({
+      type: WebhookEventType.DOMAIN_ACTIVATED,
+      workspaceId,
+      resourceId: domainId,
+      data: { id: domainId, domain: existing.normalizedDomain },
+    });
+
     return updated;
   }
 
@@ -373,6 +401,13 @@ export class DomainsService {
       workspaceId,
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
+    });
+
+    await this.webhookEvents.emit({
+      type: WebhookEventType.DOMAIN_DISABLED,
+      workspaceId,
+      resourceId: domainId,
+      data: { id: domainId, domain: existing.normalizedDomain },
     });
 
     return updated;
@@ -449,6 +484,13 @@ export class DomainsService {
       workspaceId,
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
+    });
+
+    await this.webhookEvents.emit({
+      type: WebhookEventType.DOMAIN_DELETED,
+      workspaceId,
+      resourceId: domainId,
+      data: { id: domainId, domain: existing.normalizedDomain },
     });
   }
 }
