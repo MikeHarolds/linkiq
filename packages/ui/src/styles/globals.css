@@ -10,19 +10,27 @@
     --card-foreground: 222 47% 11%;
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
-    --primary: 221 83% 53%;
-    --primary-foreground: 210 40% 98%;
+    /* LinkIQ brand orange (#F97316). Foreground is near-black (reusing
+       --foreground) rather than white — white-on-#F97316 measures ~2.8:1
+       contrast (fails WCAG AA), while near-black-on-#F97316 measures
+       ~6.2:1 (comfortably passes). See globals.css history / design
+       notes rather than assuming white text on an orange button. */
+    --primary: 25 95% 53%;
+    --primary-foreground: 222 47% 11%;
     --secondary: 210 40% 96%;
     --secondary-foreground: 222 47% 11%;
     --muted: 210 40% 96%;
     --muted-foreground: 215 16% 47%;
-    --accent: 210 40% 96%;
+    /* Light-orange tint — subtle section/card backgrounds and the
+       hover/active state every shared component already keys off
+       (Button ghost/outline, DropdownMenuItem, etc.). */
+    --accent: 24 100% 96%;
     --accent-foreground: 222 47% 11%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 210 40% 98%;
     --border: 214 32% 91%;
     --input: 214 32% 91%;
-    --ring: 221 83% 53%;
+    --ring: 25 95% 53%;
     --radius: 0.5rem;
   }
 
@@ -33,19 +41,27 @@
     --card-foreground: 210 40% 98%;
     --popover: 222 47% 8%;
     --popover-foreground: 210 40% 98%;
-    --primary: 217 91% 60%;
-    --primary-foreground: 222 47% 11%;
+    /* Lighter/brighter orange than the light theme's --primary (~Tailwind
+       orange-400 vs orange-500) so it still reads clearly against a
+       near-black page background. Foreground reuses the dark theme's own
+       --background for the same near-black-on-orange contrast reasoning
+       as the light theme above. */
+    --primary: 27 96% 61%;
+    --primary-foreground: 222 47% 6%;
     --secondary: 217 33% 17%;
     --secondary-foreground: 210 40% 98%;
     --muted: 217 33% 17%;
     --muted-foreground: 215 20% 65%;
-    --accent: 217 33% 17%;
+    /* Dark, desaturated warm tint — the dark-mode equivalent of the light
+       theme's orange accent (a literal light tint would be too bright
+       against a near-black background). */
+    --accent: 20 35% 16%;
     --accent-foreground: 210 40% 98%;
     --destructive: 0 63% 31%;
     --destructive-foreground: 210 40% 98%;
     --border: 217 33% 17%;
     --input: 217 33% 17%;
-    --ring: 224 76% 48%;
+    --ring: 27 96% 61%;
   }
 
   * {
@@ -53,5 +69,16 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

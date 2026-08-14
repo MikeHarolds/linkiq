@@ -1,38 +1,21 @@
-import { Button } from '@linkiq/ui';
-import Link from 'next/link';
 import type { ReactNode } from 'react';
 
+import { SiteFooter } from '@/components/marketing/site-footer';
+import { SiteHeader } from '@/components/marketing/site-header';
+
 /**
- * Layout for public marketing pages (landing, pricing, etc.).
- * Adds a simple top nav and footer around every route in this group.
+ * Layout for public marketing pages (landing page today; pricing/etc.
+ * could join this group later). Wraps every route in this group with
+ * the marketing-specific header and footer — deliberately separate
+ * from (dashboard)/layout.tsx and (admin)/layout.tsx, which have their
+ * own authenticated shells.
  */
 export default function MarketingLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
-        <div className="container flex h-16 items-center justify-between">
-          <Link href="/" className="text-lg font-semibold tracking-tight">
-            LinkIQ
-          </Link>
-          <nav className="flex items-center gap-2">
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/login">Log in</Link>
-            </Button>
-            <Button asChild size="sm">
-              <Link href="/register">Sign up</Link>
-            </Button>
-          </nav>
-        </div>
-      </header>
-
+      <SiteHeader />
       <main className="flex-1">{children}</main>
-
-      <footer className="border-t">
-        <div className="container flex h-16 items-center justify-between text-sm text-muted-foreground">
-          <span>© {new Date().getFullYear()} LinkIQ. All rights reserved.</span>
-          <span>Built with Next.js &amp; NestJS</span>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }
