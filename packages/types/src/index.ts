@@ -294,7 +294,9 @@ export type PlanLimitKey =
   | 'MAX_TEAM_MEMBERS'
   | 'MONTHLY_CLICKS'
   | 'ANALYTICS_RETENTION_DAYS'
-  | 'MONTHLY_API_REQUESTS';
+  | 'MONTHLY_API_REQUESTS'
+  | 'MAX_WEBHOOK_ENDPOINTS'
+  | 'MONTHLY_WEBHOOK_DELIVERIES';
 
 export type SubscriptionStatus =
   'TRIALING' | 'ACTIVE' | 'PAST_DUE' | 'PAUSED' | 'CANCELED' | 'EXPIRED';
@@ -322,6 +324,7 @@ export interface PlanDto {
   isActive: boolean;
   displayOrder: number;
   limits: PlanLimitDto[];
+  providerPlanId: string | null;
 }
 
 export interface UsageSnapshotDto {
@@ -604,4 +607,252 @@ export interface WebhookEventEnvelope {
   createdAt: string;
   workspaceId: string;
   data: Record<string, unknown>;
+}
+
+// --- Platform Administration / Super Admin (Sprint 11) ---
+
+/** Generic paginated-list shape for the new admin endpoints — every
+ * pre-Sprint-11 resource used its own `Paginated<X>Dto` name instead;
+ * this one is shared since all admin list types are new together. */
+export interface Paginated<T> {
+  items: T[];
+  pagination: PaginationMeta;
+}
+
+export type TimeRangeValue = 'today' | '7d' | '30d' | '90d';
+
+export interface PlatformOverviewDto {
+  users: { total: number; active: number };
+  workspaces: { total: number };
+  links: { active: number };
+  clicks: { inRange: number };
+  subscriptions: { active: number; trialing: number; pastDue: number };
+  mrr: { amount: number; currency: string | null; note: string | null };
+  revenue: { collectedInRange: number; currency: string | null };
+  paymentFailures: { inRange: number };
+  apiRequests: { inRange: number };
+  webhookFailures: { inRange: number };
+  domains: { total: number; active: number };
+}
+
+export interface AdminUserListItemDto {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  avatarUrl: string | null;
+  globalRole: GlobalRole;
+  isActive: boolean;
+  emailVerified: boolean;
+  createdAt: string;
+  workspaceCount: number;
+  lastLoginAt: string | null;
+}
+
+export interface AdminUserDetailDto extends AdminUserListItemDto {
+  updatedAt: string;
+  workspaces: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    role: WorkspaceRole;
+    planName: string | null;
+    planSlug: string | null;
+    subscriptionStatus: string | null;
+  }>;
+}
+
+export interface AdminAuditLogDto {
+  id: string;
+  action: string;
+  entity: string;
+  entityId: string | null;
+  createdAt: string;
+  metadata: unknown;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  user: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+  } | null;
+  workspace: { id: string; name: string; slug: string } | null;
+}
+
+export interface AdminWorkspaceListItemDto {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: string;
+  organizationName: string;
+  owner: { id: string; email: string; firstName: string; lastName: string };
+  memberCount: number;
+  linkCount: number;
+  domainCount: number;
+  planName: string | null;
+  planSlug: string | null;
+  subscriptionStatus: string | null;
+}
+
+export interface AdminWorkspaceDetailDto extends AdminWorkspaceListItemDto {
+  members: Array<{
+    id: string;
+    role: WorkspaceRole;
+    user: { id: string; email: string; firstName: string; lastName: string };
+  }>;
+  subscription: SubscriptionDto | null;
+  usage: UsageSnapshotDto[];
+  domains: Array<{
+    id: string;
+    domain: string;
+    status: DomainStatus;
+    isPrimary: boolean;
+  }>;
+  apiKeys: ApiKeyDto[];
+  webhookEndpoints: Array<{
+    id: string;
+    name: string;
+    url: string;
+    status: WebhookEndpointStatus;
+  }>;
+  recentAudit: AdminAuditLogDto[];
+}
+
+/** Raw-shaped (not the customer-facing computed SubscriptionDto — no
+ * derived effectiveStatus/billingPeriod/trial/cancellation grouping,
+ * just the underlying Subscription row plus its plan and workspace) —
+ * sufficient for the admin table/detail views without importing
+ * billing.controller.ts's private response-shaping helpers. */
+export interface AdminSubscriptionListItemDto {
+  id: string;
+  workspaceId: string;
+  status: SubscriptionStatus;
+  currentPeriodStart: string;
+  currentPeriodEnd: string | null;
+  trialStart: string | null;
+  trialEnd: string | null;
+  cancelAt: string | null;
+  canceledAt: string | null;
+  pastDueSince: string | null;
+  provider: string | null;
+  providerCustomerId: string | null;
+  providerSubscriptionId: string | null;
+  providerPriceId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  plan: PlanDto;
+  workspace: {
+    id: string;
+    name: string;
+    slug: string;
+    organization: {
+      name: string;
+      owner: { id: string; email: string; firstName: string; lastName: string };
+    };
+  };
+}
+
+export interface AdminInvoiceDto extends InvoiceDto {
+  failureReason: string | null;
+  workspace: { id: string; name: string; slug: string };
+}
+
+export interface PlatformSettingsDto {
+  billingProvider: string;
+  webhooks: {
+    maxAttempts: number;
+    backoffBaseMs: number;
+    autoDisableThreshold: number;
+  };
+  domainVerificationMode: string;
+}
+
+export interface PaymentsSettingsDto {
+  provider: string;
+  secretKeyConfigured: boolean;
+  publicKeyConfigured: boolean;
+  mode: 'test' | 'live' | 'unknown';
+  pastDueGraceDays: number;
+  apiBaseUrl: string;
+}
+
+export interface PaystackConnectionTestDto {
+  connected: boolean;
+  message: string;
+}
+
+export interface ApiUsageOverviewDto {
+  totalRequests: number;
+  failedRequests: number;
+  activeApiKeys: number;
+  requestsOverTime: Array<{ date: string; count: number }>;
+  topWorkspaces: Array<{
+    workspaceId: string;
+    workspaceName: string;
+    requests: number;
+  }>;
+}
+
+export interface WebhookOpsOverviewDto {
+  endpointCount: number;
+  activeEndpointCount: number;
+  deliveriesByStatus: Record<WebhookDeliveryStatus, number>;
+  successRate: number | null;
+  recentEvents: Array<{
+    id: string;
+    type: string;
+    workspaceId: string;
+    workspaceName: string;
+    createdAt: string;
+  }>;
+}
+
+export interface AdminWebhookEndpointListItemDto {
+  id: string;
+  name: string;
+  url: string;
+  status: WebhookEndpointStatus;
+  workspaceId: string;
+  workspaceName: string;
+  consecutiveFailures: number;
+  lastDeliveryAt: string | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  createdAt: string;
+}
+
+export interface AdminDomainListItemDto {
+  id: string;
+  workspaceId: string;
+  domain: string;
+  normalizedDomain: string;
+  status: DomainStatus;
+  isPrimary: boolean;
+  verifiedAt: string | null;
+  verificationCheckedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  workspace: { id: string; name: string; slug: string };
+}
+
+export interface UpdatePlanPayload {
+  name?: string;
+  description?: string | null;
+  priceAmount?: number;
+  currency?: string;
+  billingInterval?: BillingInterval;
+  trialDays?: number | null;
+  isActive?: boolean;
+  displayOrder?: number;
+  providerPlanId?: string | null;
+  limits?: Partial<Record<PlanLimitKey, number | null>>;
+}
+
+export interface SystemHealthDto {
+  status: 'ok' | 'error';
+  info?: Record<string, { status: string; [key: string]: unknown }>;
+  error?: Record<string, { status: string; [key: string]: unknown }>;
+  details: Record<string, { status: string; [key: string]: unknown }>;
+  paystack: PaystackConnectionTestDto;
 }

@@ -9,8 +9,10 @@ export function createMockPrismaService() {
     user: {
       findUnique: jest.fn(),
       findUniqueOrThrow: jest.fn(),
+      findMany: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      count: jest.fn(),
     },
     organization: {
       create: jest.fn(),
@@ -19,6 +21,8 @@ export function createMockPrismaService() {
       create: jest.fn(),
       update: jest.fn(),
       findUnique: jest.fn(),
+      findMany: jest.fn(),
+      count: jest.fn(),
     },
     workspaceMember: {
       create: jest.fn(),
@@ -41,6 +45,9 @@ export function createMockPrismaService() {
     },
     auditLog: {
       create: jest.fn(),
+      findMany: jest.fn(),
+      count: jest.fn(),
+      groupBy: jest.fn(),
     },
     link: {
       create: jest.fn(),
@@ -90,13 +97,20 @@ export function createMockPrismaService() {
     plan: {
       findMany: jest.fn(),
       findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
+    },
+    planLimit: {
+      upsert: jest.fn(),
     },
     subscription: {
       create: jest.fn(),
       findUnique: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       update: jest.fn(),
       upsert: jest.fn(),
+      count: jest.fn(),
     },
     billingEvent: {
       create: jest.fn(),
@@ -108,6 +122,7 @@ export function createMockPrismaService() {
       findMany: jest.fn(),
       count: jest.fn(),
       create: jest.fn(),
+      aggregate: jest.fn(),
     },
     apiKey: {
       create: jest.fn(),
@@ -120,6 +135,7 @@ export function createMockPrismaService() {
     apiUsageEvent: {
       create: jest.fn(),
       count: jest.fn(),
+      groupBy: jest.fn(),
     },
     webhookEndpoint: {
       create: jest.fn(),
@@ -131,6 +147,7 @@ export function createMockPrismaService() {
     },
     webhookEvent: {
       create: jest.fn(),
+      findMany: jest.fn(),
     },
     webhookDelivery: {
       create: jest.fn(),
@@ -139,6 +156,7 @@ export function createMockPrismaService() {
       findUnique: jest.fn(),
       update: jest.fn(),
       count: jest.fn(),
+      groupBy: jest.fn(),
     },
     $queryRawUnsafe: jest.fn(),
     $queryRaw: jest.fn(),

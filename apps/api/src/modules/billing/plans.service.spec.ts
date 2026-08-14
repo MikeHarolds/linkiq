@@ -5,9 +5,13 @@ import {
   createMockPrismaService,
   type MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
+import type { RequestContext } from '../../common/decorators/request-context.decorator';
+import type { AuditService } from '../audit/audit.service';
 import type { PrismaService } from '../prisma/prisma.service';
 
 import { PlansService } from './plans.service';
+
+const ctx: RequestContext = { ipAddress: '127.0.0.1', userAgent: 'jest' };
 
 function makePlan(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -31,11 +35,16 @@ function makePlan(overrides: Partial<Record<string, unknown>> = {}) {
 
 describe('PlansService', () => {
   let prisma: MockPrismaService;
+  let audit: { record: jest.Mock };
   let service: PlansService;
 
   beforeEach(() => {
     prisma = createMockPrismaService();
-    service = new PlansService(prisma as unknown as PrismaService);
+    audit = { record: jest.fn().mockResolvedValue(undefined) };
+    service = new PlansService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
   });
 
   describe('listActive', () => {
@@ -97,6 +106,74 @@ describe('PlansService', () => {
       ]);
 
       await expect(service.getFreePlan()).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('listAllForAdmin', () => {
+    it('includes inactive plans, sorted by displayOrder', async () => {
+      prisma.plan.findMany.mockResolvedValue([
+        makePlan({ slug: 'starter', displayOrder: 1, isActive: true }),
+        makePlan({ slug: 'inactive', displayOrder: 0, isActive: false }),
+      ]);
+
+      const result = await service.listAllForAdmin();
+
+      expect(result.map((p) => p.slug)).toEqual(['inactive', 'starter']);
+    });
+  });
+
+  describe('getByIdOrThrow', () => {
+    it('returns the plan by id', async () => {
+      prisma.plan.findUnique.mockResolvedValue(makePlan({ id: 'plan-1' }));
+
+      const plan = await service.getByIdOrThrow('plan-1');
+
+      expect(plan.id).toBe('plan-1');
+    });
+
+    it('throws NotFoundException for an unknown id', async () => {
+      prisma.plan.findUnique.mockResolvedValue(null);
+
+      await expect(service.getByIdOrThrow('missing')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('updateForAdmin', () => {
+    it('updates the plan, upserts limits, invalidates the cache, and audits the change', async () => {
+      prisma.plan.findUnique.mockResolvedValue(makePlan({ id: 'plan-1', slug: 'starter' }));
+      prisma.plan.update.mockResolvedValue(undefined);
+      prisma.planLimit.upsert.mockResolvedValue(undefined);
+      // Warm the cache first, to prove the update invalidates it.
+      prisma.plan.findMany.mockResolvedValue([makePlan({ slug: 'starter' })]);
+      await service.listActive();
+
+      await service.updateForAdmin(
+        'plan-1',
+        { isActive: false, limits: { MAX_LINKS: 5 } },
+        'admin-1',
+        ctx,
+      );
+
+      expect(prisma.plan.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'plan-1' },
+          data: expect.objectContaining({ isActive: false }),
+        }),
+      );
+      expect(prisma.planLimit.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { planId_key: { planId: 'plan-1', key: 'MAX_LINKS' } },
+        }),
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'admin.plan_updated', userId: 'admin-1' }),
+      );
+
+      // Cache invalidated: a subsequent listActive() must re-query.
+      prisma.plan.findMany.mockClear();
+      prisma.plan.findMany.mockResolvedValue([makePlan({ slug: 'starter' })]);
+      await service.listActive();
+      expect(prisma.plan.findMany).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -49,6 +49,9 @@ import { WebhooksService } from './webhooks.service';
     WebhookDeliveryProducer,
     WebhookDeliveryProcessor,
   ],
-  exports: [WebhookEventsService],
+  // WebhooksService added to exports in Sprint 11 — AdminModule reuses
+  // its retryDelivery()/listDeliveries() rather than a parallel
+  // admin-only delivery-retry implementation.
+  exports: [WebhookEventsService, WebhooksService],
 })
 export class WebhooksModule {}

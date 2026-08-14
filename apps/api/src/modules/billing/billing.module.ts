@@ -77,12 +77,16 @@ import { SubscriptionsService } from './subscriptions.service';
       inject: [DevelopmentBillingProvider, PaystackBillingProvider],
     },
   ],
+  // PaystackApiClient added to exports in Sprint 11 — AdminModule's
+  // settings service reuses it for a read-only "test connection" check
+  // (see admin-settings.service.ts), never a second Paystack client.
   exports: [
     PlansService,
     SubscriptionsService,
     BillingUsageService,
     BillingEventsService,
     InvoicesService,
+    PaystackApiClient,
   ],
 })
 export class BillingModule {}

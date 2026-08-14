@@ -15,13 +15,25 @@ const REFRESH_COOKIE_NAME =
   process.env.NEXT_PUBLIC_REFRESH_COOKIE_NAME ?? 'linkiq_refresh_token';
 
 const AUTH_ONLY_ROUTES = ['/login', '/register'];
-const PROTECTED_ROUTE_PREFIX = '/dashboard';
+// /admin gets the same cookie-presence gate as /dashboard — this is
+// still only a UX optimism check, never the real authorization boundary.
+// The actual SUPER_ADMIN check happens twice, both server-side of this
+// middleware: the (admin) layout's client effect (redirects a
+// non-SUPER_ADMIN user away, UX-only) and, decisively, SuperAdminGuard
+// on every /admin/* API endpoint (see apps/api's
+// common/guards/super-admin.guard.ts) — a workspace ADMIN with a valid
+// session cookie still gets 403 from the API no matter what this
+// middleware or the layout does.
+const PROTECTED_ROUTE_PREFIXES = ['/dashboard', '/admin'];
 
 export function middleware(request: NextRequest) {
   const hasSessionCookie = request.cookies.has(REFRESH_COOKIE_NAME);
   const { pathname } = request.nextUrl;
 
-  if (pathname.startsWith(PROTECTED_ROUTE_PREFIX) && !hasSessionCookie) {
+  if (
+    PROTECTED_ROUTE_PREFIXES.some((prefix) => pathname.startsWith(prefix)) &&
+    !hasSessionCookie
+  ) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('from', pathname);
     return NextResponse.redirect(loginUrl);
@@ -35,5 +47,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/login', '/register'],
+  matcher: ['/dashboard/:path*', '/admin/:path*', '/login', '/register'],
 };

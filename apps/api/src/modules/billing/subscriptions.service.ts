@@ -15,6 +15,10 @@ import {
 } from '@prisma/client';
 
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
+import {
+  paginationMeta,
+  type PaginatedResult,
+} from '../../common/dto/pagination.dto';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebhookEventsService } from '../webhooks/webhook-events.service';
@@ -41,6 +45,27 @@ export type SubscriptionWithPlan = Subscription & { plan: PlanWithLimits };
 export interface SubscriptionMutationResult {
   subscription: SubscriptionWithPlan;
   checkoutUrl: string | null;
+}
+
+export type SubscriptionWithPlanAndWorkspace = SubscriptionWithPlan & {
+  workspace: {
+    id: string;
+    name: string;
+    slug: string;
+    organization: {
+      name: string;
+      owner: { id: string; email: string; firstName: string; lastName: string };
+    };
+  };
+};
+
+export interface ListSubscriptionsQuery {
+  page: number;
+  pageSize: number;
+  status?: SubscriptionStatus;
+  planSlug?: string;
+  /** Matches against workspace name/slug (case-insensitive). */
+  search?: string;
 }
 
 const SUBSCRIPTION_WITH_PLAN_INCLUDE = {
@@ -521,5 +546,122 @@ export class SubscriptionsService {
     });
 
     return { subscription, checkoutUrl: null };
+  }
+
+  /**
+   * Platform-wide subscription list (Sprint 11 — Super Admin). Every
+   * mutation this admin surface offers (change-plan/cancel/reactivate)
+   * reuses the exact methods above with the admin's own userId as the
+   * acting user — never a parallel write path, so the BillingProvider
+   * abstraction (and therefore Paystack) is never bypassed.
+   */
+  async listAllForAdmin(
+    query: ListSubscriptionsQuery,
+  ): Promise<PaginatedResult<SubscriptionWithPlanAndWorkspace>> {
+    const searchTerm = query.search?.trim();
+    const where: Prisma.SubscriptionWhereInput = {
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.planSlug ? { plan: { slug: query.planSlug } } : {}),
+      ...(searchTerm
+        ? {
+            workspace: {
+              OR: [
+                { name: { contains: searchTerm, mode: 'insensitive' } },
+                { slug: { contains: searchTerm, mode: 'insensitive' } },
+              ],
+            },
+          }
+        : {}),
+    };
+
+    const include = {
+      plan: { include: { limits: true } },
+      workspace: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          organization: {
+            select: {
+              name: true,
+              owner: {
+                select: {
+                  id: true,
+                  email: true,
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    } as const;
+
+    const [items, totalItems] = await Promise.all([
+      this.prisma.subscription.findMany({
+        where,
+        include,
+        orderBy: { createdAt: 'desc' },
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+      }),
+      this.prisma.subscription.count({ where }),
+    ]);
+
+    return {
+      items,
+      pagination: paginationMeta(query.page, query.pageSize, totalItems),
+    };
+  }
+
+  /**
+   * Extends (or shortens) a currently-trialing subscription's trial end
+   * date — the one subscription mutation with no pre-Sprint-11
+   * equivalent. Deliberately restricted to subscriptions actually in
+   * TRIALING: extending a non-trial subscription's `trialEnd` would be
+   * meaningless (getEffectiveStatus only reads trialEnd when
+   * status === TRIALING), so rejecting early avoids silently doing
+   * nothing. Never touches the provider — trials are LinkIQ-only
+   * regardless of BILLING_PROVIDER (see paystack-integration.md §2), so
+   * there is nothing to reconcile with Paystack here.
+   */
+  async extendTrial(
+    workspaceId: string,
+    newTrialEnd: Date,
+    adminUserId: string,
+    ctx: RequestContext,
+  ): Promise<SubscriptionWithPlan> {
+    const existing = await this.getForWorkspace(workspaceId);
+    if (!existing) {
+      throw new NotFoundException('No subscription found for this workspace');
+    }
+    if (existing.status !== SubscriptionStatus.TRIALING) {
+      throw new BadRequestException(
+        'Only a currently-trialing subscription can have its trial extended',
+      );
+    }
+
+    const subscription = await this.prisma.subscription.update({
+      where: { workspaceId },
+      data: { trialEnd: newTrialEnd },
+      include: SUBSCRIPTION_WITH_PLAN_INCLUDE,
+    });
+
+    await this.audit.record({
+      action: 'admin.trial_extended',
+      entity: 'Subscription',
+      entityId: subscription.id,
+      userId: adminUserId,
+      workspaceId,
+      metadata: {
+        previousTrialEnd: existing.trialEnd?.toISOString() ?? null,
+        newTrialEnd: newTrialEnd.toISOString(),
+      },
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent,
+    });
+
+    return subscription;
   }
 }

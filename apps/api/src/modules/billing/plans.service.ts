@@ -1,9 +1,36 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PlanTier, type Plan, type PlanLimit } from '@prisma/client';
+import {
+  PlanTier,
+  Prisma,
+  type Plan,
+  type PlanLimit,
+  type PlanLimitKey,
+} from '@prisma/client';
 
+import type { RequestContext } from '../../common/decorators/request-context.decorator';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type PlanWithLimits = Plan & { limits: PlanLimit[] };
+
+/** Every field optional — Super Admin edits are partial updates against
+ * whatever the plan already has. Deliberately does NOT invent defaults
+ * for price/currency: omitted fields are left exactly as they are. */
+export interface UpdatePlanInput {
+  name?: string;
+  description?: string | null;
+  priceAmount?: number;
+  currency?: string;
+  billingInterval?: 'MONTHLY' | 'ANNUAL';
+  trialDays?: number | null;
+  isActive?: boolean;
+  displayOrder?: number;
+  providerPlanId?: string | null;
+  /** Replaces the full limit set when provided — a partial map would be
+   * ambiguous (does an omitted key mean "leave alone" or "remove"?); the
+   * admin UI always submits every PlanLimitKey it displays. */
+  limits?: Partial<Record<PlanLimitKey, number | null>>;
+}
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -18,7 +45,10 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 export class PlansService {
   private cache: { plans: PlanWithLimits[]; expiresAt: number } | null = null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async listActive(): Promise<PlanWithLimits[]> {
     const all = await this.getAllCached();
@@ -52,6 +82,87 @@ export class PlansService {
       );
     }
     return plan;
+  }
+
+  /** Super Admin visibility (Sprint 11) — unlike listActive(), includes
+   * inactive plans, since an admin managing the plan catalog needs to
+   * see everything, not just what's currently purchasable. */
+  async listAllForAdmin(): Promise<PlanWithLimits[]> {
+    const all = await this.getAllCached();
+    return [...all].sort((a, b) => a.displayOrder - b.displayOrder);
+  }
+
+  async getByIdOrThrow(planId: string): Promise<PlanWithLimits> {
+    const plan = await this.prisma.plan.findUnique({
+      where: { id: planId },
+      include: { limits: true },
+    });
+    if (!plan) {
+      throw new NotFoundException('Plan not found');
+    }
+    return plan;
+  }
+
+  /**
+   * Super Admin plan editing (Sprint 11) — the first write path this
+   * service has ever had. Deliberately does not touch `slug`/`tier`
+   * (identity fields other code keys off of — e.g.
+   * SubscriptionsService.subscribe looks plans up by slug) or create/
+   * delete a Plan outright; only updates an existing seeded row's
+   * editable fields. Every call is audited, and the in-memory cache is
+   * invalidated immediately so the change is visible on the very next
+   * read anywhere in the app (limit checks, checkout, this admin UI).
+   */
+  async updateForAdmin(
+    planId: string,
+    input: UpdatePlanInput,
+    adminUserId: string,
+    ctx: RequestContext,
+  ): Promise<PlanWithLimits> {
+    const existing = await this.getByIdOrThrow(planId);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.plan.update({
+        where: { id: planId },
+        data: {
+          name: input.name,
+          description: input.description,
+          priceAmount: input.priceAmount,
+          currency: input.currency,
+          billingInterval: input.billingInterval,
+          trialDays: input.trialDays,
+          isActive: input.isActive,
+          displayOrder: input.displayOrder,
+          providerPlanId: input.providerPlanId,
+        },
+      });
+
+      if (input.limits) {
+        for (const [key, value] of Object.entries(input.limits)) {
+          await tx.planLimit.upsert({
+            where: { planId_key: { planId, key: key as PlanLimitKey } },
+            create: { planId, key: key as PlanLimitKey, value },
+            update: { value },
+          });
+        }
+      }
+    });
+
+    this.cache = null;
+
+    await this.audit.record({
+      action: 'admin.plan_updated',
+      entity: 'Plan',
+      entityId: planId,
+      userId: adminUserId,
+      metadata: JSON.parse(
+        JSON.stringify({ slug: existing.slug, changes: input }),
+      ) as Prisma.InputJsonValue,
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent,
+    });
+
+    return this.getByIdOrThrow(planId);
   }
 
   private async getAllCached(): Promise<PlanWithLimits[]> {

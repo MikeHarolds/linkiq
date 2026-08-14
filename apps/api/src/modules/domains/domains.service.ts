@@ -5,7 +5,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DomainStatus, WebhookEventType, type CustomDomain } from '@prisma/client';
+import {
+  DomainStatus,
+  WebhookEventType,
+  type CustomDomain,
+} from '@prisma/client';
 
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import { isUniqueConstraintViolation } from '../../common/utils/prisma-errors';
@@ -150,6 +154,56 @@ export class DomainsService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
+      }),
+      this.prisma.customDomain.count({ where }),
+    ]);
+
+    return {
+      items,
+      pagination: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.max(1, Math.ceil(totalItems / pageSize)),
+      },
+    };
+  }
+
+  /**
+   * Platform-wide domain visibility (Sprint 11 — Super Admin) — the same
+   * query as findAll() minus the workspaceId filter, so there is no
+   * second domain-management implementation, just one additional entry
+   * point into the same table.
+   */
+  async findAllForAdmin(
+    query: QueryDomainsDto & { workspaceId?: string },
+  ): Promise<
+    PaginatedResult<
+      CustomDomain & { workspace: { id: string; name: string; slug: string } }
+    >
+  > {
+    const searchTerm = query.search?.trim();
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+
+    const where: Record<string, unknown> = {
+      deletedAt: null,
+      ...(query.workspaceId ? { workspaceId: query.workspaceId } : {}),
+      ...(query.status ? { status: query.status } : {}),
+      ...(searchTerm
+        ? { domain: { contains: searchTerm, mode: 'insensitive' } }
+        : {}),
+    };
+
+    const [items, totalItems] = await Promise.all([
+      this.prisma.customDomain.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          workspace: { select: { id: true, name: true, slug: true } },
+        },
       }),
       this.prisma.customDomain.count({ where }),
     ]);

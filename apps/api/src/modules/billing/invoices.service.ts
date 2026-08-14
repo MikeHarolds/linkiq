@@ -1,7 +1,28 @@
 import { Injectable } from '@nestjs/common';
-import type { Invoice, InvoiceStatus } from '@prisma/client';
+import { Prisma, type Invoice, type InvoiceStatus } from '@prisma/client';
 
+import {
+  paginationMeta,
+  type PaginatedResult,
+} from '../../common/dto/pagination.dto';
 import { PrismaService } from '../prisma/prisma.service';
+
+export type InvoiceWithWorkspace = Invoice & {
+  workspace: { id: string; name: string; slug: string };
+};
+
+export interface ListInvoicesQuery {
+  page: number;
+  pageSize: number;
+  status?: InvoiceStatus;
+  provider?: string;
+  workspaceId?: string;
+  /** Matches against invoice number or providerInvoiceId (the payment
+   * reference), case-insensitive. */
+  search?: string;
+  dateFrom?: Date;
+  dateTo?: Date;
+}
 
 export interface RecordProviderInvoiceInput {
   workspaceId: string;
@@ -32,6 +53,67 @@ export class InvoicesService {
       where: { workspaceId },
       orderBy: { issueDate: 'desc' },
     });
+  }
+
+  /**
+   * Platform-wide payment/invoice ledger (Sprint 11 — Super Admin).
+   * Serves both /admin/payments and /admin/invoices — the current
+   * `Invoice` model (amount, currency, provider, providerInvoiceId,
+   * status, failureReason, timestamps) already carries everything both
+   * views need; no new "payment" table or duplicate record was created,
+   * per the sprint's explicit instruction not to fork the data model.
+   * The two admin routes just present the same rows with different
+   * emphasis (payments = transaction/reference-first, invoices =
+   * invoice-number/customer-first).
+   */
+  async listAllForAdmin(
+    query: ListInvoicesQuery,
+  ): Promise<PaginatedResult<InvoiceWithWorkspace>> {
+    const searchTerm = query.search?.trim();
+    const where: Prisma.InvoiceWhereInput = {
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.provider ? { provider: query.provider } : {}),
+      ...(query.workspaceId ? { workspaceId: query.workspaceId } : {}),
+      ...(query.dateFrom || query.dateTo
+        ? {
+            issueDate: {
+              ...(query.dateFrom ? { gte: query.dateFrom } : {}),
+              ...(query.dateTo ? { lte: query.dateTo } : {}),
+            },
+          }
+        : {}),
+      ...(searchTerm
+        ? {
+            OR: [
+              { number: { contains: searchTerm, mode: 'insensitive' } },
+              {
+                providerInvoiceId: {
+                  contains: searchTerm,
+                  mode: 'insensitive',
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+
+    const [items, totalItems] = await Promise.all([
+      this.prisma.invoice.findMany({
+        where,
+        orderBy: { issueDate: 'desc' },
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+        include: {
+          workspace: { select: { id: true, name: true, slug: true } },
+        },
+      }),
+      this.prisma.invoice.count({ where }),
+    ]);
+
+    return {
+      items,
+      pagination: paginationMeta(query.page, query.pageSize, totalItems),
+    };
   }
 
   /** Number generation is a count-then-format, not a DB sequence — under

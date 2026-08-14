@@ -9,6 +9,8 @@ export const FEATURE_LABELS: Record<PlanLimitKey, string> = {
   MONTHLY_CLICKS: 'Monthly clicks',
   ANALYTICS_RETENTION_DAYS: 'Analytics retention (days)',
   MONTHLY_API_REQUESTS: 'API requests (this month)',
+  MAX_WEBHOOK_ENDPOINTS: 'Webhook endpoints',
+  MONTHLY_WEBHOOK_DELIVERIES: 'Webhook deliveries (this month)',
 };
 
 /** The subset shown as progress bars in the Usage section — matches

@@ -39,7 +39,27 @@
     "prettier-plugin-tailwindcss": "^0.6.8"
   },
   "lint-staged": {
-    "*.{ts,tsx}": [
+    "apps/api/**/*.{ts,tsx}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "apps/web/**/*.{ts,tsx}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "apps/docs/**/*.{ts,tsx}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "packages/types/**/*.{ts,tsx}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "packages/ui/**/*.{ts,tsx}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "packages/utils/**/*.{ts,tsx}": [
       "prettier --write",
       "eslint --fix"
     ],

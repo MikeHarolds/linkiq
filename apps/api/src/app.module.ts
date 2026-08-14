@@ -9,6 +9,7 @@ import databaseConfig from './config/database.config';
 import paystackConfig from './config/paystack.config';
 import redisConfig from './config/redis.config';
 import webhooksConfig from './config/webhooks.config';
+import { AdminModule } from './modules/admin/admin.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { AuditModule } from './modules/audit/audit.module';
@@ -72,6 +73,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
     CampaignsModule,
     DomainsModule,
     WebhooksModule,
+    AdminModule,
   ],
 })
 export class AppModule {}
