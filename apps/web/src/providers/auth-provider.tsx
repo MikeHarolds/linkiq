@@ -21,7 +21,12 @@ interface AuthContextValue {
   /** True until the initial silent-refresh attempt on page load resolves. */
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (values: LoginFormValues) => Promise<void>;
+  /** Returns the freshly authenticated user directly — callers that need
+   * to branch on it (e.g. the login page's post-login redirect) should
+   * use this return value, not read `user` from context right after
+   * calling this: the `setUser` update below hasn't necessarily flushed
+   * to context consumers by the time this promise resolves. */
+  login: (values: LoginFormValues) => Promise<UserDto>;
   register: (values: RegisterFormValues) => Promise<void>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
@@ -103,6 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAccessToken(res.accessToken);
       setUser(res.user);
       applyWorkspaces(res.workspaces);
+      return res.user;
     },
     [applyWorkspaces],
   );

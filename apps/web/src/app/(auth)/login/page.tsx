@@ -45,8 +45,12 @@ function LoginForm() {
   async function onSubmit(values: LoginFormValues) {
     setIsSubmitting(true);
     try {
-      await login(values);
-      router.push('/dashboard');
+      const user = await login(values);
+      // Route SUPER_ADMIN straight to the platform admin console — read
+      // from the value login() just returned, not from context state,
+      // since setUser() inside it may not have flushed to this component
+      // yet. Every other role lands on the normal customer dashboard.
+      router.push(user.globalRole === 'SUPER_ADMIN' ? '/admin' : '/dashboard');
     } catch (error) {
       const message =
         error instanceof ApiError
