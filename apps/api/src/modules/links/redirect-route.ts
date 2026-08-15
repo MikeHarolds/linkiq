@@ -1,6 +1,8 @@
 import type { INestApplication } from '@nestjs/common';
 import type { Request, Response } from 'express';
 
+import { extractClientIp } from '../../common/utils/client-ip';
+
 import { RedirectService } from './redirect.service';
 
 /**
@@ -35,7 +37,7 @@ export function registerRedirectRoute(app: INestApplication): void {
     }
 
     const outcome = await redirectService.resolve(shortCode, {
-      ipAddress: resolveClientIp(req),
+      ipAddress: extractClientIp(req.headers, req.socket.remoteAddress),
       userAgent: req.headers['user-agent'],
       referer: req.headers['referer'],
       queryString: req.url.includes('?') ? req.url.split('?')[1] : undefined,
@@ -80,14 +82,4 @@ export function registerRedirectRoute(app: INestApplication): void {
         return;
     }
   });
-}
-
-/** Respects X-Forwarded-For when running behind the Nginx reverse proxy
- * (see infrastructure/nginx) — same convention as request-context.decorator.ts. */
-function resolveClientIp(req: Request): string | undefined {
-  const forwardedFor = req.headers['x-forwarded-for'];
-  if (Array.isArray(forwardedFor)) return forwardedFor[0];
-  if (typeof forwardedFor === 'string')
-    return forwardedFor.split(',')[0]?.trim();
-  return req.ip;
 }

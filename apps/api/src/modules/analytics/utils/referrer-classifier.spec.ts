@@ -47,6 +47,88 @@ describe('classifyReferrer', () => {
     expect(classifyReferrer('https://t.co/abc123').category).toBe('social');
   });
 
+  describe('Facebook domains and subdomains', () => {
+    it('classifies the bare apex domain as social', () => {
+      const result = classifyReferrer('https://facebook.com/somepost');
+      expect(result.category).toBe('social');
+      expect(result.domain).toBe('facebook.com');
+    });
+
+    it('classifies www.facebook.com as social, normalized to the apex domain', () => {
+      const result = classifyReferrer('https://www.facebook.com/somepost');
+      expect(result.category).toBe('social');
+      expect(result.domain).toBe('facebook.com');
+    });
+
+    it('classifies m.facebook.com (mobile site) as social', () => {
+      const result = classifyReferrer('https://m.facebook.com/somepost');
+      expect(result.category).toBe('social');
+      expect(result.domain).toBe('m.facebook.com');
+    });
+
+    it('classifies l.facebook.com (link-shim redirector) as social', () => {
+      const result = classifyReferrer(
+        'https://l.facebook.com/l.php?u=https://example.com',
+      );
+      expect(result.category).toBe('social');
+      expect(result.domain).toBe('l.facebook.com');
+    });
+
+    it('classifies lm.facebook.com as social', () => {
+      const result = classifyReferrer('https://lm.facebook.com/somepost');
+      expect(result.category).toBe('social');
+      expect(result.domain).toBe('lm.facebook.com');
+    });
+
+    it('does NOT classify an unrelated facebook-lookalike subdomain as social', () => {
+      // Guards the "explicit list, not generic subdomain stripping"
+      // design choice: only the specific known Facebook hosts above are
+      // social — anything else under facebook.com still resolves via
+      // the normal referral fallback, not a blanket subdomain match.
+      const result = classifyReferrer('https://developers.facebook.com/docs');
+      expect(result.category).toBe('referral');
+      expect(result.domain).toBe('developers.facebook.com');
+    });
+  });
+
+  describe('YouTube', () => {
+    it('classifies youtube.com as social', () => {
+      const result = classifyReferrer('https://youtube.com/watch?v=abc');
+      expect(result.category).toBe('social');
+      expect(result.domain).toBe('youtube.com');
+    });
+
+    it('classifies www.youtube.com as social, normalized to the apex domain', () => {
+      const result = classifyReferrer('https://www.youtube.com/watch?v=abc');
+      expect(result.category).toBe('social');
+      expect(result.domain).toBe('youtube.com');
+    });
+
+    it('classifies the youtu.be short domain as social', () => {
+      const result = classifyReferrer('https://youtu.be/abc123');
+      expect(result.category).toBe('social');
+      expect(result.domain).toBe('youtu.be');
+    });
+  });
+
+  it('classifies every other previously-supported social/search domain unchanged', () => {
+    const cases: Array<[string, 'search' | 'social']> = [
+      ['https://www.google.com/search?q=x', 'search'],
+      ['https://bing.com/search?q=x', 'search'],
+      ['https://www.instagram.com/p/abc', 'social'],
+      ['https://www.linkedin.com/feed/', 'social'],
+      ['https://x.com/someone/status/1', 'social'],
+      ['https://twitter.com/someone/status/1', 'social'],
+      ['https://www.tiktok.com/@someone/video/1', 'social'],
+      ['https://www.reddit.com/r/test/', 'social'],
+      ['https://www.pinterest.com/pin/1', 'social'],
+      ['https://www.threads.net/@someone', 'social'],
+    ];
+    for (const [referrer, expected] of cases) {
+      expect(classifyReferrer(referrer).category).toBe(expected);
+    }
+  });
+
   it('classifies an unrecognized external domain as referral, not "other"', () => {
     const result = classifyReferrer('https://some-blog.example.com/post');
     expect(result.category).toBe('referral');

@@ -1,6 +1,8 @@
 import { createParamDecorator, type ExecutionContext } from '@nestjs/common';
 import type { Request } from 'express';
 
+import { extractClientIp } from '../utils/client-ip';
+
 export interface RequestContext {
   ipAddress: string | undefined;
   userAgent: string | undefined;
@@ -8,19 +10,16 @@ export interface RequestContext {
 
 /**
  * Extracts client IP + User-Agent for audit logging. Centralized here so
- * every module records this context the same way (respects X-Forwarded-For
- * when running behind a reverse proxy — see infrastructure/nginx).
+ * every module records this context the same way — see
+ * common/utils/client-ip.ts for the actual trust-boundary logic (also
+ * used by the redirect route), which this must stay identical to.
  */
 export const Ctx = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): RequestContext => {
     const request = ctx.switchToHttp().getRequest<Request>();
-    const forwardedFor = request.headers['x-forwarded-for'];
-    const ipAddress = Array.isArray(forwardedFor)
-      ? forwardedFor[0]
-      : (forwardedFor?.split(',')[0]?.trim() ?? request.ip);
 
     return {
-      ipAddress,
+      ipAddress: extractClientIp(request.headers, request.socket.remoteAddress),
       userAgent: request.headers['user-agent'],
     };
   },

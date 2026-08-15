@@ -19,6 +19,15 @@ const SEARCH_DOMAINS = new Set([
 
 const SOCIAL_DOMAINS = new Set([
   'facebook.com',
+  // Facebook's mobile site and link-shim/redirector domains — real,
+  // distinct hostnames a Referer can carry that are NOT "www." and so
+  // aren't caught by normalizeHostname's www-stripping below. Listed
+  // explicitly rather than generically stripping arbitrary subdomains,
+  // which would risk misclassifying unrelated *.facebook.com-adjacent
+  // hosts (or similarly-structured domains elsewhere) as social.
+  'm.facebook.com',
+  'l.facebook.com',
+  'lm.facebook.com',
   'x.com',
   'twitter.com',
   'instagram.com',
@@ -28,6 +37,8 @@ const SOCIAL_DOMAINS = new Set([
   'pinterest.com',
   't.co',
   'threads.net',
+  'youtube.com',
+  'youtu.be',
 ]);
 
 /** Strips a leading "www." and lowercases, for consistent domain matching. */

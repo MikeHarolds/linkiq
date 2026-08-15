@@ -2,9 +2,21 @@ import type { INestApplication } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import request from 'supertest';
 
+import { GeoipCountryProvider } from '../src/modules/analytics/geo/geoip-country.provider';
 import type { PrismaService } from '../src/modules/prisma/prisma.service';
 
 import { createTestApp, resetDatabase } from './setup-app';
+
+async function waitForClickEvent(prisma: PrismaService, linkId: string) {
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    const event = await prisma.clickEvent.findFirst({ where: { linkId } });
+    if (event) return event;
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`No ClickEvent recorded for link ${linkId} within 3s`);
+}
 
 describe('Redirect engine (e2e)', () => {
   let app: INestApplication;
@@ -241,6 +253,84 @@ describe('Redirect engine (e2e)', () => {
         where: { linkId: link.id },
       });
       expect(count).toBe(0);
+    });
+  });
+
+  // Sprint 13 — end-to-end proof (real HTTP request -> queue ->
+  // processor -> DB) that the client-IP trust-boundary fix and
+  // referrer classification actually work through the full stack, not
+  // just as isolated unit behavior. See src/common/utils/client-ip.ts
+  // and analytics/utils/referrer-classifier.ts for the unit-level
+  // coverage of every edge case; these confirm the real wiring.
+  describe('Referrer and client-IP attribution (Sprint 13)', () => {
+    it('classifies a deliberately-supplied Referer header end to end', async () => {
+      const { link } = await registerAndCreateLink('referrer1@example.com', {
+        slug: 'referrer-e2e-test',
+      });
+
+      await request(server)
+        .get(`/${link.shortCode}`)
+        .set('Referer', 'https://www.facebook.com/some-post')
+        .redirects(0)
+        .expect(302);
+
+      const event = await waitForClickEvent(prisma, link.id);
+      expect(event.referrerCategory).toBe('social');
+      expect(event.referrerDomain).toBe('facebook.com');
+    });
+
+    it('records "direct" when no Referer header is sent at all', async () => {
+      const { link } = await registerAndCreateLink('referrer2@example.com', {
+        slug: 'referrer-direct-test',
+      });
+
+      await request(server).get(`/${link.shortCode}`).redirects(0).expect(302);
+
+      const event = await waitForClickEvent(prisma, link.id);
+      expect(event.referrerCategory).toBe('direct');
+      expect(event.referrerDomain).toBeNull();
+    });
+
+    it('does not let a spoofed leading X-Forwarded-For entry control the stored geo attribution', async () => {
+      const { link } = await registerAndCreateLink('spoofip1@example.com', {
+        slug: 'spoof-xff-test',
+      });
+
+      // 203.0.113.0/24 is IANA's TEST-NET-3 range (RFC 5737) — reserved
+      // for documentation, so it can NEVER have a real GeoIP entry.
+      // 8.8.8.8 is a stable, real, resolvable public IP. If the old
+      // "take the first X-Forwarded-For entry" bug were still present,
+      // the attacker-supplied leading entry would be used and the
+      // event would end up with country: null; the fix must use the
+      // trusted trailing entry (8.8.8.8) instead.
+      const spoofedIp = '203.0.113.50';
+      const trustedIp = '8.8.8.8';
+      const expectedCountry = new GeoipCountryProvider().lookup(
+        trustedIp,
+      ).country;
+      expect(expectedCountry).not.toBeNull(); // sanity: the ground truth itself must resolve
+
+      await request(server)
+        .get(`/${link.shortCode}`)
+        .set('X-Forwarded-For', `${spoofedIp}, ${trustedIp}`)
+        .redirects(0)
+        .expect(302);
+
+      const event = await waitForClickEvent(prisma, link.id);
+      expect(event.country).toBe(expectedCountry);
+    });
+
+    it('reports no country (never a fabricated one) for a loopback request — matches real local-dev behavior', async () => {
+      const { link } = await registerAndCreateLink('spoofip2@example.com', {
+        slug: 'loopback-geo-test',
+      });
+
+      // No X-Forwarded-For/X-Real-IP at all — matches an unproxied
+      // local request, where the socket peer is the loopback address.
+      await request(server).get(`/${link.shortCode}`).redirects(0).expect(302);
+
+      const event = await waitForClickEvent(prisma, link.id);
+      expect(event.country).toBeNull();
     });
   });
 });

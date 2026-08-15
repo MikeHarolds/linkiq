@@ -129,6 +129,47 @@ and time-series buckets are computed:
   which is why that query runs as raw SQL rather than through Prisma's
   builder — there's no equivalent there.
 
+## 6b. Client IP extraction & trust boundary (Sprint 13)
+
+The visitor IP is extracted once, at the redirect route
+(`redirect-route.ts`) and independently at the `@Ctx()` audit-log
+decorator (`common/decorators/request-context.decorator.ts`) — both
+delegate to the same function, `common/utils/client-ip.ts`'s
+`extractClientIp()`, so the two can never drift apart.
+
+**Deployed topology** (`infrastructure/nginx/linkiq.conf`): a single
+nginx hop in front of the API — `internet client -> nginx -> api`.
+nginx sets, on every location block:
+
+- `X-Real-IP: $remote_addr` — always **overwritten**, never appended,
+  so it's an unspoofable signal for exactly this one hop.
+- `X-Forwarded-For: $proxy_add_x_forwarded_for` — **appended**: nginx
+  adds its own view of the connecting peer onto whatever the client
+  already sent. That means only the last N entries (N = trusted hop
+  count) were actually written by something trusted; everything before
+  that is client-controlled and must never be used as the "real" IP.
+
+**Extraction precedence:**
+
+1. `X-Real-IP`, but only when exactly one hop is trusted (the default)
+   — it's simple and correct for a single proxy, but reflects only the
+   immediate peer, so it's skipped entirely for a longer trusted chain.
+2. `X-Forwarded-For`, walked back exactly `TRUSTED_PROXY_HOPS` entries
+   from the end — never the first entry.
+3. The raw socket peer address — correct for local dev / no reverse
+   proxy at all.
+
+Every candidate is validated as a real IPv4/IPv6 address (`net.isIP`)
+before being trusted; anything malformed is skipped, falling through
+to the next signal rather than being returned as-is.
+
+`TRUSTED_PROXY_HOPS` (env var, default `1`) should only be raised if
+another trusted layer (e.g. a CDN) is added in front of nginx — never
+as a workaround for an unexpected IP showing up, which almost always
+means the boundary was miscounted rather than too narrow. See
+`common/utils/client-ip.spec.ts` for the full set of covered
+scenarios (spoofed headers, multi-hop, IPv4/IPv6, malformed values).
+
 ## 7. Privacy & security
 
 - No raw IP address is ever persisted (see §3, §4).
@@ -228,6 +269,28 @@ test, added as a regression guard.)
 set, or `geoip-country` failed to load (check server startup logs for a
 warning from `GeoipCountryProvider`) — both are graceful degradations,
 not errors; redirects and event processing are unaffected either way.
+This is also the **expected, correct** result for any request whose
+resolved IP is loopback (`127.0.0.1`/`::1`) or a private range — there
+is no real-world location for those addresses, and GeoIP correctly
+returns nothing rather than inventing one. Testing a link via
+`http://localhost:3000/...` will always show "Unknown" for this reason
+— it is not a bug, and no code change can fix it. See §6b for how the
+real client IP is determined once actually deployed behind nginx.
+
+**A link shared on Facebook/social shows "Direct" instead of the real
+referrer.** Before assuming a classification bug, check the scheme:
+browsers strip the `Referer` header entirely on an HTTPS→HTTP
+navigation (`Referrer-Policy: strict-origin-when-cross-origin` is the
+default in every major browser) — a secure page linking to a plain
+`http://` destination will never send one, regardless of anything
+LinkIQ does server-side. This is most likely to bite in local testing
+(`http://localhost:3000/...`); it is not an issue against a real HTTPS
+production deployment. Once a real `Referer` does arrive, known
+referrer domains — including Facebook's `www.`/`m.`/`l.`/`lm.`
+subdomains and YouTube's `youtube.com`/`youtu.be` — are classified via
+`analytics/utils/referrer-classifier.ts`'s `SOCIAL_DOMAINS`/
+`SEARCH_DOMAINS` sets; see `referrer-classifier.spec.ts` for the full
+list this covers today.
 
 **Unique visitor counts look higher than expected.** This is very likely
 the by-design daily hash rotation (§4) — someone returning on a different
