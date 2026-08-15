@@ -23,6 +23,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Archive,
+  Megaphone,
   MoreHorizontal,
   Pause,
   Play,
@@ -36,6 +37,7 @@ import { toast } from 'sonner';
 import { CampaignStatusBadge } from '@/components/campaigns/campaign-status-badge';
 import { CreateCampaignDialog } from '@/components/campaigns/create-campaign-dialog';
 import { EditCampaignDialog } from '@/components/campaigns/edit-campaign-dialog';
+import { DashboardPageHeader } from '@/components/dashboard/dashboard-page-header';
 import {
   activateCampaign,
   archiveCampaign,
@@ -181,20 +183,18 @@ export default function CampaignsDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Campaigns</h1>
-          <p className="text-muted-foreground">
-            Group links for reporting and give them shared UTM defaults.
-          </p>
-        </div>
-        {canManage && (
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Create campaign
-          </Button>
-        )}
-      </div>
+      <DashboardPageHeader
+        title="Campaigns"
+        description="Group links for reporting and give them shared UTM defaults."
+        actions={
+          canManage && (
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Create campaign
+            </Button>
+          )
+        }
+      />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Input
@@ -241,7 +241,11 @@ export default function CampaignsDashboardPage() {
 
       {!isLoading && !isError && data && data.items.length === 0 && (
         <div className="rounded-lg border border-dashed py-16 text-center">
-          <p className="text-muted-foreground">
+          <Megaphone
+            className="mx-auto h-8 w-8 text-muted-foreground/50"
+            aria-hidden="true"
+          />
+          <p className="mt-3 text-muted-foreground">
             {debouncedSearch || status !== 'ALL'
               ? 'No campaigns match your filters.'
               : "You haven't created any campaigns yet."}
@@ -257,7 +261,7 @@ export default function CampaignsDashboardPage() {
 
       {!isLoading && !isError && data && data.items.length > 0 && (
         <>
-          <div className="rounded-md border">
+          <div className="rounded-lg border bg-card">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -276,7 +280,7 @@ export default function CampaignsDashboardPage() {
                     <TableCell>
                       <Link
                         href={`/dashboard/campaigns/${campaign.id}`}
-                        className="text-sm font-medium hover:underline"
+                        className="text-sm font-semibold hover:text-primary hover:underline"
                       >
                         {campaign.name}
                       </Link>

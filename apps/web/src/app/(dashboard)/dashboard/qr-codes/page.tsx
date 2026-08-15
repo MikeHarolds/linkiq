@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import * as React from 'react';
 
+import { DashboardPageHeader } from '@/components/dashboard/dashboard-page-header';
 import { CreateQrCodeDialog } from '@/components/qr-codes/create-qr-code-dialog';
 import { EditQrCodeDialog } from '@/components/qr-codes/edit-qr-code-dialog';
 import { QrCodeCard } from '@/components/qr-codes/qr-code-card';
@@ -66,20 +67,18 @@ export default function QrCodesDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">QR Codes</h1>
-          <p className="text-muted-foreground">
-            Generate and manage QR codes for your links.
-          </p>
-        </div>
-        {canManage && (
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Create QR code
-          </Button>
-        )}
-      </div>
+      <DashboardPageHeader
+        title="QR Codes"
+        description="Generate and manage QR codes for your links."
+        actions={
+          canManage && (
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Create QR code
+            </Button>
+          )
+        }
+      />
 
       <Input
         placeholder="Search by name…"

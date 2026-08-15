@@ -1,104 +1,256 @@
-import { Badge, Button, Card } from '@linkiq/ui';
-import {
-  ArrowDown,
-  Globe2,
-  Link2,
-  MousePointerClick,
-  Smartphone,
-  Copy,
-} from 'lucide-react';
+'use client';
+
+import { Button } from '@linkiq/ui';
+import { ArrowRight, Globe2, MousePointerClick, QrCode } from 'lucide-react';
 import Link from 'next/link';
 
-const HERO_STATS = [
-  { label: 'Clicks', value: '12.8K', icon: MousePointerClick },
-  { label: 'CTR', value: '8.4%', icon: Link2 },
-  { label: 'Countries', value: '24', icon: Globe2 },
-  { label: 'Devices', value: '68%', icon: Smartphone },
-] as const;
+/** Real, already-shipped click/country figures this preview reuses —
+ * deliberately not an invented "conversion rate" or similar metric the
+ * product doesn't track. Static and clearly labeled as illustrative,
+ * per the "no fabricated backend functionality" constraint. */
+const MAIN_LINK = {
+  domain: 'go.acme.com',
+  slug: 'summer',
+  destination: 'acme.com/campaigns/summer-sale',
+  clicks: '4,821',
+  countries: '38',
+  devices: '3',
+};
 
-/** A CSS/component-built product preview — deliberately not a stock
- * illustration or screenshot, so it reads as an actual LinkIQ mockup
- * (link creation + resulting stats) rather than generic hero art. */
-function ProductPreviewCard() {
+const SPARK = [6, 9, 7, 12, 10, 15, 13, 18, 16, 22, 19, 26];
+
+/** A tiny CSS-drawn QR-like grid — visually reads as a QR code (for the
+ * "distribute" panel) without claiming to encode anything real or
+ * being a scannable stand-in for actual product output. */
+function QrGlyph() {
+  const cells = [
+    1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1,
+    1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1,
+    0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1,
+    0, 1, 0, 1, 1, 1,
+  ];
   return (
-    <Card className="w-full max-w-md border-border/80 p-1.5 shadow-lg">
-      <div className="flex items-center gap-1.5 px-3 py-2.5">
-        <span className="h-2.5 w-2.5 rounded-full bg-muted" />
-        <span className="h-2.5 w-2.5 rounded-full bg-muted" />
-        <span className="h-2.5 w-2.5 rounded-full bg-muted" />
-        <span className="ml-2 text-xs font-medium text-muted-foreground">
-          Create a link
-        </span>
-      </div>
-
-      <div className="space-y-3 px-4 pb-4">
-        <div className="rounded-lg border bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
-          https://example.com/summer-campaign
-        </div>
-
-        <div className="flex justify-center text-muted-foreground">
-          <ArrowDown className="h-4 w-4" aria-hidden="true" />
-        </div>
-
-        <div className="flex items-center justify-between rounded-lg border border-orange-200 bg-orange-50 px-3 py-2.5 text-sm font-medium text-orange-700 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-300">
-          <span>linkiq.io/summer26</span>
-          <Copy className="h-4 w-4 shrink-0" aria-hidden="true" />
-        </div>
-
-        <div className="grid grid-cols-4 gap-2 pt-2">
-          {HERO_STATS.map((stat) => (
-            <div
-              key={stat.label}
-              className="flex flex-col items-center gap-1 rounded-lg border bg-background px-2 py-3 text-center"
-            >
-              <stat.icon
-                className="h-3.5 w-3.5 text-orange-600 dark:text-orange-400"
-                aria-hidden="true"
-              />
-              <span className="text-sm font-semibold tracking-tight text-foreground">
-                {stat.value}
-              </span>
-              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                {stat.label}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </Card>
+    <div className="grid grid-cols-9 gap-[1.5px]" aria-hidden="true">
+      {cells.map((on, i) => (
+        <span
+          key={i}
+          // Fixed dark-on-white regardless of theme — a QR code's
+          // contrast is what makes it read as a QR code; tying its
+          // cells to --foreground would invert to white-on-white in
+          // dark mode against the deliberately white scan backing below.
+          className={`h-1 w-1 rounded-[1px] ${on ? 'bg-slate-900' : 'bg-transparent'}`}
+        />
+      ))}
+    </div>
   );
 }
 
+/** A layered composition of small, self-contained UI panels — built
+ * from the same tokens/typography as the real dashboard, not a stock
+ * illustration. Each panel stands in for one stage of the product
+ * loop (create a link, distribute it, watch it get clicked, read the
+ * signal) without literally labeling itself as a numbered diagram. */
+function ProductVisualization() {
+  const maxSpark = Math.max(...SPARK);
+
+  return (
+    <div
+      className="relative w-full max-w-lg sm:pb-28 sm:pt-36"
+      role="img"
+      aria-label="Illustrative preview of the LinkIQ product: a short link go.acme.com/summer pointing to acme.com/campaigns/summer-sale, with a QR code for distribution, a live click signal, and a small click-activity chart."
+    >
+      {/* Connection geometry — a thin orange gradient thread linking the
+          floating panels to the main console, an abstract nod to "link"
+          without becoming a literal flowchart arrow. */}
+      <svg
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 hidden sm:block"
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+      >
+        <defs>
+          <linearGradient id="threadGradient" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0" />
+            <stop
+              offset="50%"
+              stopColor="hsl(var(--primary))"
+              stopOpacity="0.5"
+            />
+            <stop
+              offset="100%"
+              stopColor="hsl(var(--primary))"
+              stopOpacity="0"
+            />
+          </linearGradient>
+        </defs>
+        <path
+          d="M 78 12 Q 65 17 58 22"
+          stroke="url(#threadGradient)"
+          strokeWidth="0.4"
+          fill="none"
+        />
+        <path
+          d="M 22 88 Q 35 82 42 77"
+          stroke="url(#threadGradient)"
+          strokeWidth="0.4"
+          fill="none"
+        />
+      </svg>
+
+      {/* Main console panel — the created link + its live signal. Sits
+          vertically between the two floating panels (which live in
+          this wrapper's top/bottom padding, see below) rather than
+          under them, so nothing overlaps or gets obscured. */}
+      <div className="relative rounded-2xl border border-white/10 bg-card p-0 shadow-[0_0_70px_-20px_hsl(var(--primary)/0.35)]">
+        <div className="flex items-center justify-between border-b border-white/10 px-5 py-3.5">
+          <div className="flex items-center gap-2">
+            <span
+              className="animate-signal-pulse h-1.5 w-1.5 rounded-full bg-emerald-400"
+              aria-hidden="true"
+            />
+            <span className="font-mono text-sm font-medium text-primary">
+              {MAIN_LINK.domain}/{MAIN_LINK.slug}
+            </span>
+          </div>
+          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Active
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1.5 border-b border-white/5 px-5 py-2.5 text-xs text-muted-foreground">
+          <Globe2 className="h-3 w-3 shrink-0" aria-hidden="true" />
+          <span className="truncate">{MAIN_LINK.destination}</span>
+        </div>
+
+        <div className="grid grid-cols-3 divide-x divide-white/5 border-b border-white/5">
+          {[
+            { label: 'Clicks', value: MAIN_LINK.clicks },
+            { label: 'Countries', value: MAIN_LINK.countries },
+            { label: 'Devices', value: MAIN_LINK.devices },
+          ].map((stat) => (
+            <div key={stat.label} className="px-4 py-3">
+              <p className="text-base font-semibold tabular-nums text-foreground">
+                {stat.value}
+              </p>
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                {stat.label}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <div className="px-5 py-4">
+          <p className="mb-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+            Click activity
+          </p>
+          <div className="flex h-10 items-end gap-1" aria-hidden="true">
+            {SPARK.map((v, i) => (
+              <div
+                key={i}
+                className="flex-1 rounded-t-sm bg-gradient-to-t from-primary/70 to-primary/20"
+                style={{ height: `${(v / maxSpark) * 100}%` }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Floating panel — distribute (QR + destination brand). Anchored
+          to this wrapper's top-right, inside the pt-16/pt-20 padding
+          reserved above the main card, so it never overlaps it. */}
+      <div className="absolute right-2 top-0 hidden w-36 rounded-xl border border-white/10 bg-dash-elevated p-3 shadow-xl sm:block">
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <QrCode className="h-3 w-3" aria-hidden="true" />
+          Distribute
+        </div>
+        <div className="mt-2 flex items-center justify-center rounded-md bg-white p-2">
+          <QrGlyph />
+        </div>
+      </div>
+
+      {/* Floating panel — a live click signal. Anchored to this
+          wrapper's bottom-left, inside the pb-16/pb-20 padding
+          reserved below the main card, so it never overlaps it. */}
+      <div className="absolute bottom-0 left-2 hidden w-44 rounded-xl border border-white/10 bg-dash-elevated p-3 shadow-xl sm:block">
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <MousePointerClick className="h-3 w-3" aria-hidden="true" />
+          Live signal
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <span
+            className="animate-signal-pulse h-1.5 w-1.5 shrink-0 rounded-full bg-primary"
+            aria-hidden="true"
+          />
+          <p className="text-xs text-foreground">Click from Lagos, NG</p>
+        </div>
+        <p className="mt-0.5 pl-3.5 text-[10px] text-muted-foreground">
+          via QR · mobile
+        </p>
+      </div>
+    </div>
+  );
+}
+
+const TRUST_BULLETS = [
+  'No credit card required',
+  'Free forever plan',
+  'Upgrade anytime',
+] as const;
+
 export function HeroSection() {
   return (
-    <section className="overflow-hidden border-b bg-background">
-      <div className="container grid items-center gap-12 py-20 sm:py-28 lg:grid-cols-2 lg:gap-16 lg:py-32">
+    <section className="relative overflow-hidden border-b border-white/10 bg-background">
+      <div
+        aria-hidden="true"
+        className="bg-grid-dots pointer-events-none absolute inset-0 opacity-[0.15] [mask-image:radial-gradient(ellipse_70%_60%_at_50%_0%,black,transparent)]"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_50%_0%,hsl(var(--primary)/0.16),transparent)]"
+      />
+      <div className="container relative grid items-center gap-16 py-20 sm:py-28 lg:grid-cols-2 lg:gap-16 lg:py-32">
         <div className="flex flex-col items-start gap-6 text-left">
-          <Badge
-            variant="outline"
-            className="border-orange-200 bg-orange-50 text-xs font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-300"
-          >
-            Link management for modern teams
-          </Badge>
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
+            <span
+              className="animate-signal-pulse h-1.5 w-1.5 rounded-full bg-primary"
+              aria-hidden="true"
+            />
+            Link intelligence platform
+          </span>
           <h1 className="max-w-xl text-4xl font-bold tracking-tight text-foreground sm:text-5xl lg:text-6xl">
-            Turn every link into a growth engine.
+            Every link tells a story.
           </h1>
           <p className="max-w-lg text-lg leading-relaxed text-muted-foreground">
-            Shorten, brand, track, and optimize every link from one powerful
-            platform built for modern teams.
+            LinkIQ shows you what happens after the click — who clicked, where
+            they went, and what to do next. Short links, custom domains, and
+            analytics built as one system, not three bolted-together tools.
           </p>
           <div className="flex flex-col gap-3 sm:flex-row">
             <Button asChild size="lg">
-              <Link href="/register">Start for free</Link>
+              <Link href="/register">
+                Get started for free
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
             </Button>
             <Button asChild size="lg" variant="outline">
-              <Link href="#product">Explore the platform</Link>
+              <Link href="#pricing">View pricing</Link>
             </Button>
           </div>
+          <ul className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground">
+            {TRUST_BULLETS.map((bullet) => (
+              <li key={bullet} className="flex items-center gap-1.5">
+                <span
+                  className="h-1 w-1 rounded-full bg-primary"
+                  aria-hidden="true"
+                />
+                {bullet}
+              </li>
+            ))}
+          </ul>
         </div>
 
-        <div className="flex justify-center lg:justify-end">
-          <ProductPreviewCard />
+        <div className="flex justify-center pt-6 lg:justify-end lg:pt-0">
+          <ProductVisualization />
         </div>
       </div>
     </section>

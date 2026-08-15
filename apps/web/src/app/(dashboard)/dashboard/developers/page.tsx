@@ -31,6 +31,7 @@ import { toast } from 'sonner';
 import { ApiKeyStatusBadge } from '@/components/api-keys/api-key-status-badge';
 import { CreateApiKeyDialog } from '@/components/api-keys/create-api-key-dialog';
 import { PERMISSION_LABELS } from '@/components/api-keys/permission-labels';
+import { DashboardPageHeader } from '@/components/dashboard/dashboard-page-header';
 import { deleteApiKey, listApiKeys, revokeApiKey } from '@/lib/api-keys-api';
 import { ApiError, useAuth } from '@/providers/auth-provider';
 
@@ -118,50 +119,66 @@ export default function DevelopersDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Developers</h1>
-          <p className="text-muted-foreground">
-            Create API keys to access LinkIQ programmatically.
+      <DashboardPageHeader
+        title="Developers"
+        description="Create API keys to access LinkIQ programmatically."
+        actions={
+          canManage && (
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Create API key
+            </Button>
+          )
+        }
+      />
+
+      {/* Terminal-style code panel — deliberately fixed dark colors
+          (not theme tokens) since a code/terminal surface is a
+          recognizable, intentional visual element that reads fine
+          regardless of the surrounding page theme. */}
+      <div className="overflow-hidden rounded-lg border border-white/10 bg-[#05080D] text-sm shadow-[0_8px_24px_-12px_hsl(0_0%_0%/0.6)]">
+        <div className="flex items-center gap-1.5 border-b border-white/10 bg-white/[0.03] px-4 py-2.5">
+          <span className="h-2.5 w-2.5 rounded-full bg-white/15" />
+          <span className="h-2.5 w-2.5 rounded-full bg-white/15" />
+          <span className="h-2.5 w-2.5 rounded-full bg-white/15" />
+          <span className="ml-2 font-mono text-xs text-[#94A3B8]">
+            quick start
+          </span>
+        </div>
+        <div className="space-y-2 p-4 font-mono text-[13px] leading-relaxed">
+          <p className="text-[#94A3B8]">
+            <span className="text-[#FF8A3D]"># Base URL</span>
+          </p>
+          <p className="text-[#F8FAFC]">{API_BASE_URL}</p>
+          <p className="mt-3 text-[#94A3B8]">
+            <span className="text-[#FF8A3D]"># Authenticate</span>
+          </p>
+          <p className="text-[#F8FAFC]">
+            <span className="text-[#FF8A3D]">Authorization:</span> Bearer
+            lk_live_...
           </p>
         </div>
-        {canManage && (
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Create API key
-          </Button>
-        )}
-      </div>
-
-      <div className="rounded-lg border bg-muted/30 p-4 text-sm">
-        <p className="font-medium">Quick start</p>
-        <p className="mt-1 text-muted-foreground">
-          Base URL:{' '}
-          <code className="rounded bg-muted px-1 py-0.5">{API_BASE_URL}</code>
-        </p>
-        <p className="mt-1 text-muted-foreground">
-          Authenticate with{' '}
-          <code className="rounded bg-muted px-1 py-0.5">
-            Authorization: Bearer lk_live_...
-          </code>
-        </p>
-        <a
-          href={API_DOCS_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-2 inline-flex items-center gap-1 text-primary hover:underline"
-        >
-          Full API documentation
-          <ExternalLink className="h-3.5 w-3.5" />
-        </a>
+        <div className="border-t border-white/10 px-4 py-2.5">
+          <a
+            href={API_DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 font-mono text-xs text-[#FF8A3D] hover:underline"
+          >
+            Full API documentation
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        </div>
       </div>
 
       <Link
         href="/dashboard/developers/webhooks"
-        className="flex items-center justify-between rounded-lg border p-4 transition-colors hover:bg-accent"
+        className="flex items-center justify-between rounded-lg border bg-card p-4 transition-colors hover:border-primary/30 hover:bg-accent"
       >
         <div className="flex items-center gap-3">
-          <Webhook className="h-5 w-5 text-muted-foreground" />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Webhook className="h-4 w-4" aria-hidden="true" />
+          </div>
           <div>
             <p className="font-medium">Webhooks</p>
             <p className="text-sm text-muted-foreground">
@@ -202,7 +219,7 @@ export default function DevelopersDashboardPage() {
       )}
 
       {!isLoading && !isError && data && data.length > 0 && (
-        <div className="rounded-md border">
+        <div className="rounded-lg border bg-card">
           <Table>
             <TableHeader>
               <TableRow>
@@ -221,7 +238,7 @@ export default function DevelopersDashboardPage() {
                 <TableRow key={apiKey.id}>
                   <TableCell className="font-medium">{apiKey.name}</TableCell>
                   <TableCell>
-                    <code className="text-xs text-muted-foreground">
+                    <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-primary">
                       {apiKey.keyPrefix}••••••••
                     </code>
                   </TableCell>

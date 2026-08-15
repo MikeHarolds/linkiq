@@ -70,6 +70,82 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /*
+   * Fintech/data-platform palette shared by the customer dashboard AND
+   * the marketing site — scoped under .dashboard-shell /
+   * .marketing-shell (applied once each, to (dashboard)/layout.tsx's
+   * and (marketing)/layout.tsx's root elements) so it can never leak
+   * into the admin console, which reads the exact same token names but
+   * must stay visually untouched. Both surfaces share one value block
+   * so the two can never drift apart in a later edit. In light mode
+   * this scope intentionally defines nothing for the dashboard — it
+   * keeps using the standard light tokens above, unchanged (the
+   * marketing site has no light mode; it's permanently dark via its
+   * own .dark wrapper). Only .dark .dashboard-shell/.marketing-shell
+   * overrides anything, giving these two surfaces a deeper, more
+   * layered dark theme than the 2-layer (background/card) system the
+   * admin console still uses, while every existing shared component
+   * (Button, Card, Badge, Input, ...) picks this up automatically since
+   * they all read these same CSS variables — no component needed to
+   * change.
+   */
+  .dashboard-shell,
+  .marketing-shell {
+    --dash-elevated: 210 40% 96%;
+    --dash-highlight: 25 95% 53%;
+  }
+
+  .dark .dashboard-shell,
+  .dark .marketing-shell {
+    --background: 217 44% 4%; /* #05080D */
+    --foreground: 210 40% 98%;
+    --card: 217 41% 9%; /* #0D141F */
+    --card-foreground: 210 40% 98%;
+    --popover: 217 41% 9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 25 95% 53%; /* #F97316 */
+    --primary-foreground: 217 44% 4%;
+    --secondary: 216 34% 14%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 215 43% 5%; /* #080D14 */
+    --muted-foreground: 215 20% 65%;
+    --accent: 216 34% 14%;
+    --accent-foreground: 210 40% 98%;
+    --border: 217 20% 20%;
+    --input: 217 20% 20%;
+    --ring: 25 95% 53%;
+    /* Extra layers the shared 2-layer system has no token for: a
+       distinctly-elevated surface above --card (metric card icon
+       wells, code-panel chrome, floating hero panels) and an orange
+       highlight distinct from --primary, for chart lines / glow
+       accents. */
+    --dash-elevated: 216 38% 11%; /* #121B28 */
+    --dash-highlight: 24 100% 62%; /* #FF8A3D */
+  }
+
+  /* Very low-opacity dot grid — an electronic/technical texture cue,
+     restrained enough to read as a subtle surface detail rather than a
+     decorative pattern. Used sparingly (hero, a couple of section
+     backgrounds), never at full section coverage with high contrast. */
+  .bg-grid-dots {
+    background-image: radial-gradient(circle, hsl(var(--foreground) / 0.15) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+}
+
+@keyframes signal-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.animate-signal-pulse {
+  animation: signal-pulse 2.4s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

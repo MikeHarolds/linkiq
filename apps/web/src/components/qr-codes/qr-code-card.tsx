@@ -106,9 +106,9 @@ export function QrCodeCard({
   }
 
   return (
-    <div className="flex flex-col rounded-lg border p-4">
+    <div className="flex flex-col rounded-lg border bg-card p-4 transition-colors hover:border-primary/30">
       <div
-        className="flex items-center justify-center rounded-md bg-muted/20 p-3"
+        className="flex items-center justify-center rounded-md bg-muted/40 p-3"
         style={{ minHeight: 160 }}
       >
         {previewUrl ? (

@@ -34,18 +34,34 @@ interface PlanCardProps {
   onSelect: (planSlug: string) => void;
 }
 
-export function PlanCard({ plan, isCurrent, canManage, busy, onSelect }: PlanCardProps) {
+export function PlanCard({
+  plan,
+  isCurrent,
+  canManage,
+  busy,
+  onSelect,
+}: PlanCardProps) {
   return (
-    <Card className={isCurrent ? 'border-primary' : undefined}>
+    <Card
+      className={
+        isCurrent
+          ? 'border-primary/60 shadow-[0_0_0_1px_hsl(var(--primary)/0.3),0_0_24px_-8px_hsl(var(--primary)/0.4)]'
+          : 'transition-colors hover:border-primary/30'
+      }
+    >
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">
           <span>{plan.name}</span>
-          {isCurrent && <Badge variant="secondary">Current plan</Badge>}
+          {isCurrent && <Badge variant="default">Current plan</Badge>}
         </CardTitle>
-        {plan.description && <CardDescription>{plan.description}</CardDescription>}
+        {plan.description && (
+          <CardDescription>{plan.description}</CardDescription>
+        )}
       </CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-2xl font-semibold tracking-tight">{formatPrice(plan)}</p>
+        <p className="text-2xl font-semibold tracking-tight">
+          {formatPrice(plan)}
+        </p>
         {plan.trialDays ? (
           <p className="text-xs text-muted-foreground">
             {plan.trialDays}-day free trial on subscribe
@@ -55,7 +71,9 @@ export function PlanCard({ plan, isCurrent, canManage, busy, onSelect }: PlanCar
           {plan.limits.map((limit) => (
             <li key={limit.key}>
               {FEATURE_LABELS[limit.key] ?? limit.key}:{' '}
-              {limit.value === null ? 'Unlimited' : limit.value.toLocaleString()}
+              {limit.value === null
+                ? 'Unlimited'
+                : limit.value.toLocaleString()}
             </li>
           ))}
         </ul>
@@ -68,7 +86,11 @@ export function PlanCard({ plan, isCurrent, canManage, busy, onSelect }: PlanCar
             disabled={isCurrent || busy}
             onClick={() => onSelect(plan.slug)}
           >
-            {isCurrent ? 'Current plan' : busy ? 'Updating…' : 'Switch to this plan'}
+            {isCurrent
+              ? 'Current plan'
+              : busy
+                ? 'Updating…'
+                : 'Switch to this plan'}
           </Button>
         </CardFooter>
       )}

@@ -34,13 +34,17 @@ const FOOTER_COLUMNS = [
 
 export function SiteFooter() {
   return (
-    <footer className="border-t bg-background">
+    <footer className="border-t border-white/10 bg-background">
+      <div
+        aria-hidden="true"
+        className="h-px w-full bg-gradient-to-r from-transparent via-primary/30 to-transparent"
+      />
       <div className="container grid gap-10 py-16 sm:grid-cols-2 lg:grid-cols-5 lg:gap-8">
         <div className="sm:col-span-2 lg:col-span-2">
           <Logo />
           <p className="mt-4 max-w-xs text-sm text-muted-foreground">
-            Shorten, brand, track, and automate every link your team shares —
-            from one platform built for modern teams.
+            Every link is a data point. LinkIQ turns them into a system your
+            whole team can see and act on.
           </p>
         </div>
 
@@ -65,10 +69,12 @@ export function SiteFooter() {
         ))}
       </div>
 
-      <div className="border-t">
+      <div className="border-t border-white/10">
         <div className="container flex flex-col items-center justify-between gap-2 py-6 text-sm text-muted-foreground sm:flex-row">
           <span>© {new Date().getFullYear()} LinkIQ. All rights reserved.</span>
-          <span>Link management for modern teams.</span>
+          <span className="font-mono text-xs">
+            Link infrastructure for modern teams.
+          </span>
         </div>
       </div>
     </footer>

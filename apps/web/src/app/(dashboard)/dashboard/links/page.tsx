@@ -24,6 +24,7 @@ import {
   Check,
   Copy,
   ExternalLink,
+  Link2,
   MoreHorizontal,
   Pause,
   Play,
@@ -31,9 +32,11 @@ import {
   Trash2,
 } from 'lucide-react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import * as React from 'react';
 import { toast } from 'sonner';
 
+import { DashboardPageHeader } from '@/components/dashboard/dashboard-page-header';
 import {
   activateLink,
   archiveLink,
@@ -90,14 +93,20 @@ function formatDate(value: string | null): string {
 export default function LinksPage() {
   const { currentWorkspaceId, workspaces } = useAuth();
   const queryClient = useQueryClient();
+  const searchParams = useSearchParams();
   const currentRole = workspaces.find((w) => w.id === currentWorkspaceId)?.role;
   const canManage =
     currentRole === 'OWNER' ||
     currentRole === 'ADMIN' ||
     currentRole === 'MEMBER';
 
-  const [search, setSearch] = React.useState('');
-  const [debouncedSearch, setDebouncedSearch] = React.useState('');
+  // Pre-fills from ?q= when arriving via the dashboard header's search
+  // box (see (dashboard)/layout.tsx's HeaderSearch) — read once on
+  // mount, not kept in sync afterward, so typing here doesn't fight
+  // with the URL.
+  const initialQuery = searchParams.get('q') ?? '';
+  const [search, setSearch] = React.useState(initialQuery);
+  const [debouncedSearch, setDebouncedSearch] = React.useState(initialQuery);
   const [status, setStatus] = React.useState<LinkStatus | 'ALL'>('ALL');
   const [page, setPage] = React.useState(1);
   const [createOpen, setCreateOpen] = React.useState(false);
@@ -203,20 +212,18 @@ export default function LinksPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Links</h1>
-          <p className="text-muted-foreground">
-            Create and manage your short links.
-          </p>
-        </div>
-        {canManage && (
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Create link
-          </Button>
-        )}
-      </div>
+      <DashboardPageHeader
+        title="Links"
+        description="Create and manage your short links."
+        actions={
+          canManage && (
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Create link
+            </Button>
+          )
+        }
+      />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Input
@@ -261,7 +268,11 @@ export default function LinksPage() {
 
       {!isLoading && !isError && data && data.items.length === 0 && (
         <div className="rounded-lg border border-dashed py-16 text-center">
-          <p className="text-muted-foreground">
+          <Link2
+            className="mx-auto h-8 w-8 text-muted-foreground/50"
+            aria-hidden="true"
+          />
+          <p className="mt-3 text-muted-foreground">
             {debouncedSearch || status !== 'ALL'
               ? 'No links match your filters.'
               : "You haven't created any links yet."}
@@ -277,11 +288,11 @@ export default function LinksPage() {
 
       {!isLoading && !isError && data && data.items.length > 0 && (
         <>
-          <div className="rounded-md border">
+          <div className="rounded-lg border bg-card">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Short URL</TableHead>
+                  <TableHead>Short link</TableHead>
                   <TableHead>Title</TableHead>
                   <TableHead>Destination</TableHead>
                   <TableHead>Status</TableHead>
@@ -292,24 +303,26 @@ export default function LinksPage() {
               </TableHeader>
               <TableBody>
                 {data.items.map((link) => (
-                  <TableRow key={link.id}>
+                  <TableRow key={link.id} className="group">
                     <TableCell>
                       <div className="flex items-center gap-1.5">
                         <Link
                           href={`/dashboard/links/${link.id}`}
-                          className="text-sm font-medium hover:underline"
+                          className="min-w-0 truncate font-mono text-sm font-semibold text-primary transition-colors hover:text-dash-highlight hover:underline"
                         >
-                          <code>{link.shortCode}</code>
+                          {link.publicUrl
+                            ? link.publicUrl.replace(/^https?:\/\//, '')
+                            : `${APP_URL.replace(/^https?:\/\//, '')}/${link.shortCode}`}
                         </Link>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-6 w-6"
+                          className="h-6 w-6 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
                           onClick={() => handleCopy(link)}
                           aria-label="Copy short URL"
                         >
                           {copiedId === link.id ? (
-                            <Check className="h-3.5 w-3.5 text-emerald-600" />
+                            <Check className="h-3.5 w-3.5 text-emerald-500" />
                           ) : (
                             <Copy className="h-3.5 w-3.5" />
                           )}

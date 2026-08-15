@@ -21,7 +21,13 @@ export function SiteHeader() {
   const [mobileOpen, setMobileOpen] = React.useState(false);
 
   return (
-    <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-white/10 bg-background/80 backdrop-blur">
+      {/* Fine orange gradient hairline — a restrained "powered on"
+          signal rather than a full-width flat brand bar. */}
+      <div
+        aria-hidden="true"
+        className="h-px w-full bg-gradient-to-r from-transparent via-primary/50 to-transparent"
+      />
       <div className="container flex h-16 items-center justify-between">
         <Logo />
 
@@ -68,7 +74,7 @@ export function SiteHeader() {
         <nav
           id="mobile-nav"
           aria-label="Mobile"
-          className="border-t bg-background px-4 pb-6 pt-2 md:hidden"
+          className="border-t border-white/10 bg-background px-4 pb-6 pt-2 md:hidden"
         >
           <ul className="flex flex-col gap-1">
             {NAV_LINKS.map((link) => (

@@ -53,6 +53,12 @@ module.exports = {
           DEFAULT: 'hsl(var(--popover))',
           foreground: 'hsl(var(--popover-foreground))',
         },
+        // Dashboard-only tokens (see packages/ui/src/styles/globals.css's
+        // .dashboard-shell scope) — unused outside apps/web's (dashboard)
+        // route group, harmless no-ops elsewhere since nothing else sets
+        // these CSS variables.
+        'dash-elevated': 'hsl(var(--dash-elevated))',
+        'dash-highlight': 'hsl(var(--dash-highlight))',
       },
       borderRadius: {
         lg: 'var(--radius)',

@@ -5,57 +5,57 @@ import { FeatureCard } from './feature-card';
 const FEATURES = [
   {
     icon: Link2,
-    eyebrow: 'Shorten',
-    title: 'Memorable, trackable links',
-    description:
-      'Turn long, unwieldy URLs into short, branded links you can share anywhere — created in seconds, tracked from the first click.',
+    title: 'Shorten',
+    description: 'Turn any URL into a clean, brandable link in milliseconds.',
   },
   {
     icon: BarChart3,
-    eyebrow: 'Track',
-    title: 'Real-time click intelligence',
-    description:
-      'Understand clicks, devices, countries, and referrers as they happen, broken down by link and by campaign.',
+    title: 'Track',
+    description: 'See clicks, visitors, and sources the moment they happen.',
   },
   {
     icon: Globe2,
-    eyebrow: 'Brand',
-    title: 'Custom domains, your brand',
-    description:
-      'Connect your own domain so every link you share looks and feels like part of your product, not a third-party redirect.',
+    title: 'Brand',
+    description: 'Route every link through a domain your audience recognizes.',
   },
   {
     icon: Webhook,
-    eyebrow: 'Automate',
-    title: 'API and webhooks built in',
-    description:
-      'Create and manage links programmatically, and get notified the moment something happens with real-time webhook events.',
+    title: 'Automate',
+    description: 'Create links and react to activity from your own systems.',
   },
   {
     icon: Users,
-    eyebrow: 'Scale',
-    title: 'Teams, permissions, billing',
-    description:
-      'Invite your team with role-based access, and manage plans and usage from one workspace as you grow.',
+    title: 'Scale',
+    description: 'Workspaces, roles, and permissions built for real teams.',
   },
 ] as const;
 
 export function FeatureGrid() {
   return (
-    <section id="features" className="border-t bg-background py-24 sm:py-32">
+    <section
+      id="features"
+      className="border-t border-white/10 bg-background py-20 sm:py-24"
+    >
       <div className="container">
         <div className="mx-auto max-w-2xl text-center">
-          <h2 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            Everything a link needs to work harder
+          <p className="font-mono text-xs font-semibold uppercase tracking-wide text-primary">
+            The core loop
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+            Everything a link needs to do its job
           </h2>
-          <p className="mt-4 text-lg text-muted-foreground">
-            One platform for creating, branding, tracking, and automating every
-            link your team shares.
+          <p className="mt-4 text-muted-foreground">
+            From the moment you shorten it to the moment someone acts on it.
           </p>
         </div>
-        <div className="mx-auto mt-16 grid max-w-5xl gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {FEATURES.map((feature) => (
-            <FeatureCard key={feature.eyebrow} {...feature} />
+
+        <div className="mt-12 grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
+          {FEATURES.map((feature, i) => (
+            <FeatureCard
+              key={feature.title}
+              index={String(i + 1).padStart(2, '0')}
+              {...feature}
+            />
           ))}
         </div>
       </div>

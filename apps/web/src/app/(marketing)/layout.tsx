@@ -12,7 +12,20 @@ import { SiteHeader } from '@/components/marketing/site-header';
  */
 export default function MarketingLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-screen flex-col">
+    // The marketing site is intentionally always dark — a fixed brand
+    // choice, not a light/dark preference — independent of the
+    // system/user theme toggle that (dashboard) and (admin) respect.
+    // Tailwind's `darkMode: ['class']` config means this single class
+    // flips every semantic token (bg-background, text-foreground, the
+    // `dark:` variants already used throughout components/marketing)
+    // for this whole subtree. `text-foreground` is set explicitly here
+    // (not just bg-background) because plain CSS `color` inheritance
+    // otherwise falls through to <body>'s already-computed light-mode
+    // color — body sits outside this scoped .dark div, so anything in
+    // this subtree that doesn't set its own text color (e.g. a button
+    // variant with no explicit text-* class) would silently inherit
+    // the wrong, low-contrast value instead of re-resolving here.
+    <div className="marketing-shell dark flex min-h-screen flex-col bg-background text-foreground">
       <SiteHeader />
       <main className="flex-1">{children}</main>
       <SiteFooter />

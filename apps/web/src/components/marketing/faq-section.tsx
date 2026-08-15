@@ -61,7 +61,7 @@ function FaqItem({
           aria-expanded={isOpen}
           aria-controls={panelId}
           onClick={onToggle}
-          className="flex w-full items-center justify-between gap-4 py-4 text-left text-base font-medium text-foreground transition-colors hover:text-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 dark:hover:text-orange-400"
+          className="flex w-full items-center justify-between gap-4 py-4 text-left text-base font-medium text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
           {question}
           <ChevronDown
@@ -94,10 +94,16 @@ export function FaqSection() {
   const [openIndex, setOpenIndex] = React.useState<number | null>(0);
 
   return (
-    <section id="faq" className="border-t bg-background py-24 sm:py-32">
+    <section
+      id="faq"
+      className="border-t border-white/10 bg-muted py-24 sm:py-32"
+    >
       <div className="container">
         <div className="mx-auto max-w-2xl text-center">
-          <h2 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+          <p className="font-mono text-xs font-semibold uppercase tracking-wide text-primary">
+            Questions
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
             Frequently asked questions
           </h2>
         </div>

@@ -31,8 +31,8 @@ export function PricingCard({
     <Card
       className={
         highlighted
-          ? 'relative border-orange-300 shadow-md ring-1 ring-orange-300 dark:border-orange-500/40 dark:ring-orange-500/40'
-          : 'border-border/80'
+          ? 'relative border-primary/60 bg-card shadow-[0_0_0_1px_hsl(var(--primary)/0.3),0_0_32px_-10px_hsl(var(--primary)/0.45)]'
+          : 'border-white/10 bg-card transition-colors hover:border-primary/30'
       }
     >
       {highlighted && (
@@ -57,7 +57,7 @@ export function PricingCard({
           {features.map((feature) => (
             <li key={feature} className="flex items-start gap-2 text-sm">
               <Check
-                className="mt-0.5 h-4 w-4 shrink-0 text-orange-600 dark:text-orange-400"
+                className="mt-0.5 h-4 w-4 shrink-0 text-primary"
                 aria-hidden="true"
               />
               <span className="text-foreground">{feature}</span>

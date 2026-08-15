@@ -29,6 +29,7 @@ import {
   DateRangePicker,
 } from '@/components/analytics/date-range-picker';
 import { TimeSeriesChart } from '@/components/analytics/time-series-chart';
+import { DashboardPageHeader } from '@/components/dashboard/dashboard-page-header';
 import {
   getDevices,
   getGeography,
@@ -108,15 +109,11 @@ export default function AnalyticsDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Analytics</h1>
-          <p className="text-muted-foreground">
-            Traffic and engagement across your links.
-          </p>
-        </div>
-        <DateRangePicker value={dateRange} onChange={setDateRange} />
-      </div>
+      <DashboardPageHeader
+        title="Analytics"
+        description="Traffic and engagement across your links."
+        actions={<DateRangePicker value={dateRange} onChange={setDateRange} />}
+      />
 
       {/* Summary cards */}
       {overview.isLoading ? (
@@ -241,8 +238,8 @@ export default function AnalyticsDashboardPage() {
                       <TableCell className="max-w-[220px] truncate">
                         {link.title ?? link.shortCode}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {link.clicks}
+                      <TableCell className="text-right font-semibold tabular-nums text-primary">
+                        {link.clicks.toLocaleString()}
                       </TableCell>
                     </TableRow>
                   ))}

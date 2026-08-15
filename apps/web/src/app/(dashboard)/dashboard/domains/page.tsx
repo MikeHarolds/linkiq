@@ -29,6 +29,7 @@ import {
 import * as React from 'react';
 import { toast } from 'sonner';
 
+import { DashboardPageHeader } from '@/components/dashboard/dashboard-page-header';
 import { AddDomainDialog } from '@/components/domains/add-domain-dialog';
 import { DomainStatusBadge } from '@/components/domains/domain-status-badge';
 import {
@@ -155,23 +156,23 @@ export default function DomainsDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Custom domains
-          </h1>
-          <p className="text-muted-foreground">
+      <DashboardPageHeader
+        title="Custom domains"
+        description={
+          <>
             Serve your short links from your own branded domain, e.g.{' '}
             <code>go.acme.com</code>.
-          </p>
-        </div>
-        {canManage && (
-          <Button onClick={() => setAddOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add domain
-          </Button>
-        )}
-      </div>
+          </>
+        }
+        actions={
+          canManage && (
+            <Button onClick={() => setAddOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add domain
+            </Button>
+          )
+        }
+      />
 
       {isLoading && (
         <div
@@ -206,7 +207,7 @@ export default function DomainsDashboardPage() {
       )}
 
       {!isLoading && !isError && data && data.items.length > 0 && (
-        <div className="rounded-md border">
+        <div className="rounded-lg border bg-card">
           <Table>
             <TableHeader>
               <TableRow>
@@ -220,7 +221,7 @@ export default function DomainsDashboardPage() {
             <TableBody>
               {data.items.map((domain) => (
                 <TableRow key={domain.id}>
-                  <TableCell className="font-medium">
+                  <TableCell className="font-mono text-sm font-semibold text-primary">
                     {domain.normalizedDomain}
                   </TableCell>
                   <TableCell>

@@ -2,6 +2,7 @@
 
 import type { PlanDto } from '@linkiq/types';
 import {
+  Badge,
   Button,
   Card,
   CardContent,
@@ -23,6 +24,7 @@ import { USAGE_BAR_KEYS } from '@/components/billing/feature-labels';
 import { PlanCard } from '@/components/billing/plan-card';
 import { SubscriptionStatusBadge } from '@/components/billing/subscription-status-badge';
 import { UsageRow } from '@/components/billing/usage-row';
+import { DashboardPageHeader } from '@/components/dashboard/dashboard-page-header';
 import {
   cancelSubscription,
   changePlan,
@@ -33,6 +35,15 @@ import {
   subscribe,
 } from '@/lib/billing-api';
 import { ApiError, useAuth } from '@/providers/auth-provider';
+
+function invoiceStatusVariant(
+  status: string,
+): 'success' | 'secondary' | 'destructive' | 'outline' {
+  if (status === 'PAID') return 'success';
+  if (status === 'VOID' || status === 'UNCOLLECTIBLE') return 'destructive';
+  if (status === 'REFUNDED') return 'secondary';
+  return 'outline';
+}
 
 function formatDate(value: string | null): string {
   if (!value) return '—';
@@ -199,12 +210,10 @@ export default function BillingDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
-        <p className="text-muted-foreground">
-          Manage your plan, usage, and billing history.
-        </p>
-      </div>
+      <DashboardPageHeader
+        title="Billing"
+        description="Manage your plan, usage, and billing history."
+      />
 
       <Card>
         <CardHeader>
@@ -336,15 +345,24 @@ export default function BillingDashboardPage() {
               <TableBody>
                 {invoicesQuery.data.map((invoice) => (
                   <TableRow key={invoice.id}>
-                    <TableCell>{invoice.number}</TableCell>
-                    <TableCell>{invoice.status}</TableCell>
+                    <TableCell className="font-mono text-sm">
+                      {invoice.number}
+                    </TableCell>
                     <TableCell>
+                      <Badge variant={invoiceStatusVariant(invoice.status)}>
+                        {invoice.status.charAt(0) +
+                          invoice.status.slice(1).toLowerCase()}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="font-semibold tabular-nums">
                       {(invoice.amount / 100).toLocaleString('en-US', {
                         style: 'currency',
                         currency: invoice.currency,
                       })}
                     </TableCell>
-                    <TableCell>{formatDate(invoice.issueDate)}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {formatDate(invoice.issueDate)}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

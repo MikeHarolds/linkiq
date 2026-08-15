@@ -1,5 +1,15 @@
 import { Badge, Button, Card } from '@linkiq/ui';
-import { Key, Terminal, Webhook, BarChart3, ArrowRight } from 'lucide-react';
+import {
+  ArrowRight,
+  BarChart3,
+  Globe2,
+  Key,
+  MousePointerClick,
+  ShieldCheck,
+  Terminal,
+  Users,
+  Webhook,
+} from 'lucide-react';
 import Link from 'next/link';
 import type { ComponentProps } from 'react';
 
@@ -10,19 +20,31 @@ import { HeroSection } from '@/components/marketing/hero-section';
 import { PricingCard } from '@/components/marketing/pricing-card';
 import { StatStrip } from '@/components/marketing/stat-strip';
 
+// Real, already-shipped metrics this preview reuses (see
+// components/marketing/hero-section.tsx and the actual dashboard's
+// analytics — the same categories: clicks, visitors, countries,
+// devices, referrers, top links). Static and illustrative, not a live
+// feed, and labeled as such.
 const CLICK_TREND = [28, 34, 22, 40, 52, 38, 61, 48, 70, 55, 82, 66, 90, 74];
 
+const SHOWCASE_STATS = [
+  { label: 'Clicks', value: '28.4K', icon: MousePointerClick },
+  { label: 'Visitors', value: '9.7K', icon: Users },
+  { label: 'Countries', value: '24', icon: Globe2 },
+  { label: 'Devices', value: '3 types', icon: BarChart3 },
+] as const;
+
 const TOP_LINKS = [
-  { code: 'linkiq.io/summer26', clicks: '4,821' },
-  { code: 'linkiq.io/launch-day', clicks: '3,209' },
-  { code: 'linkiq.io/webinar-q3', clicks: '1,984' },
+  { code: 'go.acme.com/summer26', clicks: '4,821' },
+  { code: 'go.acme.com/launch-day', clicks: '3,209' },
+  { code: 'go.acme.com/webinar-q3', clicks: '1,984' },
 ];
 
-const TOP_COUNTRIES = [
-  { country: 'United States', pct: 42 },
-  { country: 'United Kingdom', pct: 21 },
-  { country: 'Germany', pct: 14 },
-  { country: 'Nigeria', pct: 9 },
+const REFERRERS = [
+  { source: 'Social', pct: 42 },
+  { source: 'Search', pct: 24 },
+  { source: 'Direct', pct: 18 },
+  { source: 'Referral', pct: 10 },
 ];
 
 const PRICING_TIERS: Array<
@@ -94,32 +116,73 @@ function ProductShowcaseSection() {
   const maxTrend = Math.max(...CLICK_TREND);
 
   return (
-    <section id="product" className="border-t bg-muted/30 py-24 sm:py-32">
-      <div className="container">
+    <section
+      id="product"
+      className="relative border-t border-white/10 bg-muted py-24 sm:py-32"
+    >
+      <div
+        aria-hidden="true"
+        className="bg-grid-dots pointer-events-none absolute inset-0 opacity-[0.08]"
+      />
+      <div className="container relative">
         <div className="mx-auto max-w-2xl text-center">
-          <h2 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            See your links the moment they perform
+          <p className="font-mono text-xs font-semibold uppercase tracking-wide text-primary">
+            See it in action
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+            Every click, the moment it happens
           </h2>
           <p className="mt-4 text-lg text-muted-foreground">
-            A preview of the analytics workspace every LinkIQ link reports into
-            — clicks over time, top links, and where your audience is coming
-            from.
+            This is the same analytics workspace every LinkIQ link reports into
+            — who clicked, where they came from, and which links are actually
+            working.
           </p>
         </div>
 
-        <Card className="mx-auto mt-14 max-w-4xl overflow-hidden border-border/80 p-0 shadow-lg">
-          <div className="flex items-center justify-between border-b bg-background px-6 py-4">
-            <div>
-              <p className="text-sm font-semibold text-foreground">
-                Analytics overview
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Illustrative product preview
-              </p>
+        <Card className="mx-auto mt-14 max-w-4xl overflow-hidden border-white/10 bg-card p-0 shadow-2xl">
+          <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+            <div className="flex items-center gap-2">
+              <span
+                className="animate-signal-pulse h-1.5 w-1.5 rounded-full bg-emerald-400"
+                aria-hidden="true"
+              />
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  Analytics overview
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Illustrative product preview
+                </p>
+              </div>
             </div>
-            <Badge variant="secondary" className="text-xs">
+            <Badge
+              variant="outline"
+              className="border-white/10 bg-white/5 text-xs text-muted-foreground"
+            >
               Last 30 days
             </Badge>
+          </div>
+
+          <div className="grid grid-cols-2 gap-px border-b border-white/10 bg-white/5 sm:grid-cols-4">
+            {SHOWCASE_STATS.map((stat) => (
+              <div
+                key={stat.label}
+                className="flex items-center gap-2.5 bg-card px-4 py-3"
+              >
+                <stat.icon
+                  className="h-4 w-4 shrink-0 text-primary"
+                  aria-hidden="true"
+                />
+                <div>
+                  <p className="text-sm font-semibold tabular-nums text-foreground">
+                    {stat.value}
+                  </p>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {stat.label}
+                  </p>
+                </div>
+              </div>
+            ))}
           </div>
 
           <div className="grid gap-6 p-6 lg:grid-cols-5">
@@ -135,7 +198,7 @@ function ProductShowcaseSection() {
                 {CLICK_TREND.map((value, index) => (
                   <div
                     key={index}
-                    className="flex-1 rounded-t-sm bg-orange-200 dark:bg-orange-500/25"
+                    className="flex-1 rounded-t-sm bg-gradient-to-t from-primary/60 to-primary/15"
                     style={{ height: `${(value / maxTrend) * 100}%` }}
                   />
                 ))}
@@ -148,12 +211,12 @@ function ProductShowcaseSection() {
                 {TOP_LINKS.map((link) => (
                   <li
                     key={link.code}
-                    className="flex items-center justify-between rounded-md border bg-background px-3 py-2 text-sm"
+                    className="flex items-center justify-between rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
                   >
-                    <span className="font-medium text-foreground">
+                    <span className="font-mono font-medium text-primary">
                       {link.code}
                     </span>
-                    <span className="text-muted-foreground">
+                    <span className="tabular-nums text-muted-foreground">
                       {link.clicks} clicks
                     </span>
                   </li>
@@ -163,20 +226,20 @@ function ProductShowcaseSection() {
 
             <div className="lg:col-span-2">
               <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Top countries
+                Referrers
               </p>
               <ul className="space-y-3">
-                {TOP_COUNTRIES.map((entry) => (
-                  <li key={entry.country}>
+                {REFERRERS.map((entry) => (
+                  <li key={entry.source}>
                     <div className="mb-1 flex items-center justify-between text-sm">
-                      <span className="text-foreground">{entry.country}</span>
+                      <span className="text-foreground">{entry.source}</span>
                       <span className="text-muted-foreground">
                         {entry.pct}%
                       </span>
                     </div>
-                    <div className="h-1.5 w-full rounded-full bg-muted">
+                    <div className="h-1.5 w-full rounded-full bg-white/10">
                       <div
-                        className="h-1.5 rounded-full bg-orange-500"
+                        className="h-1.5 rounded-full bg-primary"
                         style={{ width: `${entry.pct}%` }}
                       />
                     </div>
@@ -193,10 +256,10 @@ function ProductShowcaseSection() {
 
 function CustomDomainsSection() {
   return (
-    <section className="border-t bg-background py-24 sm:py-32">
+    <section className="border-t border-white/10 bg-background py-24 sm:py-32">
       <div className="container grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
+          <p className="font-mono text-xs font-semibold uppercase tracking-wide text-primary">
             Custom domains
           </p>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
@@ -205,13 +268,14 @@ function CustomDomainsSection() {
             Your brand.
           </h2>
           <p className="mt-4 max-w-md text-muted-foreground">
-            Connect your own domain and make every shared link feel like part of
-            your brand, not a third-party redirect.
+            A link that says go.yourbrand.com earns more trust — and more clicks
+            — than one that says linkiq.io. Connect your domain once; every link
+            you create after that inherits it.
           </p>
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-xl border bg-muted/30 p-5">
+          <div className="rounded-xl border border-white/10 bg-card p-5">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Default
             </p>
@@ -219,11 +283,17 @@ function CustomDomainsSection() {
               linkiq.io/a8Kx92
             </p>
           </div>
-          <div className="rounded-xl border border-orange-200 bg-orange-50 p-5 dark:border-orange-500/30 dark:bg-orange-500/10">
-            <p className="text-xs font-medium uppercase tracking-wide text-orange-700 dark:text-orange-300">
-              Branded
-            </p>
-            <p className="mt-2 font-mono text-lg font-medium text-orange-700 dark:text-orange-300">
+          <div className="relative overflow-hidden rounded-xl border border-primary/30 bg-primary/10 p-5">
+            <div className="flex items-center justify-between">
+              <p className="font-mono text-xs font-medium uppercase tracking-wide text-dash-highlight">
+                Branded
+              </p>
+              <span className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-emerald-400">
+                <ShieldCheck className="h-3 w-3" aria-hidden="true" />
+                DNS verified
+              </span>
+            </div>
+            <p className="mt-2 font-mono text-lg font-medium text-dash-highlight">
               go.yourbrand.com/summer
             </p>
           </div>
@@ -235,46 +305,41 @@ function CustomDomainsSection() {
 
 function DeveloperSection() {
   return (
-    <section id="developers" className="border-t bg-muted/30 py-24 sm:py-32">
+    <section
+      id="developers"
+      className="border-t border-white/10 bg-muted py-24 sm:py-32"
+    >
       <div className="container grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
         <div>
-          <h2 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            Built for developers.
+          <p className="font-mono text-xs font-semibold uppercase tracking-wide text-primary">
+            For developers
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+            Built to be automated,
             <br />
-            Ready for automation.
+            not just clicked through.
           </h2>
           <p className="mt-4 max-w-md text-muted-foreground">
-            Create and manage links programmatically with a scoped API key, and
-            react to activity in real time with webhook events.
+            Create and manage links from your own systems with a scoped API key,
+            and react to activity in real time with webhook events — no
+            dashboard required.
           </p>
           <ul className="mt-6 grid grid-cols-2 gap-4 text-sm">
             <li className="flex items-center gap-2 text-foreground">
-              <Terminal
-                className="h-4 w-4 text-orange-600 dark:text-orange-400"
-                aria-hidden="true"
-              />
+              <Terminal className="h-4 w-4 text-primary" aria-hidden="true" />
               REST API
             </li>
             <li className="flex items-center gap-2 text-foreground">
-              <Key
-                className="h-4 w-4 text-orange-600 dark:text-orange-400"
-                aria-hidden="true"
-              />
-              API keys
+              <Key className="h-4 w-4 text-primary" aria-hidden="true" />
+              Scoped API keys
             </li>
             <li className="flex items-center gap-2 text-foreground">
-              <Webhook
-                className="h-4 w-4 text-orange-600 dark:text-orange-400"
-                aria-hidden="true"
-              />
+              <Webhook className="h-4 w-4 text-primary" aria-hidden="true" />
               Webhooks
             </li>
             <li className="flex items-center gap-2 text-foreground">
-              <BarChart3
-                className="h-4 w-4 text-orange-600 dark:text-orange-400"
-                aria-hidden="true"
-              />
-              Analytics
+              <BarChart3 className="h-4 w-4 text-primary" aria-hidden="true" />
+              Analytics API
             </li>
           </ul>
           <Button asChild variant="link" className="mt-4 h-auto p-0">
@@ -285,19 +350,50 @@ function DeveloperSection() {
           </Button>
         </div>
 
-        <Card className="overflow-hidden border-border/80 bg-[#0B0F19] p-0 text-left shadow-lg">
-          <div className="flex items-center gap-1.5 border-b border-white/10 px-4 py-3">
-            <span className="h-2.5 w-2.5 rounded-full bg-white/20" />
-            <span className="h-2.5 w-2.5 rounded-full bg-white/20" />
-            <span className="h-2.5 w-2.5 rounded-full bg-white/20" />
+        {/* Same terminal-panel vocabulary as the dashboard's Developers
+            page (deep-dark fixed surface, traffic-light dots, orange
+            comment-style accents) — deliberately reused, not
+            reinvented, so the two surfaces read as one product. */}
+        <div className="overflow-hidden rounded-xl border border-white/10 bg-[#05080D] text-left shadow-2xl">
+          <div className="flex items-center gap-1.5 border-b border-white/10 bg-white/[0.03] px-4 py-3">
+            <span className="h-2.5 w-2.5 rounded-full bg-white/15" />
+            <span className="h-2.5 w-2.5 rounded-full bg-white/15" />
+            <span className="h-2.5 w-2.5 rounded-full bg-white/15" />
+            <span className="ml-2 font-mono text-xs text-[#94A3B8]">
+              create-link.sh
+            </span>
           </div>
-          <pre className="overflow-x-auto p-5 text-sm leading-relaxed text-slate-200">
-            <code>{`curl https://api.linkiq.io/api/v1/links \\
-  -H "Authorization: Bearer lk_live_..." \\
-  -H "Content-Type: application/json" \\
-  -d '{ "destinationUrl": "https://example.com" }'`}</code>
+          <pre className="overflow-x-auto p-5 text-sm leading-relaxed">
+            <code className="text-[#F8FAFC]">
+              <span className="text-[#94A3B8]">
+                # Authenticate with a scoped key
+              </span>
+              {'\n'}curl https://api.linkiq.io/v1/links \{'\n'}
+              {'  '}
+              <span className="text-[#FF8A3D]">-H</span> &quot;Authorization:
+              Bearer lk_live_••••3f2a&quot; \{'\n'}
+              {'  '}
+              <span className="text-[#FF8A3D]">-d</span> {'{'}{' '}
+              &quot;destinationUrl&quot;: &quot;https://acme.com/sale&quot;{' '}
+              {'}'}
+            </code>
           </pre>
-        </Card>
+          <div className="border-t border-white/10 px-5 py-4">
+            <p className="mb-2 font-mono text-[10px] uppercase tracking-wide text-[#94A3B8]">
+              # Response 201
+            </p>
+            <pre className="overflow-x-auto text-sm leading-relaxed">
+              <code className="text-[#F8FAFC]">
+                {'{ '}
+                <span className="text-[#FF8A3D]">&quot;shortUrl&quot;</span>:
+                &quot;go.acme.com/x7K2p&quot;,{' '}
+                <span className="text-[#FF8A3D]">&quot;status&quot;</span>:
+                &quot;ACTIVE&quot;
+                {' }'}
+              </code>
+            </pre>
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -305,15 +401,18 @@ function DeveloperSection() {
 
 function PricingSection() {
   return (
-    <section id="pricing" className="border-t bg-background py-24 sm:py-32">
+    <section
+      id="pricing"
+      className="border-t border-white/10 bg-background py-24 sm:py-32"
+    >
       <div className="container">
         <div className="mx-auto max-w-2xl text-center">
-          <h2 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+          <p className="font-mono text-xs font-semibold uppercase tracking-wide text-primary">
             Simple, transparent pricing
-          </h2>
-          <p className="mt-4 text-lg text-muted-foreground">
-            Start free. Upgrade as your links, clicks, and team grow.
           </p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+            Choose the plan that grows with you
+          </h2>
         </div>
 
         <div className="mx-auto mt-14 grid max-w-6xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -322,16 +421,18 @@ function PricingSection() {
           ))}
         </div>
 
-        <p className="mt-8 text-center text-sm text-muted-foreground">
-          Need custom limits or dedicated support?{' '}
-          <Link
-            href="/register"
-            className="font-medium text-orange-600 underline-offset-4 hover:underline dark:text-orange-400"
-          >
-            Talk to us about Enterprise
-          </Link>
-          .
-        </p>
+        <div className="mx-auto mt-6 flex max-w-6xl flex-col items-center justify-between gap-3 rounded-xl border border-white/10 bg-card p-6 sm:flex-row">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Enterprise</p>
+            <p className="text-sm text-muted-foreground">
+              Custom limits, dedicated support, and contract billing for larger
+              organizations.
+            </p>
+          </div>
+          <Button asChild variant="outline" className="shrink-0">
+            <Link href="/register">Contact sales</Link>
+          </Button>
+        </div>
       </div>
     </section>
   );

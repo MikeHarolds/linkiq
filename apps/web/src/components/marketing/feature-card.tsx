@@ -1,37 +1,40 @@
-import { Card, CardContent } from '@linkiq/ui';
 import type { LucideIcon } from 'lucide-react';
 
 interface FeatureCardProps {
   icon: LucideIcon;
-  eyebrow: string;
+  index: string;
   title: string;
   description: string;
 }
 
 export function FeatureCard({
   icon: Icon,
-  eyebrow,
+  index,
   title,
   description,
 }: FeatureCardProps) {
   return (
-    <Card className="border-border/80 transition-shadow duration-200 hover:shadow-md">
-      <CardContent className="flex flex-col gap-4 p-6">
-        <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400">
+    <div className="group relative flex flex-1 flex-col gap-3 overflow-hidden rounded-xl border border-white/10 bg-card p-5 transition-colors duration-200 hover:border-primary/30">
+      {/* Thin top accent line that lights up on hover — a restrained
+          "powered" cue instead of a full glowing border. */}
+      <span
+        aria-hidden="true"
+        className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/70 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+      />
+      <div className="flex items-center justify-between">
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Icon className="h-5 w-5" aria-hidden="true" />
         </div>
-        <div className="space-y-1.5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
-            {eyebrow}
-          </p>
-          <h3 className="text-lg font-semibold tracking-tight text-foreground">
-            {title}
-          </h3>
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            {description}
-          </p>
-        </div>
-      </CardContent>
-    </Card>
+        <span className="font-mono text-xs text-muted-foreground/60">
+          {index}
+        </span>
+      </div>
+      <div className="space-y-1">
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          {description}
+        </p>
+      </div>
+    </div>
   );
 }

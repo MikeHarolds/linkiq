@@ -23,6 +23,7 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 
+import { DashboardPageHeader } from '@/components/dashboard/dashboard-page-header';
 import { api } from '@/lib/api-client';
 import {
   changePasswordSchema,
@@ -263,12 +264,10 @@ function SessionsSection() {
 export default function SettingsPage() {
   return (
     <div className="max-w-2xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground">
-          Manage your profile, password, and sessions.
-        </p>
-      </div>
+      <DashboardPageHeader
+        title="Settings"
+        description="Manage your profile, password, and sessions."
+      />
       <ProfileSection />
       <Separator />
       <PasswordSection />
