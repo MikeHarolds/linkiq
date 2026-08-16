@@ -23,6 +23,9 @@ npm-debug.log*
 # Prisma
 apps/api/prisma/migrations/dev.db
 
+# Uploaded media (branding logo/favicon — local disk storage provider)
+apps/api/uploads/
+
 # OS
 .DS_Store
 Thumbs.db

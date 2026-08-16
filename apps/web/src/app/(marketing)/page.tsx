@@ -1,3 +1,4 @@
+import type { LandingPageSectionKey, PublicLandingPageContentDto, PublicPlanDto } from '@linkiq/types';
 import { Badge, Button, Card } from '@linkiq/ui';
 import {
   ArrowRight,
@@ -11,14 +12,15 @@ import {
   Webhook,
 } from 'lucide-react';
 import Link from 'next/link';
-import type { ComponentProps } from 'react';
 
+import { FEATURE_LABELS } from '@/components/billing/feature-labels';
 import { CtaSection } from '@/components/marketing/cta-section';
 import { FaqSection } from '@/components/marketing/faq-section';
 import { FeatureGrid } from '@/components/marketing/feature-grid';
 import { HeroSection } from '@/components/marketing/hero-section';
 import { PricingCard } from '@/components/marketing/pricing-card';
 import { StatStrip } from '@/components/marketing/stat-strip';
+import { getServerLandingPageContent, getServerPlans } from '@/lib/server/landing-page-data';
 
 // Real, already-shipped metrics this preview reuses (see
 // components/marketing/hero-section.tsx and the actual dashboard's
@@ -47,73 +49,19 @@ const REFERRERS = [
   { source: 'Referral', pct: 10 },
 ];
 
-const PRICING_TIERS: Array<
-  ComponentProps<typeof PricingCard> & { key: string }
-> = [
-  {
-    key: 'free',
-    name: 'Free',
-    price: '$0',
-    description: 'Get started with the essentials, no card required.',
-    features: [
-      '25 links',
-      '1,000 clicks / month',
-      '3 custom domains',
-      '3 team members',
-    ],
-    ctaLabel: 'Start for free',
-    href: '/register',
-  },
-  {
-    key: 'starter',
-    name: 'Starter',
-    price: '$19',
-    priceSuffix: '/mo',
-    description: 'For individuals and small projects ready to grow.',
-    features: [
-      '500 links',
-      '25,000 clicks / month',
-      '5 custom domains',
-      '14-day free trial',
-    ],
-    ctaLabel: 'Start for free',
-    href: '/register',
-  },
-  {
-    key: 'professional',
-    name: 'Professional',
-    price: '$49',
-    priceSuffix: '/mo',
-    description: 'For growing teams running multiple campaigns.',
-    features: [
-      '5,000 links',
-      '250,000 clicks / month',
-      '10 custom domains',
-      '20 team members',
-    ],
-    ctaLabel: 'Start for free',
-    href: '/register',
-    highlighted: true,
-  },
-  {
-    key: 'business',
-    name: 'Business',
-    price: '$149',
-    priceSuffix: '/mo',
-    description: 'For larger organizations with advanced branding needs.',
-    features: [
-      '50,000 links',
-      '2,000,000 clicks / month',
-      '25 custom domains',
-      '100 team members',
-    ],
-    ctaLabel: 'Start for free',
-    href: '/register',
-  },
-];
+type SectionContent = PublicLandingPageContentDto['sections'][number];
 
-function ProductShowcaseSection() {
+function findSection(sections: SectionContent[], key: LandingPageSectionKey): SectionContent | undefined {
+  return sections.find((s) => s.key === key);
+}
+
+function ProductShowcaseSection({ content }: { content?: SectionContent }) {
   const maxTrend = Math.max(...CLICK_TREND);
+  const eyebrow = content?.eyebrow ?? 'See it in action';
+  const headline = content?.headline ?? 'Every click, the moment it happens';
+  const description =
+    content?.description ??
+    'This is the same analytics workspace every LinkIQ link reports into — who clicked, where they came from, and which links are actually working.';
 
   return (
     <section
@@ -127,16 +75,12 @@ function ProductShowcaseSection() {
       <div className="container relative">
         <div className="mx-auto max-w-2xl text-center">
           <p className="font-mono text-xs font-semibold uppercase tracking-wide text-primary">
-            See it in action
+            {eyebrow}
           </p>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            Every click, the moment it happens
+            {headline}
           </h2>
-          <p className="mt-4 text-lg text-muted-foreground">
-            This is the same analytics workspace every LinkIQ link reports into
-            — who clicked, where they came from, and which links are actually
-            working.
-          </p>
+          <p className="mt-4 text-lg text-muted-foreground">{description}</p>
         </div>
 
         <Card className="mx-auto mt-14 max-w-4xl overflow-hidden border-white/10 bg-card p-0 shadow-2xl">
@@ -254,24 +198,24 @@ function ProductShowcaseSection() {
   );
 }
 
-function CustomDomainsSection() {
+function CustomDomainsSection({ content }: { content?: SectionContent }) {
+  const eyebrow = content?.eyebrow ?? 'Custom domains';
+  const headline = content?.headline ?? 'Your links. Your brand.';
+  const description =
+    content?.description ??
+    'A link that says go.yourbrand.com earns more trust — and more clicks — than one that says linkiq.io. Connect your domain once; every link you create after that inherits it.';
+
   return (
     <section className="border-t border-white/10 bg-background py-24 sm:py-32">
       <div className="container grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
         <div>
           <p className="font-mono text-xs font-semibold uppercase tracking-wide text-primary">
-            Custom domains
+            {eyebrow}
           </p>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            Your links.
-            <br />
-            Your brand.
+            {headline}
           </h2>
-          <p className="mt-4 max-w-md text-muted-foreground">
-            A link that says go.yourbrand.com earns more trust — and more clicks
-            — than one that says linkiq.io. Connect your domain once; every link
-            you create after that inherits it.
-          </p>
+          <p className="mt-4 max-w-md text-muted-foreground">{description}</p>
         </div>
 
         <div className="space-y-4">
@@ -303,7 +247,15 @@ function CustomDomainsSection() {
   );
 }
 
-function DeveloperSection() {
+function DeveloperSection({ content }: { content?: SectionContent }) {
+  const eyebrow = content?.eyebrow ?? 'For developers';
+  const headline = content?.headline ?? 'Built to be automated, not just clicked through.';
+  const description =
+    content?.description ??
+    'Create and manage links from your own systems with a scoped API key, and react to activity in real time with webhook events — no dashboard required.';
+  const primaryCtaText = content?.primaryCtaText ?? 'Get an API key';
+  const primaryCtaUrl = content?.primaryCtaUrl ?? '/register';
+
   return (
     <section
       id="developers"
@@ -312,18 +264,12 @@ function DeveloperSection() {
       <div className="container grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
         <div>
           <p className="font-mono text-xs font-semibold uppercase tracking-wide text-primary">
-            For developers
+            {eyebrow}
           </p>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            Built to be automated,
-            <br />
-            not just clicked through.
+            {headline}
           </h2>
-          <p className="mt-4 max-w-md text-muted-foreground">
-            Create and manage links from your own systems with a scoped API key,
-            and react to activity in real time with webhook events — no
-            dashboard required.
-          </p>
+          <p className="mt-4 max-w-md text-muted-foreground">{description}</p>
           <ul className="mt-6 grid grid-cols-2 gap-4 text-sm">
             <li className="flex items-center gap-2 text-foreground">
               <Terminal className="h-4 w-4 text-primary" aria-hidden="true" />
@@ -342,12 +288,14 @@ function DeveloperSection() {
               Analytics API
             </li>
           </ul>
-          <Button asChild variant="link" className="mt-4 h-auto p-0">
-            <Link href="/register">
-              Get an API key
-              <ArrowRight className="h-4 w-4" aria-hidden="true" />
-            </Link>
-          </Button>
+          {primaryCtaText && (
+            <Button asChild variant="link" className="mt-4 h-auto p-0">
+              <Link href={primaryCtaUrl ?? '/register'}>
+                {primaryCtaText}
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
+            </Button>
+          )}
         </div>
 
         {/* Same terminal-panel vocabulary as the dashboard's Developers
@@ -399,7 +347,48 @@ function DeveloperSection() {
   );
 }
 
-function PricingSection() {
+// Priority order for which limits show as bullet points on a pricing
+// card — matches what the old hardcoded copy highlighted (links,
+// clicks, domains, team members). A plan missing a key from this list
+// is fail-open/unlimited (see PlanLimit's own docs), shown as such
+// rather than omitted.
+const PRICING_CARD_LIMIT_ORDER: Array<keyof typeof FEATURE_LABELS> = [
+  'MAX_LINKS',
+  'MONTHLY_CLICKS',
+  'MAX_CUSTOM_DOMAINS',
+  'MAX_TEAM_MEMBERS',
+];
+
+function formatPlanPrice(plan: PublicPlanDto): { price: string; priceSuffix?: string } {
+  if (plan.priceAmount === 0) return { price: '$0' };
+  const major = Math.round(plan.priceAmount / 100);
+  return { price: `$${major}`, priceSuffix: plan.billingInterval === 'ANNUAL' ? '/yr' : '/mo' };
+}
+
+function planToFeatureList(plan: PublicPlanDto): string[] {
+  const byKey = new Map(plan.limits.map((l) => [l.key, l.value]));
+  const features = PRICING_CARD_LIMIT_ORDER.map((key) => {
+    const value = byKey.has(key) ? byKey.get(key) : null;
+    const label = FEATURE_LABELS[key];
+    if (value === null || value === undefined) {
+      return key === 'MONTHLY_CLICKS' ? `Unlimited clicks` : `Unlimited ${label.toLowerCase()}`;
+    }
+    return key === 'MONTHLY_CLICKS'
+      ? `${value.toLocaleString()} clicks / month`
+      : `${value.toLocaleString()} ${label.toLowerCase()}`;
+  });
+  if (plan.trialDays) features.push(`${plan.trialDays}-day free trial`);
+  return features;
+}
+
+function PricingSection({ content, plans }: { content?: SectionContent; plans: PublicPlanDto[] }) {
+  const eyebrow = content?.eyebrow ?? 'Simple, transparent pricing';
+  const headline = content?.headline ?? 'Choose the plan that grows with you';
+  // Enterprise is contract pricing, not a purchasable card — shown as
+  // its own "Contact sales" bar below, same as before this was wired
+  // to real plan data.
+  const purchasable = plans.filter((p) => p.tier !== 'ENTERPRISE').sort((a, b) => a.displayOrder - b.displayOrder);
+
   return (
     <section
       id="pricing"
@@ -408,17 +397,30 @@ function PricingSection() {
       <div className="container">
         <div className="mx-auto max-w-2xl text-center">
           <p className="font-mono text-xs font-semibold uppercase tracking-wide text-primary">
-            Simple, transparent pricing
+            {eyebrow}
           </p>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            Choose the plan that grows with you
+            {headline}
           </h2>
         </div>
 
         <div className="mx-auto mt-14 grid max-w-6xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {PRICING_TIERS.map(({ key, ...tier }) => (
-            <PricingCard key={key} {...tier} />
-          ))}
+          {purchasable.map((plan) => {
+            const { price, priceSuffix } = formatPlanPrice(plan);
+            return (
+              <PricingCard
+                key={plan.id}
+                name={plan.name}
+                price={price}
+                priceSuffix={priceSuffix}
+                description={plan.description ?? ''}
+                features={planToFeatureList(plan)}
+                ctaLabel="Start for free"
+                href="/register"
+                highlighted={plan.slug === 'professional'}
+              />
+            );
+          })}
         </div>
 
         <div className="mx-auto mt-6 flex max-w-6xl flex-col items-center justify-between gap-3 rounded-xl border border-white/10 bg-card p-6 sm:flex-row">
@@ -438,18 +440,21 @@ function PricingSection() {
   );
 }
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const [content, plans] = await Promise.all([getServerLandingPageContent(), getServerPlans()]);
+  const sections = content.sections;
+
   return (
     <>
-      <HeroSection />
-      <StatStrip />
-      <FeatureGrid />
-      <ProductShowcaseSection />
-      <CustomDomainsSection />
-      <DeveloperSection />
-      <PricingSection />
-      <FaqSection />
-      <CtaSection />
+      <HeroSection content={findSection(sections, 'HERO')} />
+      <StatStrip stats={content.stats} />
+      <FeatureGrid content={findSection(sections, 'FEATURES')} features={content.features} />
+      <ProductShowcaseSection content={findSection(sections, 'PRODUCT_SHOWCASE')} />
+      <CustomDomainsSection content={findSection(sections, 'CUSTOM_DOMAINS')} />
+      <DeveloperSection content={findSection(sections, 'DEVELOPERS')} />
+      <PricingSection content={findSection(sections, 'PRICING')} plans={plans} />
+      <FaqSection content={findSection(sections, 'FAQ')} faqs={content.faqs} />
+      <CtaSection content={findSection(sections, 'CTA')} />
     </>
   );
 }

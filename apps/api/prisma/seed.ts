@@ -36,6 +36,8 @@ import {
   BillingInterval,
   CampaignStatus,
   GlobalRole,
+  LandingPageNavPlacement,
+  LandingPageSectionKey,
   LinkStatus,
   PlanTier,
   PrismaClient,
@@ -1115,6 +1117,196 @@ async function seedFeatureFlags() {
 }
 
 /**
+ * Sprint 14 — reproduces the exact Sprint 12 landing page copy as
+ * real, admin-editable database rows, so the public site looks
+ * identical the moment this seed runs, with no manual data-entry step
+ * required after deployment (see docs/architecture/landing-page-cms.md).
+ * Idempotent: sections are upserted by their unique `key`; the
+ * repeatable lists (features/faqs/stats/nav items) are skipped
+ * entirely if any rows already exist, the same "don't re-seed once
+ * real content might have been edited" convention seedDemoClickEvents
+ * already uses.
+ */
+async function seedLandingPageContent() {
+  const sections: Array<{
+    key: LandingPageSectionKey;
+    eyebrow?: string;
+    headline?: string;
+    description?: string;
+    primaryCtaText?: string;
+    primaryCtaUrl?: string;
+    secondaryCtaText?: string;
+    secondaryCtaUrl?: string;
+  }> = [
+    {
+      key: LandingPageSectionKey.HERO,
+      eyebrow: 'Link intelligence platform',
+      headline: 'Every link tells a story.',
+      description:
+        'LinkIQ shows you what happens after the click — who clicked, where they went, and what to do next. Short links, custom domains, and analytics built as one system, not three bolted-together tools.',
+      primaryCtaText: 'Get started for free',
+      primaryCtaUrl: '/register',
+      secondaryCtaText: 'View pricing',
+      secondaryCtaUrl: '#pricing',
+    },
+    { key: LandingPageSectionKey.STATS },
+    {
+      key: LandingPageSectionKey.FEATURES,
+      eyebrow: 'The core loop',
+      headline: 'Everything a link needs to do its job',
+      description: 'From the moment you shorten it to the moment someone acts on it.',
+    },
+    {
+      key: LandingPageSectionKey.PRODUCT_SHOWCASE,
+      eyebrow: 'See it in action',
+      headline: 'Every click, the moment it happens',
+      description:
+        'This is the same analytics workspace every LinkIQ link reports into — who clicked, where they came from, and which links are actually working.',
+    },
+    {
+      key: LandingPageSectionKey.CUSTOM_DOMAINS,
+      eyebrow: 'Custom domains',
+      headline: 'Your links. Your brand.',
+      description:
+        'A link that says go.yourbrand.com earns more trust — and more clicks — than one that says linkiq.io. Connect your domain once; every link you create after that inherits it.',
+    },
+    {
+      key: LandingPageSectionKey.DEVELOPERS,
+      eyebrow: 'For developers',
+      headline: 'Built to be automated, not just clicked through.',
+      description:
+        'Create and manage links from your own systems with a scoped API key, and react to activity in real time with webhook events — no dashboard required.',
+      primaryCtaText: 'Get an API key',
+      primaryCtaUrl: '/register',
+    },
+    {
+      key: LandingPageSectionKey.PRICING,
+      eyebrow: 'Simple, transparent pricing',
+      headline: 'Choose the plan that grows with you',
+    },
+    {
+      key: LandingPageSectionKey.FAQ,
+      eyebrow: 'Questions',
+      headline: 'Frequently asked questions',
+    },
+    {
+      key: LandingPageSectionKey.CTA,
+      headline: 'Start seeing what happens after the click.',
+      description: 'Free forever plan. No credit card required.',
+      primaryCtaText: 'Get started for free',
+      primaryCtaUrl: '/register',
+    },
+  ];
+
+  for (const section of sections) {
+    await prisma.landingPageSection.upsert({
+      where: { key: section.key },
+      update: {},
+      create: section,
+    });
+  }
+
+  const existingFeatures = await prisma.landingPageFeature.count();
+  if (existingFeatures === 0) {
+    await prisma.landingPageFeature.createMany({
+      data: [
+        { title: 'Shorten', description: 'Turn any URL into a clean, brandable link in milliseconds.', icon: 'Link2', sortOrder: 0 },
+        { title: 'Track', description: 'See clicks, visitors, and sources the moment they happen.', icon: 'BarChart3', sortOrder: 1 },
+        { title: 'Brand', description: 'Route every link through a domain your audience recognizes.', icon: 'Globe2', sortOrder: 2 },
+        { title: 'Automate', description: 'Create links and react to activity from your own systems.', icon: 'Webhook', sortOrder: 3 },
+        { title: 'Scale', description: 'Workspaces, roles, and permissions built for real teams.', icon: 'Users', sortOrder: 4 },
+      ],
+    });
+  }
+
+  const existingStats = await prisma.landingPageStat.count();
+  if (existingStats === 0) {
+    await prisma.landingPageStat.createMany({
+      data: [
+        { label: 'Fast redirects', sublabel: 'Cached, low-latency', icon: 'Zap', sortOrder: 0 },
+        { label: 'Secure by design', sublabel: 'Scoped API keys & RBAC', icon: 'ShieldCheck', sortOrder: 1 },
+        { label: 'Custom domains', sublabel: 'Every link, on-brand', icon: 'Globe2', sortOrder: 2 },
+        { label: 'Team workspaces', sublabel: 'Role-based collaboration', icon: 'Users', sortOrder: 3 },
+        { label: 'Developer API', sublabel: 'REST + webhooks', icon: 'Terminal', sortOrder: 4 },
+      ],
+    });
+  }
+
+  const existingFaqs = await prisma.landingPageFaq.count();
+  if (existingFaqs === 0) {
+    await prisma.landingPageFaq.createMany({
+      data: [
+        {
+          question: 'What is LinkIQ?',
+          answer:
+            'LinkIQ is a link management platform for modern teams — shorten and share links, brand them with your own domain, track clicks in real time, and automate link creation through an API.',
+          sortOrder: 0,
+        },
+        {
+          question: 'Can I use my own domain?',
+          answer:
+            'Yes. Connect a custom domain to your workspace, verify ownership with a DNS record, and every link you create can use your branded domain instead of a generic shortener host.',
+          sortOrder: 1,
+        },
+        {
+          question: 'Can I track clicks?',
+          answer:
+            'Yes. Every link reports real-time analytics — total clicks, devices, countries, and referrers — broken down per link and per campaign so you can see exactly what is driving traffic.',
+          sortOrder: 2,
+        },
+        {
+          question: 'Does LinkIQ have an API?',
+          answer:
+            'Yes. LinkIQ ships a REST API secured with scoped API keys, so you can create and manage links programmatically and subscribe to webhook events for real-time notifications.',
+          sortOrder: 3,
+        },
+        {
+          question: 'Can teams collaborate?',
+          answer:
+            'Yes. Every workspace supports role-based access for your team — owners, admins, members, and viewers — so you can collaborate on links and campaigns with the right level of access for each person.',
+          sortOrder: 4,
+        },
+        {
+          question: 'How does billing work?',
+          answer:
+            'LinkIQ offers a free plan plus paid plans that scale with usage — links, clicks, domains, and team seats. Paid plans include a trial period, and you can change plans at any time from your workspace billing settings.',
+          sortOrder: 5,
+        },
+      ],
+    });
+  }
+
+  const existingNavItems = await prisma.landingPageNavItem.count();
+  if (existingNavItems === 0) {
+    await prisma.landingPageNavItem.createMany({
+      data: [
+        { placement: LandingPageNavPlacement.HEADER, label: 'Product', url: '/#features', sortOrder: 0 },
+        { placement: LandingPageNavPlacement.HEADER, label: 'Pricing', url: '/#pricing', sortOrder: 1 },
+        { placement: LandingPageNavPlacement.HEADER, label: 'Developers', url: '/#developers', sortOrder: 2 },
+        { placement: LandingPageNavPlacement.FOOTER_PRODUCT, label: 'Link Management', url: '/#features', sortOrder: 0 },
+        { placement: LandingPageNavPlacement.FOOTER_PRODUCT, label: 'Analytics', url: '/#features', sortOrder: 1 },
+        { placement: LandingPageNavPlacement.FOOTER_PRODUCT, label: 'Custom Domains', url: '/#features', sortOrder: 2 },
+        { placement: LandingPageNavPlacement.FOOTER_PRODUCT, label: 'QR Codes', url: '/#features', sortOrder: 3 },
+        { placement: LandingPageNavPlacement.FOOTER_PRODUCT, label: 'Campaigns', url: '/#features', sortOrder: 4 },
+        { placement: LandingPageNavPlacement.FOOTER_DEVELOPERS, label: 'API', url: '/#developers', sortOrder: 0 },
+        { placement: LandingPageNavPlacement.FOOTER_DEVELOPERS, label: 'Webhooks', url: '/#developers', sortOrder: 1 },
+        { placement: LandingPageNavPlacement.FOOTER_COMPANY, label: 'Contact', url: 'mailto:support@linkiq.com', sortOrder: 0 },
+      ],
+    });
+  }
+
+  // Singleton row — same fixed id BrandingService always targets (see
+  // its own docs on why a singleton is enforced in application logic).
+  await prisma.siteBranding.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000001' },
+    update: {},
+    create: { id: '00000000-0000-0000-0000-000000000001', siteName: 'LinkIQ' },
+  });
+
+  console.log('Seeded landing page content (sections, features, FAQs, stats, nav items) and site branding');
+}
+
+/**
  * Every workspace created through the live app (AuthService.register,
  * WorkspacesService.create) gets a subscription transactionally and can
  * never be missing one — this covers workspaces that already existed in
@@ -1159,6 +1351,7 @@ async function main() {
   await seedDemoSubscription(workspace, plans);
   await seedAdminUser();
   await seedFeatureFlags();
+  await seedLandingPageContent();
   const links = await seedDemoLinks(workspace, user);
   await seedDemoClickEvents(workspace, links);
   await seedDemoQrCodes(workspace, user, links);

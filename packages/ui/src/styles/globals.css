@@ -72,32 +72,35 @@
   }
 
   /*
-   * Fintech/data-platform palette shared by the customer dashboard AND
-   * the marketing site — scoped under .dashboard-shell /
-   * .marketing-shell (applied once each, to (dashboard)/layout.tsx's
-   * and (marketing)/layout.tsx's root elements) so it can never leak
-   * into the admin console, which reads the exact same token names but
-   * must stay visually untouched. Both surfaces share one value block
-   * so the two can never drift apart in a later edit. In light mode
-   * this scope intentionally defines nothing for the dashboard — it
-   * keeps using the standard light tokens above, unchanged (the
-   * marketing site has no light mode; it's permanently dark via its
-   * own .dark wrapper). Only .dark .dashboard-shell/.marketing-shell
-   * overrides anything, giving these two surfaces a deeper, more
-   * layered dark theme than the 2-layer (background/card) system the
-   * admin console still uses, while every existing shared component
-   * (Button, Card, Badge, Input, ...) picks this up automatically since
-   * they all read these same CSS variables — no component needed to
-   * change.
+   * Fintech/data-platform palette shared by the customer dashboard, the
+   * marketing site, AND the auth pages (login/register — Sprint 14) —
+   * scoped under .dashboard-shell / .marketing-shell / .auth-shell
+   * (applied once each, to (dashboard)/layout.tsx's, (marketing)/
+   * layout.tsx's, and (auth)/layout.tsx's root elements) so it can
+   * never leak into the admin console, which reads the exact same
+   * token names but must stay visually untouched. All three surfaces
+   * share one value block so they can never drift apart in a later
+   * edit. In light mode this scope intentionally defines nothing for
+   * the dashboard — it keeps using the standard light tokens above,
+   * unchanged (marketing and auth have no light mode; both are
+   * permanently dark via their own .dark wrapper). Only
+   * .dark .dashboard-shell/.marketing-shell/.auth-shell overrides
+   * anything, giving these surfaces a deeper, more layered dark theme
+   * than the 2-layer (background/card) system the admin console still
+   * uses, while every existing shared component (Button, Card, Badge,
+   * Input, ...) picks this up automatically since they all read these
+   * same CSS variables — no component needed to change.
    */
   .dashboard-shell,
-  .marketing-shell {
+  .marketing-shell,
+  .auth-shell {
     --dash-elevated: 210 40% 96%;
     --dash-highlight: 25 95% 53%;
   }
 
   .dark .dashboard-shell,
-  .dark .marketing-shell {
+  .dark .marketing-shell,
+  .dark .auth-shell {
     --background: 217 44% 4%; /* #05080D */
     --foreground: 210 40% 98%;
     --card: 217 41% 9%; /* #0D141F */

@@ -2,37 +2,42 @@ import Link from 'next/link';
 
 import { Logo } from './logo';
 
-// Every column below only links to a destination that actually exists
-// today — in-page anchors on the landing page itself, or a mailto for
-// Contact. The brief's suggested Company/Legal items (About, Privacy,
-// Terms) have no real page behind them yet and are intentionally
-// omitted rather than pointing at placeholder routes; see the
-// redesign report for the full reasoning.
-const FOOTER_COLUMNS = [
-  {
-    title: 'Product',
-    links: [
-      { label: 'Link Management', href: '/#features' },
-      { label: 'Analytics', href: '/#features' },
-      { label: 'Custom Domains', href: '/#features' },
-      { label: 'QR Codes', href: '/#features' },
-      { label: 'Campaigns', href: '/#features' },
-    ],
-  },
-  {
-    title: 'Developers',
-    links: [
-      { label: 'API', href: '/#developers' },
-      { label: 'Webhooks', href: '/#developers' },
-    ],
-  },
-  {
-    title: 'Company',
-    links: [{ label: 'Contact', href: 'mailto:support@linkiq.com' }],
-  },
-] as const;
+interface NavLink {
+  label: string;
+  url: string;
+}
 
-export function SiteFooter() {
+// Fallback — used only when the admin hasn't configured any FOOTER nav
+// items yet. Every link only points at a destination that actually
+// exists today (in-page anchors, or a mailto for Contact).
+const DEFAULT_FOOTER_PRODUCT: NavLink[] = [
+  { label: 'Link Management', url: '/#features' },
+  { label: 'Analytics', url: '/#features' },
+  { label: 'Custom Domains', url: '/#features' },
+  { label: 'QR Codes', url: '/#features' },
+  { label: 'Campaigns', url: '/#features' },
+];
+const DEFAULT_FOOTER_DEVELOPERS: NavLink[] = [
+  { label: 'API', url: '/#developers' },
+  { label: 'Webhooks', url: '/#developers' },
+];
+const DEFAULT_FOOTER_COMPANY: NavLink[] = [{ label: 'Contact', url: 'mailto:support@linkiq.com' }];
+
+interface SiteFooterProps {
+  footerProduct?: NavLink[];
+  footerDevelopers?: NavLink[];
+  footerCompany?: NavLink[];
+  logoUrl?: string | null;
+  siteName?: string;
+}
+
+export function SiteFooter({ footerProduct, footerDevelopers, footerCompany, logoUrl, siteName }: SiteFooterProps) {
+  const columns = [
+    { title: 'Product', links: footerProduct && footerProduct.length > 0 ? footerProduct : DEFAULT_FOOTER_PRODUCT },
+    { title: 'Developers', links: footerDevelopers && footerDevelopers.length > 0 ? footerDevelopers : DEFAULT_FOOTER_DEVELOPERS },
+    { title: 'Company', links: footerCompany && footerCompany.length > 0 ? footerCompany : DEFAULT_FOOTER_COMPANY },
+  ].filter((column) => column.links.length > 0);
+
   return (
     <footer className="border-t border-white/10 bg-background">
       <div
@@ -41,14 +46,14 @@ export function SiteFooter() {
       />
       <div className="container grid gap-10 py-16 sm:grid-cols-2 lg:grid-cols-5 lg:gap-8">
         <div className="sm:col-span-2 lg:col-span-2">
-          <Logo />
+          <Logo logoUrl={logoUrl} siteName={siteName} />
           <p className="mt-4 max-w-xs text-sm text-muted-foreground">
             Every link is a data point. LinkIQ turns them into a system your
             whole team can see and act on.
           </p>
         </div>
 
-        {FOOTER_COLUMNS.map((column) => (
+        {columns.map((column) => (
           <div key={column.title}>
             <h3 className="text-sm font-semibold text-foreground">
               {column.title}
@@ -57,7 +62,7 @@ export function SiteFooter() {
               {column.links.map((link) => (
                 <li key={link.label}>
                   <Link
-                    href={link.href}
+                    href={link.url}
                     className="text-sm text-muted-foreground transition-colors hover:text-foreground"
                   >
                     {link.label}
@@ -71,7 +76,7 @@ export function SiteFooter() {
 
       <div className="border-t border-white/10">
         <div className="container flex flex-col items-center justify-between gap-2 py-6 text-sm text-muted-foreground sm:flex-row">
-          <span>© {new Date().getFullYear()} LinkIQ. All rights reserved.</span>
+          <span>© {new Date().getFullYear()} {siteName ?? 'LinkIQ'}. All rights reserved.</span>
           <span className="font-mono text-xs">
             Link infrastructure for modern teams.
           </span>

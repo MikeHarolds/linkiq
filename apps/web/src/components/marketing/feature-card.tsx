@@ -1,18 +1,19 @@
-import type { LucideIcon } from 'lucide-react';
+import { resolveLandingPageIcon } from './icon-map';
 
 interface FeatureCardProps {
-  icon: LucideIcon;
+  icon: string;
   index: string;
   title: string;
   description: string;
 }
 
 export function FeatureCard({
-  icon: Icon,
+  icon,
   index,
   title,
   description,
 }: FeatureCardProps) {
+  const Icon = resolveLandingPageIcon(icon);
   return (
     <div className="group relative flex flex-1 flex-col gap-3 overflow-hidden rounded-xl border border-white/10 bg-card p-5 transition-colors duration-200 hover:border-primary/30">
       {/* Thin top accent line that lights up on hover — a restrained

@@ -1,9 +1,12 @@
 'use client';
 
+import type { PublicLandingPageContentDto } from '@linkiq/types';
 import { ChevronDown } from 'lucide-react';
 import * as React from 'react';
 
-const FAQS = [
+const DEFAULT_SECTION = { eyebrow: 'Questions', headline: 'Frequently asked questions' };
+
+const DEFAULT_FAQS: PublicLandingPageContentDto['faqs'] = [
   {
     question: 'What is LinkIQ?',
     answer:
@@ -34,7 +37,7 @@ const FAQS = [
     answer:
       'LinkIQ offers a free plan plus paid plans that scale with usage — links, clicks, domains, and team seats. Paid plans include a trial period, and you can change plans at any time from your workspace billing settings.',
   },
-] as const;
+];
 
 function FaqItem({
   question,
@@ -90,8 +93,18 @@ function FaqItem({
  * open at a time; each trigger is a real <button> so it's keyboard
  * operable (Enter/Space, natural Tab order) without any custom key
  * handling. */
-export function FaqSection() {
+interface FaqSectionProps {
+  content?: PublicLandingPageContentDto['sections'][number];
+  faqs?: PublicLandingPageContentDto['faqs'];
+}
+
+export function FaqSection({ content, faqs }: FaqSectionProps) {
   const [openIndex, setOpenIndex] = React.useState<number | null>(0);
+  const eyebrow = content?.eyebrow ?? DEFAULT_SECTION.eyebrow;
+  const headline = content?.headline ?? DEFAULT_SECTION.headline;
+  const items = faqs && faqs.length > 0 ? faqs : DEFAULT_FAQS;
+
+  if (items.length === 0) return null;
 
   return (
     <section
@@ -100,15 +113,17 @@ export function FaqSection() {
     >
       <div className="container">
         <div className="mx-auto max-w-2xl text-center">
-          <p className="font-mono text-xs font-semibold uppercase tracking-wide text-primary">
-            Questions
-          </p>
+          {eyebrow && (
+            <p className="font-mono text-xs font-semibold uppercase tracking-wide text-primary">
+              {eyebrow}
+            </p>
+          )}
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            Frequently asked questions
+            {headline}
           </h2>
         </div>
         <div className="mx-auto mt-12 max-w-2xl">
-          {FAQS.map((faq, index) => (
+          {items.map((faq, index) => (
             <FaqItem
               key={faq.question}
               id={`faq-${index}`}

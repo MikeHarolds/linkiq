@@ -1,6 +1,7 @@
 import type {
   AdminAuditLogDto,
   AdminDomainListItemDto,
+  AdminLandingPageContentDto,
   AdminSubscriptionListItemDto,
   AdminUserDetailDto,
   AdminUserListItemDto,
@@ -8,21 +9,34 @@ import type {
   AdminWorkspaceDetailDto,
   AdminWorkspaceListItemDto,
   ApiUsageOverviewDto,
+  CreatePlanPayload,
   DomainStatus,
   GlobalRole,
   InvoiceStatus,
+  LandingPageFaqDto,
+  LandingPageFeatureDto,
+  LandingPageNavItemDto,
+  LandingPageSectionDto,
+  LandingPageSectionKey,
+  LandingPageStatDto,
   Paginated,
   PaymentsSettingsDto,
   PaystackConnectionTestDto,
   PlanDto,
   PlatformOverviewDto,
   PlatformSettingsDto,
+  SiteBrandingDto,
   SubscriptionMutationResultDto,
   SubscriptionStatus,
   SubscriptionDto,
   SystemHealthDto,
   TimeRangeValue,
+  UpdateLandingPageSectionPayload,
   UpdatePlanPayload,
+  UpsertLandingPageFaqPayload,
+  UpsertLandingPageFeaturePayload,
+  UpsertLandingPageNavItemPayload,
+  UpsertLandingPageStatPayload,
   WebhookDeliveryDetailDto,
   WebhookDeliveryDto,
   WebhookDeliveryStatus,
@@ -141,6 +155,9 @@ export function listPlans(): Promise<PlanDto[]> {
 export function getPlan(planId: string): Promise<PlanDto> {
   return api.get(`${BASE}/plans/${planId}`);
 }
+export function createPlan(payload: CreatePlanPayload): Promise<PlanDto> {
+  return api.post(`${BASE}/plans`, payload);
+}
 export function updatePlan(planId: string, payload: UpdatePlanPayload): Promise<PlanDto> {
   return api.patch(`${BASE}/plans/${planId}`, payload);
 }
@@ -250,4 +267,103 @@ export function testPaystackConnection(): Promise<PaystackConnectionTestDto> {
 // --- System health ---
 export function getSystemHealth(): Promise<SystemHealthDto> {
   return api.get(`${BASE}/system-health`);
+}
+
+// --- Landing Page CMS ---
+export function getLandingPageContent(): Promise<AdminLandingPageContentDto> {
+  return api.get(`${BASE}/landing-page`);
+}
+export function updateLandingPageSection(
+  key: LandingPageSectionKey,
+  payload: UpdateLandingPageSectionPayload,
+): Promise<LandingPageSectionDto> {
+  return api.patch(`${BASE}/landing-page/sections/${key}`, payload);
+}
+
+export function createFeature(payload: UpsertLandingPageFeaturePayload): Promise<LandingPageFeatureDto> {
+  return api.post(`${BASE}/landing-page/features`, payload);
+}
+export function updateFeature(
+  id: string,
+  payload: Partial<UpsertLandingPageFeaturePayload>,
+): Promise<LandingPageFeatureDto> {
+  return api.patch(`${BASE}/landing-page/features/${id}`, payload);
+}
+export function deleteFeature(id: string): Promise<{ success: boolean }> {
+  return api.delete(`${BASE}/landing-page/features/${id}`);
+}
+export function reorderFeatures(orderedIds: string[]): Promise<{ success: boolean }> {
+  return api.post(`${BASE}/landing-page/features/reorder`, { orderedIds });
+}
+
+export function createFaq(payload: UpsertLandingPageFaqPayload): Promise<LandingPageFaqDto> {
+  return api.post(`${BASE}/landing-page/faqs`, payload);
+}
+export function updateFaq(
+  id: string,
+  payload: Partial<UpsertLandingPageFaqPayload>,
+): Promise<LandingPageFaqDto> {
+  return api.patch(`${BASE}/landing-page/faqs/${id}`, payload);
+}
+export function deleteFaq(id: string): Promise<{ success: boolean }> {
+  return api.delete(`${BASE}/landing-page/faqs/${id}`);
+}
+export function reorderFaqs(orderedIds: string[]): Promise<{ success: boolean }> {
+  return api.post(`${BASE}/landing-page/faqs/reorder`, { orderedIds });
+}
+
+export function createStat(payload: UpsertLandingPageStatPayload): Promise<LandingPageStatDto> {
+  return api.post(`${BASE}/landing-page/stats`, payload);
+}
+export function updateStat(
+  id: string,
+  payload: Partial<UpsertLandingPageStatPayload>,
+): Promise<LandingPageStatDto> {
+  return api.patch(`${BASE}/landing-page/stats/${id}`, payload);
+}
+export function deleteStat(id: string): Promise<{ success: boolean }> {
+  return api.delete(`${BASE}/landing-page/stats/${id}`);
+}
+export function reorderStats(orderedIds: string[]): Promise<{ success: boolean }> {
+  return api.post(`${BASE}/landing-page/stats/reorder`, { orderedIds });
+}
+
+export function createNavItem(payload: UpsertLandingPageNavItemPayload): Promise<LandingPageNavItemDto> {
+  return api.post(`${BASE}/landing-page/nav-items`, payload);
+}
+export function updateNavItem(
+  id: string,
+  payload: Partial<UpsertLandingPageNavItemPayload>,
+): Promise<LandingPageNavItemDto> {
+  return api.patch(`${BASE}/landing-page/nav-items/${id}`, payload);
+}
+export function deleteNavItem(id: string): Promise<{ success: boolean }> {
+  return api.delete(`${BASE}/landing-page/nav-items/${id}`);
+}
+export function reorderNavItems(orderedIds: string[]): Promise<{ success: boolean }> {
+  return api.post(`${BASE}/landing-page/nav-items/reorder`, { orderedIds });
+}
+
+// --- Site Branding ---
+export function getBranding(): Promise<SiteBrandingDto> {
+  return api.get(`${BASE}/branding`);
+}
+export function updateBranding(siteName: string): Promise<SiteBrandingDto> {
+  return api.patch(`${BASE}/branding`, { siteName });
+}
+export function uploadLogo(file: File): Promise<SiteBrandingDto> {
+  const form = new FormData();
+  form.append('file', file);
+  return api.post(`${BASE}/branding/logo`, form);
+}
+export function removeLogo(): Promise<SiteBrandingDto> {
+  return api.delete(`${BASE}/branding/logo`);
+}
+export function uploadFavicon(file: File): Promise<SiteBrandingDto> {
+  const form = new FormData();
+  form.append('file', file);
+  return api.post(`${BASE}/branding/favicon`, form);
+}
+export function removeFavicon(): Promise<SiteBrandingDto> {
+  return api.delete(`${BASE}/branding/favicon`);
 }

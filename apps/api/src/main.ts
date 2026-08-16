@@ -1,5 +1,7 @@
 import { ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { type NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -15,9 +17,20 @@ async function bootstrap(): Promise<void> {
   // PaystackWebhookController to verify the x-paystack-signature header
   // against the true raw bytes (see paystack-signature.service.ts's docs
   // on why a re-JSON.stringify'd body isn't safe to sign/verify against).
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
     rawBody: true,
+  });
+
+  // Serves uploaded branding assets (logo/favicon — see
+  // modules/branding/storage/local-disk-storage.provider.ts) at
+  // /uploads/*. No new dependency: useStaticAssets ships with
+  // @nestjs/platform-express, already installed. Registered before
+  // setGlobalPrefix so these URLs stay unprefixed (SiteBranding.logoUrl
+  // is stored — and rendered by the frontend — as a plain "/uploads/..."
+  // path, not "/api/v1/uploads/...").
+  app.useStaticAssets(app.get(ConfigService).get<string>('branding.uploadDir')!, {
+    prefix: '/uploads',
   });
 
   app.useLogger(app.get(Logger));

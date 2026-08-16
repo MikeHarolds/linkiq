@@ -141,7 +141,10 @@ describe('Paystack Checkout Flow (e2e, BILLING_PROVIDER=paystack)', () => {
     // upsert, not create: resetDatabase() deliberately never touches
     // Plan rows (shared with real seed data), so a leftover row from a
     // previous run of this same file would otherwise collide on the
-    // unique slug.
+    // unique slug. Also re-asserts isActive: true on the update branch
+    // — a previous run's deactivate test (see the "plan is not
+    // currently available" scenario below) leaves this row deactivated
+    // otherwise, permanently poisoning every subsequent run.
     return prisma.plan.upsert({
       where: { slug },
       create: {
@@ -156,7 +159,7 @@ describe('Paystack Checkout Flow (e2e, BILLING_PROVIDER=paystack)', () => {
         displayOrder: 99,
         providerPlanId,
       },
-      update: { providerPlanId },
+      update: { providerPlanId, isActive: true },
     });
   }
 

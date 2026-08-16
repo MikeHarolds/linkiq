@@ -7,8 +7,10 @@ import {
   BarChart3,
   CreditCard,
   Globe2,
+  ImageIcon,
   LayoutDashboard,
   Menu,
+  Newspaper,
   ReceiptText,
   ScrollText,
   Settings,
@@ -37,6 +39,8 @@ const NAV_ITEMS = [
   { label: 'Webhooks', href: '/admin/webhooks', icon: Webhook },
   { label: 'Domains', href: '/admin/domains', icon: Globe2 },
   { label: 'Audit Logs', href: '/admin/audit-logs', icon: ScrollText },
+  { label: 'Landing Page', href: '/admin/landing-page', icon: Newspaper },
+  { label: 'Branding', href: '/admin/settings/branding', icon: ImageIcon },
   { label: 'Platform Settings', href: '/admin/settings', icon: Settings },
   { label: 'System Health', href: '/admin/system-health', icon: Activity },
 ] as const;
@@ -96,8 +100,14 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const navList = (
     <nav aria-label="Admin" className="flex flex-1 flex-col gap-1 p-3">
       {NAV_ITEMS.map((item) => {
+        // Exact match for routes that have their own unlisted
+        // sub-routes (e.g. /admin/settings/branding, /admin/settings/
+        // payments) — a prefix match would otherwise also highlight
+        // "Platform Settings" while on the Branding page.
         const active =
-          item.href === '/admin' ? pathname === '/admin' : pathname.startsWith(item.href);
+          item.href === '/admin' || item.href === '/admin/settings'
+            ? pathname === item.href
+            : pathname.startsWith(item.href);
         const Icon = item.icon;
         return (
           <Link
@@ -172,7 +182,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      <div className="flex flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-16 items-center justify-between gap-4 border-b bg-background px-4 md:px-6">
           <div className="flex items-center gap-3">
             <Button

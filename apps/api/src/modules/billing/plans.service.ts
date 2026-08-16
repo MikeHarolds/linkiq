@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  BillingInterval,
   PlanTier,
   Prisma,
   type Plan,
@@ -12,6 +13,23 @@ import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type PlanWithLimits = Plan & { limits: PlanLimit[] };
+
+/** slug/tier ARE settable here, unlike UpdatePlanInput — they're only
+ * immutable once a plan exists (see updateForAdmin's own docs). */
+export interface CreatePlanInput {
+  name: string;
+  slug: string;
+  tier: PlanTier;
+  description?: string;
+  priceAmount: number;
+  currency?: string;
+  billingInterval?: BillingInterval;
+  trialDays?: number | null;
+  isActive?: boolean;
+  displayOrder?: number;
+  providerPlanId?: string | null;
+  limits?: Partial<Record<PlanLimitKey, number | null>>;
+}
 
 /** Every field optional — Super Admin edits are partial updates against
  * whatever the plan already has. Deliberately does NOT invent defaults
@@ -101,6 +119,68 @@ export class PlansService {
       throw new NotFoundException('Plan not found');
     }
     return plan;
+  }
+
+  /**
+   * Super Admin plan creation (Sprint 14). Deliberately does NOT talk
+   * to any BillingProvider — that would create a circular dependency
+   * (PaystackBillingProvider already depends on PlansService for
+   * checkout's plan lookup). Provider-side sync, when requested, is
+   * orchestrated one layer up by AdminPlansController, which injects
+   * BILLING_PROVIDER directly and — on success — calls updateForAdmin
+   * to persist the resulting providerPlanId, reusing that existing
+   * write path rather than adding a second one here.
+   */
+  async create(
+    input: CreatePlanInput,
+    adminUserId: string,
+    ctx: RequestContext,
+  ): Promise<PlanWithLimits> {
+    const existing = await this.prisma.plan.findUnique({ where: { slug: input.slug } });
+    if (existing) {
+      throw new ConflictException(`A plan with slug "${input.slug}" already exists`);
+    }
+
+    const plan = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.plan.create({
+        data: {
+          name: input.name,
+          slug: input.slug,
+          tier: input.tier,
+          description: input.description,
+          priceAmount: input.priceAmount,
+          currency: input.currency ?? 'USD',
+          billingInterval: input.billingInterval ?? BillingInterval.MONTHLY,
+          trialDays: input.trialDays,
+          isActive: input.isActive ?? true,
+          displayOrder: input.displayOrder ?? 0,
+          providerPlanId: input.providerPlanId,
+        },
+      });
+
+      if (input.limits) {
+        for (const [key, value] of Object.entries(input.limits)) {
+          await tx.planLimit.create({
+            data: { planId: created.id, key: key as PlanLimitKey, value },
+          });
+        }
+      }
+
+      return created;
+    });
+
+    this.cache = null;
+    await this.audit.record({
+      action: 'admin.plan_created',
+      entity: 'Plan',
+      entityId: plan.id,
+      userId: adminUserId,
+      metadata: { slug: plan.slug, name: plan.name, tier: plan.tier },
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent,
+    });
+
+    return this.getByIdOrThrow(plan.id);
   }
 
   /**

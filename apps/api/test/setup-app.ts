@@ -92,6 +92,12 @@ export async function resetDatabase(
   prisma: PrismaService,
   redis?: Redis,
 ): Promise<void> {
+  await prisma.landingPageFeature.deleteMany();
+  await prisma.landingPageFaq.deleteMany();
+  await prisma.landingPageStat.deleteMany();
+  await prisma.landingPageNavItem.deleteMany();
+  await prisma.landingPageSection.deleteMany();
+  await prisma.siteBranding.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.passwordResetToken.deleteMany();
   await prisma.refreshToken.deleteMany();

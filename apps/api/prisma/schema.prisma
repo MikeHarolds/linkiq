@@ -168,6 +168,31 @@ enum InvoiceStatus {
   REFUNDED
 }
 
+/// Sprint 14 — one value per editable section of the public marketing
+/// landing page. Matches the sections that already exist in
+/// apps/web/src/app/(marketing)/page.tsx and its section components
+/// one-to-one; not a reinvented structure.
+enum LandingPageSectionKey {
+  HERO
+  STATS
+  FEATURES
+  PRODUCT_SHOWCASE
+  CUSTOM_DOMAINS
+  DEVELOPERS
+  PRICING
+  FAQ
+  CTA
+}
+
+/// Sprint 14 — where a LandingPageNavItem renders: the header's nav bar,
+/// or one of the footer's three existing columns.
+enum LandingPageNavPlacement {
+  HEADER
+  FOOTER_PRODUCT
+  FOOTER_DEVELOPERS
+  FOOTER_COMPANY
+}
+
 // ---------------------------------------------------------------------------
 // Identity & Multi-tenancy
 // ---------------------------------------------------------------------------
@@ -1108,4 +1133,127 @@ model WebhookDelivery {
   @@index([webhookEndpointId, createdAt])
   @@index([status])
   @@map("webhook_deliveries")
+}
+
+// ---------------------------------------------------------------------------
+// Landing Page CMS & Site Branding (Sprint 14)
+// ---------------------------------------------------------------------------
+// Platform-level (not workspace-level) content — there is exactly one
+// public marketing site, so none of these models carry a workspaceId.
+// Every mutation goes through AdminModule's SuperAdminGuard-protected
+// controllers and is recorded via AuditService; "who changed this last"
+// is answered by the audit log, not a duplicated updatedById column here.
+
+/// Editable copy for one section of the public marketing landing page.
+/// One row per LandingPageSectionKey, seeded once for every key (see
+/// prisma/seed.ts) so the public renderer never has to handle a MISSING
+/// section row — only missing/optional FIELDS within one (every content
+/// field below is nullable; the renderer falls back to the shipped
+/// Sprint 12 copy when a field is null). isActive hides an entire
+/// section from the public page without discarding its content.
+model LandingPageSection {
+  id       String                @id @default(uuid()) @db.Uuid
+  key      LandingPageSectionKey @unique
+  isActive Boolean               @default(true)
+
+  eyebrow          String?
+  headline         String?
+  description      String? @db.Text
+  primaryCtaText   String?
+  primaryCtaUrl    String?
+  secondaryCtaText String?
+  secondaryCtaUrl  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("landing_page_sections")
+}
+
+/// Repeatable "what LinkIQ does" cards under the Features section.
+/// `icon` stores a lucide-react icon name, validated server-side
+/// against an explicit allow-list (see landing-page.service.ts) —
+/// never raw markup, so this field can't be used to inject arbitrary
+/// content into the public page.
+model LandingPageFeature {
+  id          String  @id @default(uuid()) @db.Uuid
+  title       String
+  description String
+  icon        String
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("landing_page_features")
+}
+
+/// Repeatable FAQ entries.
+model LandingPageFaq {
+  id        String  @id @default(uuid()) @db.Uuid
+  question  String
+  answer    String  @db.Text
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("landing_page_faqs")
+}
+
+/// Repeatable capability-strip entries (the "Fast redirects / Secure by
+/// design / ..." row under the hero).
+model LandingPageStat {
+  id        String  @id @default(uuid()) @db.Uuid
+  label     String
+  sublabel  String?
+  icon      String
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("landing_page_stats")
+}
+
+/// Repeatable nav links for the header's nav bar and the footer's three
+/// existing columns (Product / Developers / Company).
+model LandingPageNavItem {
+  id        String                  @id @default(uuid()) @db.Uuid
+  placement LandingPageNavPlacement
+  label     String
+  url       String
+  sortOrder Int                     @default(0)
+  isActive  Boolean                 @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([placement, isActive, sortOrder])
+  @@map("landing_page_nav_items")
+}
+
+/// Platform-wide branding. A deliberate singleton — exactly one row,
+/// enforced in BrandingService (not at the schema level; Postgres has
+/// no clean native "at most one row" constraint without a partial-index
+/// hack that would be overkill for one config row). logoUrl/faviconUrl
+/// are null until an admin uploads one; every consumer (marketing site,
+/// login, register) falls back to the bundled default LinkIQ mark when
+/// null — see BrandMark/Logo components.
+model SiteBranding {
+  id         String  @id @default(uuid()) @db.Uuid
+  siteName   String  @default("LinkIQ")
+  logoUrl    String?
+  faviconUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("site_branding")
 }

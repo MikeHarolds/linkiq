@@ -7,17 +7,21 @@ import { API_USAGE_QUEUE } from '../api-keys/queue/api-usage.types';
 import { AuthModule } from '../auth/auth.module';
 import { BillingModule } from '../billing/billing.module';
 import { PAYSTACK_WEBHOOK_QUEUE } from '../billing/providers/paystack/queue/paystack-webhook.types';
+import { BrandingModule } from '../branding/branding.module';
 import { DomainsModule } from '../domains/domains.module';
 import { HealthModule } from '../health/health.module';
+import { LandingPageModule } from '../landing-page/landing-page.module';
 import { CLICK_EVENT_QUEUE } from '../links/queue/click-event.types';
 import { WEBHOOK_DELIVERY_QUEUE } from '../webhooks/queue/webhook-delivery.types';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 
 import { AdminApiUsageController } from './controllers/admin-api-usage.controller';
 import { AdminAuditLogsController } from './controllers/admin-audit-logs.controller';
+import { AdminBrandingController } from './controllers/admin-branding.controller';
 import { AdminDomainsController } from './controllers/admin-domains.controller';
 import { AdminHealthController } from './controllers/admin-health.controller';
 import { AdminInvoicesController } from './controllers/admin-invoices.controller';
+import { AdminLandingPageController } from './controllers/admin-landing-page.controller';
 import { AdminOverviewController } from './controllers/admin-overview.controller';
 import { AdminPaymentsController } from './controllers/admin-payments.controller';
 import { AdminPlansController } from './controllers/admin-plans.controller';
@@ -62,6 +66,8 @@ import { AdminWorkspacesService } from './services/admin-workspaces.service';
     AuthModule,
     HealthModule,
     TerminusModule,
+    LandingPageModule,
+    BrandingModule,
     BullModule.registerQueue(
       { name: CLICK_EVENT_QUEUE },
       { name: WEBHOOK_DELIVERY_QUEUE },
@@ -83,6 +89,8 @@ import { AdminWorkspacesService } from './services/admin-workspaces.service';
     AdminAuditLogsController,
     AdminSettingsController,
     AdminHealthController,
+    AdminLandingPageController,
+    AdminBrandingController,
   ],
   providers: [
     AdminUsersService,

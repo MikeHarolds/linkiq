@@ -1,8 +1,25 @@
 'use client';
 
+import type { PublicLandingPageContentDto } from '@linkiq/types';
 import { Button } from '@linkiq/ui';
 import { ArrowRight, Globe2, MousePointerClick, QrCode } from 'lucide-react';
 import Link from 'next/link';
+
+// Ships as the fallback whenever the admin hasn't set a field (or the
+// section itself is missing from the API response) — the Sprint 12
+// copy, so the page never renders visibly blank/broken content just
+// because a field is null. See prisma/seed.ts's seedLandingPageContent
+// for the actual source of truth this mirrors.
+const DEFAULTS = {
+  eyebrow: 'Link intelligence platform',
+  headline: 'Every link tells a story.',
+  description:
+    'LinkIQ shows you what happens after the click — who clicked, where they went, and what to do next. Short links, custom domains, and analytics built as one system, not three bolted-together tools.',
+  primaryCtaText: 'Get started for free',
+  primaryCtaUrl: '/register',
+  secondaryCtaText: 'View pricing',
+  secondaryCtaUrl: '#pricing',
+};
 
 /** Real, already-shipped click/country figures this preview reuses —
  * deliberately not an invented "conversion rate" or similar metric the
@@ -197,7 +214,19 @@ const TRUST_BULLETS = [
   'Upgrade anytime',
 ] as const;
 
-export function HeroSection() {
+interface HeroSectionProps {
+  content?: PublicLandingPageContentDto['sections'][number];
+}
+
+export function HeroSection({ content }: HeroSectionProps) {
+  const eyebrow = content?.eyebrow ?? DEFAULTS.eyebrow;
+  const headline = content?.headline ?? DEFAULTS.headline;
+  const description = content?.description ?? DEFAULTS.description;
+  const primaryCtaText = content?.primaryCtaText ?? DEFAULTS.primaryCtaText;
+  const primaryCtaUrl = content?.primaryCtaUrl ?? DEFAULTS.primaryCtaUrl;
+  const secondaryCtaText = content?.secondaryCtaText ?? DEFAULTS.secondaryCtaText;
+  const secondaryCtaUrl = content?.secondaryCtaUrl ?? DEFAULTS.secondaryCtaUrl;
+
   return (
     <section className="relative overflow-hidden border-b border-white/10 bg-background">
       <div
@@ -210,31 +239,37 @@ export function HeroSection() {
       />
       <div className="container relative grid items-center gap-16 py-20 sm:py-28 lg:grid-cols-2 lg:gap-16 lg:py-32">
         <div className="flex flex-col items-start gap-6 text-left">
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
-            <span
-              className="animate-signal-pulse h-1.5 w-1.5 rounded-full bg-primary"
-              aria-hidden="true"
-            />
-            Link intelligence platform
-          </span>
+          {eyebrow && (
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
+              <span
+                className="animate-signal-pulse h-1.5 w-1.5 rounded-full bg-primary"
+                aria-hidden="true"
+              />
+              {eyebrow}
+            </span>
+          )}
           <h1 className="max-w-xl text-4xl font-bold tracking-tight text-foreground sm:text-5xl lg:text-6xl">
-            Every link tells a story.
+            {headline}
           </h1>
-          <p className="max-w-lg text-lg leading-relaxed text-muted-foreground">
-            LinkIQ shows you what happens after the click — who clicked, where
-            they went, and what to do next. Short links, custom domains, and
-            analytics built as one system, not three bolted-together tools.
-          </p>
+          {description && (
+            <p className="max-w-lg text-lg leading-relaxed text-muted-foreground">
+              {description}
+            </p>
+          )}
           <div className="flex flex-col gap-3 sm:flex-row">
-            <Button asChild size="lg">
-              <Link href="/register">
-                Get started for free
-                <ArrowRight className="h-4 w-4" aria-hidden="true" />
-              </Link>
-            </Button>
-            <Button asChild size="lg" variant="outline">
-              <Link href="#pricing">View pricing</Link>
-            </Button>
+            {primaryCtaText && (
+              <Button asChild size="lg">
+                <Link href={primaryCtaUrl ?? '/register'}>
+                  {primaryCtaText}
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+              </Button>
+            )}
+            {secondaryCtaText && (
+              <Button asChild size="lg" variant="outline">
+                <Link href={secondaryCtaUrl ?? '#pricing'}>{secondaryCtaText}</Link>
+              </Button>
+            )}
           </div>
           <ul className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground">
             {TRUST_BULLETS.map((bullet) => (

@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { PlanTier } from '@prisma/client';
 
 import {
@@ -174,6 +174,63 @@ describe('PlansService', () => {
       prisma.plan.findMany.mockResolvedValue([makePlan({ slug: 'starter' })]);
       await service.listActive();
       expect(prisma.plan.findMany).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('create', () => {
+    it('creates a new plan with its limits, invalidates the cache, and audits it', async () => {
+      prisma.plan.findUnique
+        .mockResolvedValueOnce(null) // slug-uniqueness check
+        .mockResolvedValueOnce(makePlan({ id: 'plan-new', slug: 'growth' })); // getByIdOrThrow
+      prisma.plan.create.mockResolvedValue(makePlan({ id: 'plan-new', slug: 'growth' }));
+      prisma.planLimit.create.mockResolvedValue(undefined);
+
+      const result = await service.create(
+        {
+          name: 'Growth',
+          slug: 'growth',
+          tier: PlanTier.PROFESSIONAL,
+          priceAmount: 7900,
+          limits: { MAX_LINKS: 1000 },
+        },
+        'admin-1',
+        ctx,
+      );
+
+      expect(result.slug).toBe('growth');
+      expect(prisma.plan.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ slug: 'growth', tier: PlanTier.PROFESSIONAL, priceAmount: 7900 }),
+        }),
+      );
+      expect(prisma.planLimit.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { planId: 'plan-new', key: 'MAX_LINKS', value: 1000 } }),
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'admin.plan_created', userId: 'admin-1' }),
+      );
+    });
+
+    it('rejects a duplicate slug without creating anything', async () => {
+      prisma.plan.findUnique.mockResolvedValue(makePlan({ slug: 'starter' }));
+
+      await expect(
+        service.create({ name: 'Starter', slug: 'starter', tier: PlanTier.STARTER, priceAmount: 1900 }, 'admin-1', ctx),
+      ).rejects.toThrow(ConflictException);
+      expect(prisma.plan.create).not.toHaveBeenCalled();
+    });
+
+    it('defaults currency, billing interval, and displayOrder when not provided', async () => {
+      prisma.plan.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(makePlan({ id: 'plan-new' }));
+      prisma.plan.create.mockResolvedValue(makePlan({ id: 'plan-new' }));
+
+      await service.create({ name: 'Growth', slug: 'growth', tier: PlanTier.PROFESSIONAL, priceAmount: 7900 }, 'admin-1', ctx);
+
+      expect(prisma.plan.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ currency: 'USD', billingInterval: 'MONTHLY', displayOrder: 0, isActive: true }),
+        }),
+      );
     });
   });
 });

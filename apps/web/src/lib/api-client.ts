@@ -89,16 +89,22 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const { body, skipAuthRetry, headers, ...rest } = options;
 
+  // FormData (file uploads) must never be JSON-stringified, and must
+  // never get an explicit Content-Type — the browser sets its own,
+  // including the multipart boundary, only when Content-Type is left
+  // unset. Every other request keeps the existing JSON behavior.
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+
   const doFetch = () =>
     fetch(`${API_URL}${path}`, {
       ...rest,
       credentials: 'include',
       headers: {
-        'Content-Type': 'application/json',
+        ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...headers,
       },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: isFormData ? (body as FormData) : body !== undefined ? JSON.stringify(body) : undefined,
     });
 
   let res = await doFetch();

@@ -97,9 +97,7 @@ describe('GeoipCountryProvider', () => {
       // Re-require after mocking so the constructor's internal
       // require('geoip-country') call hits the mock above.
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const {
-        GeoipCountryProvider: ProviderWithBrokenDb,
-      } = require('./geoip-country.provider');
+      const { GeoipCountryProvider: ProviderWithBrokenDb } = require('./geoip-country.provider');
       const brokenProvider = new ProviderWithBrokenDb();
 
       expect(() => brokenProvider.lookup('8.8.8.8')).not.toThrow();

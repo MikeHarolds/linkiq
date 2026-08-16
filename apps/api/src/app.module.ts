@@ -5,6 +5,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import analyticsConfig from './config/analytics.config';
 import appConfig from './config/app.config';
 import authConfig from './config/auth.config';
+import brandingConfig from './config/branding.config';
 import databaseConfig from './config/database.config';
 import paystackConfig from './config/paystack.config';
 import redisConfig from './config/redis.config';
@@ -15,12 +16,15 @@ import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BillingModule } from './modules/billing/billing.module';
+import { BrandingModule } from './modules/branding/branding.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { DomainsModule } from './modules/domains/domains.module';
 import { HealthModule } from './modules/health/health.module';
+import { LandingPageModule } from './modules/landing-page/landing-page.module';
 import { LinksModule } from './modules/links/links.module';
 import { LoggingModule } from './modules/logging/logging.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
+import { PublicModule } from './modules/public/public.module';
 import { QrCodesModule } from './modules/qr-codes/qr-codes.module';
 import { QueueModule } from './modules/queue/queue.module';
 import { RedisModule } from './modules/redis/redis.module';
@@ -40,6 +44,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
         analyticsConfig,
         webhooksConfig,
         paystackConfig,
+        brandingConfig,
       ],
       envFilePath: ['.env'],
     }),
@@ -73,6 +78,9 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
     CampaignsModule,
     DomainsModule,
     WebhooksModule,
+    LandingPageModule,
+    BrandingModule,
+    PublicModule,
     AdminModule,
   ],
 })

@@ -6,6 +6,8 @@ import type {
   BillingWebhookEvent,
   CheckoutSessionResult,
   CreateCheckoutSessionInput,
+  CreateProviderPlanInput,
+  CreateProviderPlanResult,
   ProviderSubscriptionSnapshot,
   VerifyTransactionResult,
 } from '../billing-provider.interface';
@@ -152,5 +154,25 @@ export class PaystackBillingProvider implements BillingProvider {
       success: result.status === 'success',
       reference: result.reference,
     };
+  }
+
+  /**
+   * Sprint 14 — the first caller of PaystackApiClient.createPlan(),
+   * which existed since Sprint 10 but was never wired through the
+   * BillingProvider abstraction until now (see admin-plans.controller.ts
+   * / plans.service.ts's create() for the call site). Real Paystack API
+   * call, not a simulation — a successful result means a plan genuinely
+   * now exists in Paystack's dashboard under this plan_code.
+   */
+  async createProviderPlan(
+    input: CreateProviderPlanInput,
+  ): Promise<CreateProviderPlanResult> {
+    const result = await this.api.createPlan({
+      name: input.name,
+      amountKobo: input.priceAmount,
+      interval: input.billingInterval === 'ANNUAL' ? 'annually' : 'monthly',
+      currency: input.currency,
+    });
+    return { providerPlanId: result.planCode };
   }
 }

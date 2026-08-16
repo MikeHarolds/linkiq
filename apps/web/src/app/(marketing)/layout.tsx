@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 
 import { SiteFooter } from '@/components/marketing/site-footer';
 import { SiteHeader } from '@/components/marketing/site-header';
+import { getServerLandingPageContent, getServerSiteConfig } from '@/lib/server/landing-page-data';
 
 /**
  * Layout for public marketing pages (landing page today; pricing/etc.
@@ -9,8 +10,19 @@ import { SiteHeader } from '@/components/marketing/site-header';
  * the marketing-specific header and footer — deliberately separate
  * from (dashboard)/layout.tsx and (admin)/layout.tsx, which have their
  * own authenticated shells.
+ *
+ * Fetches nav items + site branding server-side (Sprint 14) so the
+ * header/footer render real, admin-editable content on first paint —
+ * no client-side loading flicker. See lib/server/landing-page-data.ts
+ * for why this is an uncached fetch (defers caching entirely to the
+ * backend's own short-lived in-memory cache).
  */
-export default function MarketingLayout({ children }: { children: ReactNode }) {
+export default async function MarketingLayout({ children }: { children: ReactNode }) {
+  const [content, siteConfig] = await Promise.all([
+    getServerLandingPageContent(),
+    getServerSiteConfig(),
+  ]);
+
   return (
     // The marketing site is intentionally always dark — a fixed brand
     // choice, not a light/dark preference — independent of the
@@ -26,9 +38,19 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
     // variant with no explicit text-* class) would silently inherit
     // the wrong, low-contrast value instead of re-resolving here.
     <div className="marketing-shell dark flex min-h-screen flex-col bg-background text-foreground">
-      <SiteHeader />
+      <SiteHeader
+        navItems={content.navItems.header}
+        logoUrl={siteConfig.logoUrl}
+        siteName={siteConfig.siteName}
+      />
       <main className="flex-1">{children}</main>
-      <SiteFooter />
+      <SiteFooter
+        footerProduct={content.navItems.footerProduct}
+        footerDevelopers={content.navItems.footerDevelopers}
+        footerCompany={content.navItems.footerCompany}
+        logoUrl={siteConfig.logoUrl}
+        siteName={siteConfig.siteName}
+      />
     </div>
   );
 }

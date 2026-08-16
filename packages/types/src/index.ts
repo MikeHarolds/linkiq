@@ -856,3 +856,246 @@ export interface SystemHealthDto {
   details: Record<string, { status: string; [key: string]: unknown }>;
   paystack: PaystackConnectionTestDto;
 }
+
+export interface CreatePlanPayload {
+  name: string;
+  slug: string;
+  tier: PlanTier;
+  description?: string | null;
+  priceAmount: number;
+  currency?: string;
+  billingInterval?: BillingInterval;
+  trialDays?: number | null;
+  isActive?: boolean;
+  displayOrder?: number;
+  providerPlanId?: string | null;
+  limits?: Partial<Record<PlanLimitKey, number | null>>;
+  /** When true, and the active BillingProvider supports it (Paystack
+   * does), also creates a matching plan on the provider side and
+   * stores the resulting code as providerPlanId. Silently skipped
+   * (never fails plan creation) if the provider doesn't support it or
+   * the call fails — see BillingProvider.createProviderPlan. */
+  syncToProvider?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Landing Page CMS & Site Branding (Sprint 14)
+// ---------------------------------------------------------------------------
+
+export type LandingPageSectionKey =
+  | 'HERO'
+  | 'STATS'
+  | 'FEATURES'
+  | 'PRODUCT_SHOWCASE'
+  | 'CUSTOM_DOMAINS'
+  | 'DEVELOPERS'
+  | 'PRICING'
+  | 'FAQ'
+  | 'CTA';
+
+export type LandingPageNavPlacement =
+  'HEADER' | 'FOOTER_PRODUCT' | 'FOOTER_DEVELOPERS' | 'FOOTER_COMPANY';
+
+/** Curated, deliberately finite set of lucide-react icon names an admin
+ * may attach to a feature/stat — never free-text, so content can never
+ * inject arbitrary markup via this field. Keep in sync with
+ * apps/web/src/components/marketing/icon-map.ts's lookup object. */
+export const LANDING_PAGE_ICON_KEYS = [
+  'Link2',
+  'BarChart3',
+  'Globe2',
+  'Webhook',
+  'Users',
+  'Zap',
+  'ShieldCheck',
+  'Terminal',
+  'Lock',
+  'Shield',
+  'Rocket',
+  'Sparkles',
+  'Database',
+  'Code',
+  'Cloud',
+  'Smartphone',
+  'Mail',
+  'Bell',
+  'Search',
+  'Star',
+  'CheckCircle2',
+  'TrendingUp',
+  'Activity',
+  'MousePointerClick',
+  'QrCode',
+  'Settings',
+  'Layers',
+  'KeyRound',
+] as const;
+export type LandingPageIconKey = (typeof LANDING_PAGE_ICON_KEYS)[number];
+
+export interface LandingPageSectionDto {
+  id: string;
+  key: LandingPageSectionKey;
+  isActive: boolean;
+  eyebrow: string | null;
+  headline: string | null;
+  description: string | null;
+  primaryCtaText: string | null;
+  primaryCtaUrl: string | null;
+  secondaryCtaText: string | null;
+  secondaryCtaUrl: string | null;
+  updatedAt: string;
+}
+
+export interface UpdateLandingPageSectionPayload {
+  isActive?: boolean;
+  eyebrow?: string | null;
+  headline?: string | null;
+  description?: string | null;
+  primaryCtaText?: string | null;
+  primaryCtaUrl?: string | null;
+  secondaryCtaText?: string | null;
+  secondaryCtaUrl?: string | null;
+}
+
+export interface LandingPageFeatureDto {
+  id: string;
+  title: string;
+  description: string;
+  icon: LandingPageIconKey;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface UpsertLandingPageFeaturePayload {
+  title: string;
+  description: string;
+  icon: LandingPageIconKey;
+  isActive?: boolean;
+}
+
+export interface LandingPageFaqDto {
+  id: string;
+  question: string;
+  answer: string;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface UpsertLandingPageFaqPayload {
+  question: string;
+  answer: string;
+  isActive?: boolean;
+}
+
+export interface LandingPageStatDto {
+  id: string;
+  label: string;
+  sublabel: string | null;
+  icon: LandingPageIconKey;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface UpsertLandingPageStatPayload {
+  label: string;
+  sublabel?: string | null;
+  icon: LandingPageIconKey;
+  isActive?: boolean;
+}
+
+export interface LandingPageNavItemDto {
+  id: string;
+  placement: LandingPageNavPlacement;
+  label: string;
+  url: string;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface UpsertLandingPageNavItemPayload {
+  placement: LandingPageNavPlacement;
+  label: string;
+  url: string;
+  isActive?: boolean;
+}
+
+export interface ReorderPayload {
+  /** The full set of ids for this resource, in the desired display
+   * order — sortOrder is reassigned sequentially from this array. */
+  orderedIds: string[];
+}
+
+/** Admin view — every section (including inactive) plus every
+ * repeatable content list (including inactive rows), for the CMS
+ * editor. Contrast with PublicLandingPageContentDto, which only ever
+ * includes active content. */
+export interface AdminLandingPageContentDto {
+  sections: LandingPageSectionDto[];
+  features: LandingPageFeatureDto[];
+  faqs: LandingPageFaqDto[];
+  stats: LandingPageStatDto[];
+  navItems: LandingPageNavItemDto[];
+}
+
+/** Public view — only active sections/rows, already sorted, ready to
+ * render directly. Never includes ids/timestamps the public page has
+ * no use for beyond what's listed here. */
+export interface PublicLandingPageContentDto {
+  sections: Array<Omit<LandingPageSectionDto, 'id' | 'isActive' | 'updatedAt'>>;
+  features: Array<Omit<LandingPageFeatureDto, 'id' | 'isActive' | 'sortOrder'>>;
+  faqs: Array<Omit<LandingPageFaqDto, 'id' | 'isActive' | 'sortOrder'>>;
+  stats: Array<Omit<LandingPageStatDto, 'id' | 'isActive' | 'sortOrder'>>;
+  navItems: {
+    header: Array<
+      Omit<LandingPageNavItemDto, 'id' | 'isActive' | 'sortOrder' | 'placement'>
+    >;
+    footerProduct: Array<
+      Omit<LandingPageNavItemDto, 'id' | 'isActive' | 'sortOrder' | 'placement'>
+    >;
+    footerDevelopers: Array<
+      Omit<LandingPageNavItemDto, 'id' | 'isActive' | 'sortOrder' | 'placement'>
+    >;
+    footerCompany: Array<
+      Omit<LandingPageNavItemDto, 'id' | 'isActive' | 'sortOrder' | 'placement'>
+    >;
+  };
+}
+
+export interface SiteBrandingDto {
+  siteName: string;
+  logoUrl: string | null;
+  faviconUrl: string | null;
+  updatedAt: string;
+}
+
+/** Public view — deliberately just the 3 fields the marketing site /
+ * auth pages need. Never the admin's full SiteBrandingDto verbatim, so
+ * this type is the enforced boundary against accidentally widening the
+ * public endpoint later. */
+export interface PublicSiteConfigDto {
+  siteName: string;
+  logoUrl: string | null;
+  faviconUrl: string | null;
+}
+
+export interface UpdateSiteBrandingPayload {
+  siteName?: string;
+}
+
+/** The marketing pricing section's data source — a deliberately
+ * narrower view of PlanDto (no providerPlanId, no isActive — this
+ * list is already filtered to active-only) for the public,
+ * unauthenticated /public/plans endpoint. */
+export interface PublicPlanDto {
+  id: string;
+  name: string;
+  slug: string;
+  tier: PlanTier;
+  description: string | null;
+  priceAmount: number;
+  currency: string;
+  billingInterval: BillingInterval;
+  trialDays: number | null;
+  displayOrder: number;
+  limits: Array<{ key: PlanLimitKey; value: number | null }>;
+}

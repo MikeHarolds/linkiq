@@ -7,18 +7,25 @@ import * as React from 'react';
 
 import { Logo } from './logo';
 
-// Anchor links into sections of the single landing page rather than
-// separate routes — there is no standalone /product, /pricing, or
-// /developers page yet, and the brief is explicit about not inventing
-// placeholder routes just to populate navigation.
-const NAV_LINKS = [
-  { label: 'Product', href: '/#features' },
-  { label: 'Pricing', href: '/#pricing' },
-  { label: 'Developers', href: '/#developers' },
-] as const;
+// Fallback — used only when the admin hasn't configured any HEADER nav
+// items yet (an empty database list). Anchor links into sections of
+// the single landing page rather than separate routes — there is no
+// standalone /product, /pricing, or /developers page.
+const DEFAULT_NAV_LINKS = [
+  { label: 'Product', url: '/#features' },
+  { label: 'Pricing', url: '/#pricing' },
+  { label: 'Developers', url: '/#developers' },
+];
 
-export function SiteHeader() {
+interface SiteHeaderProps {
+  navItems?: Array<{ label: string; url: string }>;
+  logoUrl?: string | null;
+  siteName?: string;
+}
+
+export function SiteHeader({ navItems, logoUrl, siteName }: SiteHeaderProps) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const links = navItems && navItems.length > 0 ? navItems : DEFAULT_NAV_LINKS;
 
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-background/80 backdrop-blur">
@@ -29,13 +36,13 @@ export function SiteHeader() {
         className="h-px w-full bg-gradient-to-r from-transparent via-primary/50 to-transparent"
       />
       <div className="container flex h-16 items-center justify-between">
-        <Logo />
+        <Logo logoUrl={logoUrl} siteName={siteName} />
 
         <nav aria-label="Main" className="hidden items-center gap-8 md:flex">
-          {NAV_LINKS.map((link) => (
+          {links.map((link) => (
             <Link
-              key={link.href}
-              href={link.href}
+              key={link.url}
+              href={link.url}
               className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               {link.label}
@@ -77,10 +84,10 @@ export function SiteHeader() {
           className="border-t border-white/10 bg-background px-4 pb-6 pt-2 md:hidden"
         >
           <ul className="flex flex-col gap-1">
-            {NAV_LINKS.map((link) => (
-              <li key={link.href}>
+            {links.map((link) => (
+              <li key={link.url}>
                 <Link
-                  href={link.href}
+                  href={link.url}
                   onClick={() => setMobileOpen(false)}
                   className="block rounded-md px-3 py-2.5 text-sm font-medium text-foreground hover:bg-accent"
                 >
