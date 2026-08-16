@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Patch,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -12,6 +14,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { PermissionKey } from '@prisma/client';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import {
@@ -19,6 +22,9 @@ import {
   type RequestContext,
 } from '../../common/decorators/request-context.decorator';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
+import { RequirePermission } from '../roles/decorators/require-permission.decorator';
+import { PlatformPermissionsGuard } from '../roles/guards/platform-permissions.guard';
+import { RoleResolutionService } from '../roles/role-resolution.service';
 
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -28,7 +34,35 @@ import { UsersService } from './users.service';
 @ApiBearerAuth()
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly roleResolution: RoleResolutionService,
+  ) {}
+
+  @Get('me/entitlement')
+  @ApiOperation({
+    summary:
+      "The authenticated user's current platform role, why they have it, and what it grants — resolved live, not read from the access token (see docs/architecture/roles-and-permissions.md).",
+  })
+  async getMyEntitlement(@CurrentUser() user: AuthenticatedUser) {
+    const resolved = await this.roleResolution.resolveEffectiveRole(user.id);
+    return {
+      role: resolved.roleSlug,
+      source: resolved.source,
+      permissions: user.platformPermissions,
+    };
+  }
+
+  @Get('me/features/advanced-analytics')
+  @UseGuards(PlatformPermissionsGuard)
+  @RequirePermission(PermissionKey.ANALYTICS_ADVANCED)
+  @ApiOperation({
+    summary:
+      'Demonstration endpoint proving @RequirePermission/PlatformPermissionsGuard end-to-end — gated by the ANALYTICS_ADVANCED platform permission, distinct from workspace-level authorization.',
+  })
+  getAdvancedAnalyticsPreview() {
+    return { available: true };
+  }
 
   @Patch('me')
   @ApiOperation({ summary: "Update the authenticated user's profile" })

@@ -21,6 +21,7 @@ import {
 } from '../../common/dto/pagination.dto';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RoleResolutionService } from '../roles/role-resolution.service';
 import { WebhookEventsService } from '../webhooks/webhook-events.service';
 
 import { PlansService, type PlanWithLimits } from './plans.service';
@@ -69,7 +70,9 @@ export interface ListSubscriptionsQuery {
 }
 
 const SUBSCRIPTION_WITH_PLAN_INCLUDE = {
-  plan: { include: { limits: true } },
+  plan: {
+    include: { limits: true, platformRole: { select: { id: true, name: true, slug: true } } },
+  },
 } as const;
 
 /** Day-based billing-period approximation (30 days / 365 days) rather
@@ -91,10 +94,32 @@ export class SubscriptionsService {
     @Inject(BILLING_PROVIDER) private readonly provider: BillingProvider,
     @Inject(forwardRef(() => WebhookEventsService))
     private readonly webhookEvents: WebhookEventsService,
+    private readonly roleResolution: RoleResolutionService,
   ) {}
 
   private get pastDueGraceDays(): number {
     return this.config.get<number>('paystack.pastDueGraceDays') ?? 7;
+  }
+
+  /**
+   * Re-resolves platformRole (Sprint 15) for every OWNER of this
+   * workspace after a subscription mutation — never the acting `userId`
+   * directly, since subscribe/changePlan/cancel/reactivate are reachable
+   * by a workspace ADMIN, not just its OWNER (see @Roles(ADMIN) on
+   * BillingController), and platformRole is derived from *ownership*,
+   * not membership (see RoleResolutionService's docs). Safe to call
+   * unconditionally after every mutation, including ones that don't
+   * change the effective plan (e.g. a cancel() that only sets a future
+   * cancelAt) — RoleResolutionService itself decides whether anything
+   * actually changed via getEffectiveStatus, and syncStoredRole() is a
+   * no-op when the resolved role already matches what's stored.
+   */
+  private async syncOwnerRoles(workspaceId: string, ctx: RequestContext): Promise<void> {
+    const owners = await this.prisma.workspaceMember.findMany({
+      where: { workspaceId, role: 'OWNER' },
+      select: { userId: true },
+    });
+    await Promise.all(owners.map((o) => this.roleResolution.syncStoredRole(o.userId, ctx)));
   }
 
   private async getUserEmail(userId: string): Promise<string> {
@@ -323,6 +348,7 @@ export class SubscriptionsService {
       },
     });
 
+    await this.syncOwnerRoles(workspaceId, ctx);
     return { subscription, checkoutUrl: null };
   }
 
@@ -412,6 +438,7 @@ export class SubscriptionsService {
       },
     });
 
+    await this.syncOwnerRoles(workspaceId, ctx);
     return { subscription, checkoutUrl: null };
   }
 
@@ -462,6 +489,13 @@ export class SubscriptionsService {
       data: { id: subscription.id, cancelAt: cancelAt.toISOString() },
     });
 
+    // A no-op today (cancelAt is in the future, so getEffectiveStatus
+    // still reports the subscription as effectively active) — called
+    // anyway for the day cancelAt is set to "now" or already past, and
+    // to keep this method's behavior consistent with subscribe/
+    // changePlan/reactivate rather than being the one mutation that
+    // silently skips role resolution.
+    await this.syncOwnerRoles(workspaceId, ctx);
     return subscription;
   }
 
@@ -545,6 +579,7 @@ export class SubscriptionsService {
       data: { id: subscription.id, status: subscription.status },
     });
 
+    await this.syncOwnerRoles(workspaceId, ctx);
     return { subscription, checkoutUrl: null };
   }
 
@@ -575,7 +610,9 @@ export class SubscriptionsService {
     };
 
     const include = {
-      plan: { include: { limits: true } },
+      plan: {
+        include: { limits: true, platformRole: { select: { id: true, name: true, slug: true } } },
+      },
       workspace: {
         select: {
           id: true,

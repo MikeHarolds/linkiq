@@ -2,6 +2,7 @@ import type {
   BillingSummaryDto,
   CheckoutCallbackResultDto,
   InvoiceDto,
+  MyEntitlementDto,
   PlanDto,
   SubscriptionDto,
   SubscriptionMutationResultDto,
@@ -9,6 +10,13 @@ import type {
 } from '@linkiq/types';
 
 import { api } from './api-client';
+
+/** Sprint 15 — not workspace-scoped (unlike everything else in this
+ * file): the caller's own resolved platform role, shown alongside their
+ * workspace's plan on the billing page per Part 19 of the sprint spec. */
+export function getMyEntitlement(): Promise<MyEntitlementDto> {
+  return api.get('/users/me/entitlement');
+}
 
 /** Nested under /workspaces/:workspaceId/billing — matches the API's own
  * routing, see apps/api/src/modules/billing/billing.controller.ts. */

@@ -4,7 +4,7 @@ import { Test, type TestingModuleBuilder } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import type Redis from 'ioredis';
 
-import { seedPlans } from '../prisma/seed';
+import { seedPlans, seedPlatformRoles } from '../prisma/seed';
 import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { registerRedirectRoute } from '../src/modules/links/redirect-route';
@@ -78,7 +78,12 @@ export async function createTestApp(
   // shared test database's life. seedPlans() upserts everything in two
   // parallel batches rather than ~40 sequential round trips specifically
   // so this stays cheap enough to call unconditionally on every file.
-  await seedPlans(prisma);
+  const plans = await seedPlans(prisma);
+  // Sprint 15 — same unconditional-reseed rationale as seedPlans() above:
+  // resetDatabase() never touches PlatformRole/RolePermission rows either,
+  // so every e2e file gets the canonical system roles + plan attachments
+  // regardless of what a previous file's run left behind.
+  await seedPlatformRoles(prisma, plans);
 
   return { app, prisma, redis };
 }

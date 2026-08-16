@@ -61,6 +61,8 @@ describe('ApiKeysAuthService', () => {
       firstName: 'Dev',
       lastName: 'User',
       globalRole: GlobalRole.USER,
+      platformRoleId: undefined,
+      platformPermissions: [],
     });
     expect(result.apiKeyAuth).toEqual({
       authenticationType: 'api_key',

@@ -8,6 +8,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -85,4 +86,11 @@ export class UpdatePlanDto {
   @IsOptional()
   @IsObject()
   limits?: Partial<Record<PlanLimitKey, number | null>>;
+
+  @ApiPropertyOptional({
+    description: "The platform role a workspace's OWNER holds while this plan is effectively active, or null to detach.",
+  })
+  @IsOptional()
+  @IsUUID()
+  platformRoleId?: string | null;
 }

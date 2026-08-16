@@ -9,7 +9,9 @@ import type {
   AdminWorkspaceDetailDto,
   AdminWorkspaceListItemDto,
   ApiUsageOverviewDto,
+  AssignRolePayload,
   CreatePlanPayload,
+  CreateRolePayload,
   DomainStatus,
   GlobalRole,
   InvoiceStatus,
@@ -24,6 +26,7 @@ import type {
   PaystackConnectionTestDto,
   PlanDto,
   PlatformOverviewDto,
+  PlatformRoleDto,
   PlatformSettingsDto,
   SiteBrandingDto,
   SubscriptionMutationResultDto,
@@ -33,6 +36,7 @@ import type {
   TimeRangeValue,
   UpdateLandingPageSectionPayload,
   UpdatePlanPayload,
+  UpdateRolePayload,
   UpsertLandingPageFaqPayload,
   UpsertLandingPageFeaturePayload,
   UpsertLandingPageNavItemPayload,
@@ -60,7 +64,9 @@ function qs(params: Record<string, string | number | undefined>): string {
 }
 
 // --- Overview ---
-export function getOverview(range: TimeRangeValue): Promise<PlatformOverviewDto> {
+export function getOverview(
+  range: TimeRangeValue,
+): Promise<PlatformOverviewDto> {
   return api.get<PlatformOverviewDto>(`${BASE}/overview${qs({ range })}`);
 }
 
@@ -72,7 +78,9 @@ export interface ListUsersParams {
   globalRole?: GlobalRole;
   isActive?: 'true' | 'false';
 }
-export function listUsers(params: ListUsersParams): Promise<Paginated<AdminUserListItemDto>> {
+export function listUsers(
+  params: ListUsersParams,
+): Promise<Paginated<AdminUserListItemDto>> {
   return api.get(`${BASE}/users${qs({ ...params })}`);
 }
 export function getUser(userId: string): Promise<AdminUserDetailDto> {
@@ -83,7 +91,9 @@ export function getUserAuditActivity(
   page: number,
   pageSize: number,
 ): Promise<Paginated<AdminAuditLogDto>> {
-  return api.get(`${BASE}/users/${userId}/audit-activity${qs({ page, pageSize })}`);
+  return api.get(
+    `${BASE}/users/${userId}/audit-activity${qs({ page, pageSize })}`,
+  );
 }
 export function suspendUser(userId: string): Promise<{ success: boolean }> {
   return api.post(`${BASE}/users/${userId}/suspend`);
@@ -93,6 +103,12 @@ export function reactivateUser(userId: string): Promise<{ success: boolean }> {
 }
 export function forceLogoutUser(userId: string): Promise<{ success: boolean }> {
   return api.post(`${BASE}/users/${userId}/force-logout`);
+}
+export function assignUserRole(userId: string, payload: AssignRolePayload) {
+  return api.post(`${BASE}/users/${userId}/assign-role`, payload);
+}
+export function removeUserRoleOverride(userId: string) {
+  return api.post(`${BASE}/users/${userId}/remove-role-override`);
 }
 
 // --- Workspaces ---
@@ -107,7 +123,9 @@ export function listWorkspaces(
 ): Promise<Paginated<AdminWorkspaceListItemDto>> {
   return api.get(`${BASE}/workspaces${qs({ ...params })}`);
 }
-export function getWorkspace(workspaceId: string): Promise<AdminWorkspaceDetailDto> {
+export function getWorkspace(
+  workspaceId: string,
+): Promise<AdminWorkspaceDetailDto> {
   return api.get(`${BASE}/workspaces/${workspaceId}`);
 }
 
@@ -131,9 +149,13 @@ export function changeWorkspacePlan(
   workspaceId: string,
   planSlug: string,
 ): Promise<SubscriptionMutationResultDto> {
-  return api.post(`${BASE}/subscriptions/${workspaceId}/change-plan`, { planSlug });
+  return api.post(`${BASE}/subscriptions/${workspaceId}/change-plan`, {
+    planSlug,
+  });
 }
-export function cancelWorkspaceSubscription(workspaceId: string): Promise<SubscriptionDto> {
+export function cancelWorkspaceSubscription(
+  workspaceId: string,
+): Promise<SubscriptionDto> {
   return api.post(`${BASE}/subscriptions/${workspaceId}/cancel`);
 }
 export function reactivateWorkspaceSubscription(
@@ -145,7 +167,9 @@ export function extendWorkspaceTrial(
   workspaceId: string,
   trialEnd: string,
 ): Promise<SubscriptionDto> {
-  return api.post(`${BASE}/subscriptions/${workspaceId}/extend-trial`, { trialEnd });
+  return api.post(`${BASE}/subscriptions/${workspaceId}/extend-trial`, {
+    trialEnd,
+  });
 }
 
 // --- Plans ---
@@ -158,8 +182,33 @@ export function getPlan(planId: string): Promise<PlanDto> {
 export function createPlan(payload: CreatePlanPayload): Promise<PlanDto> {
   return api.post(`${BASE}/plans`, payload);
 }
-export function updatePlan(planId: string, payload: UpdatePlanPayload): Promise<PlanDto> {
+export function updatePlan(
+  planId: string,
+  payload: UpdatePlanPayload,
+): Promise<PlanDto> {
   return api.patch(`${BASE}/plans/${planId}`, payload);
+}
+
+// --- Roles (Sprint 15) ---
+export function listRoles(): Promise<PlatformRoleDto[]> {
+  return api.get(`${BASE}/roles`);
+}
+export function getRole(roleId: string): Promise<PlatformRoleDto> {
+  return api.get(`${BASE}/roles/${roleId}`);
+}
+export function createRole(
+  payload: CreateRolePayload,
+): Promise<PlatformRoleDto> {
+  return api.post(`${BASE}/roles`, payload);
+}
+export function updateRole(
+  roleId: string,
+  payload: UpdateRolePayload,
+): Promise<PlatformRoleDto> {
+  return api.patch(`${BASE}/roles/${roleId}`, payload);
+}
+export function deleteRole(roleId: string): Promise<{ success: boolean }> {
+  return api.delete(`${BASE}/roles/${roleId}`);
 }
 
 // --- Payments & Invoices (same underlying data) ---
@@ -173,10 +222,14 @@ export interface ListInvoicesParams {
   dateFrom?: string;
   dateTo?: string;
 }
-export function listPayments(params: ListInvoicesParams): Promise<Paginated<AdminInvoiceDto>> {
+export function listPayments(
+  params: ListInvoicesParams,
+): Promise<Paginated<AdminInvoiceDto>> {
   return api.get(`${BASE}/payments${qs({ ...params })}`);
 }
-export function listInvoices(params: ListInvoicesParams): Promise<Paginated<AdminInvoiceDto>> {
+export function listInvoices(
+  params: ListInvoicesParams,
+): Promise<Paginated<AdminInvoiceDto>> {
   return api.get(`${BASE}/invoices${qs({ ...params })}`);
 }
 export function getInvoice(invoiceId: string): Promise<AdminInvoiceDto> {
@@ -184,12 +237,16 @@ export function getInvoice(invoiceId: string): Promise<AdminInvoiceDto> {
 }
 
 // --- API Usage ---
-export function getApiUsageOverview(range: TimeRangeValue): Promise<ApiUsageOverviewDto> {
+export function getApiUsageOverview(
+  range: TimeRangeValue,
+): Promise<ApiUsageOverviewDto> {
   return api.get(`${BASE}/api-usage${qs({ range })}`);
 }
 
 // --- Webhooks ---
-export function getWebhookOpsOverview(range: TimeRangeValue): Promise<WebhookOpsOverviewDto> {
+export function getWebhookOpsOverview(
+  range: TimeRangeValue,
+): Promise<WebhookOpsOverviewDto> {
   return api.get(`${BASE}/webhooks/overview${qs({ range })}`);
 }
 export function listWebhookEndpoints(
@@ -212,13 +269,17 @@ export function getEndpointDelivery(
   endpointId: string,
   deliveryId: string,
 ): Promise<WebhookDeliveryDetailDto> {
-  return api.get(`${BASE}/webhooks/endpoints/${endpointId}/deliveries/${deliveryId}`);
+  return api.get(
+    `${BASE}/webhooks/endpoints/${endpointId}/deliveries/${deliveryId}`,
+  );
 }
 export function retryEndpointDelivery(
   endpointId: string,
   deliveryId: string,
 ): Promise<WebhookDeliveryDto> {
-  return api.post(`${BASE}/webhooks/endpoints/${endpointId}/deliveries/${deliveryId}/retry`);
+  return api.post(
+    `${BASE}/webhooks/endpoints/${endpointId}/deliveries/${deliveryId}/retry`,
+  );
 }
 
 // --- Domains ---
@@ -280,7 +341,9 @@ export function updateLandingPageSection(
   return api.patch(`${BASE}/landing-page/sections/${key}`, payload);
 }
 
-export function createFeature(payload: UpsertLandingPageFeaturePayload): Promise<LandingPageFeatureDto> {
+export function createFeature(
+  payload: UpsertLandingPageFeaturePayload,
+): Promise<LandingPageFeatureDto> {
   return api.post(`${BASE}/landing-page/features`, payload);
 }
 export function updateFeature(
@@ -292,11 +355,15 @@ export function updateFeature(
 export function deleteFeature(id: string): Promise<{ success: boolean }> {
   return api.delete(`${BASE}/landing-page/features/${id}`);
 }
-export function reorderFeatures(orderedIds: string[]): Promise<{ success: boolean }> {
+export function reorderFeatures(
+  orderedIds: string[],
+): Promise<{ success: boolean }> {
   return api.post(`${BASE}/landing-page/features/reorder`, { orderedIds });
 }
 
-export function createFaq(payload: UpsertLandingPageFaqPayload): Promise<LandingPageFaqDto> {
+export function createFaq(
+  payload: UpsertLandingPageFaqPayload,
+): Promise<LandingPageFaqDto> {
   return api.post(`${BASE}/landing-page/faqs`, payload);
 }
 export function updateFaq(
@@ -308,11 +375,15 @@ export function updateFaq(
 export function deleteFaq(id: string): Promise<{ success: boolean }> {
   return api.delete(`${BASE}/landing-page/faqs/${id}`);
 }
-export function reorderFaqs(orderedIds: string[]): Promise<{ success: boolean }> {
+export function reorderFaqs(
+  orderedIds: string[],
+): Promise<{ success: boolean }> {
   return api.post(`${BASE}/landing-page/faqs/reorder`, { orderedIds });
 }
 
-export function createStat(payload: UpsertLandingPageStatPayload): Promise<LandingPageStatDto> {
+export function createStat(
+  payload: UpsertLandingPageStatPayload,
+): Promise<LandingPageStatDto> {
   return api.post(`${BASE}/landing-page/stats`, payload);
 }
 export function updateStat(
@@ -324,11 +395,15 @@ export function updateStat(
 export function deleteStat(id: string): Promise<{ success: boolean }> {
   return api.delete(`${BASE}/landing-page/stats/${id}`);
 }
-export function reorderStats(orderedIds: string[]): Promise<{ success: boolean }> {
+export function reorderStats(
+  orderedIds: string[],
+): Promise<{ success: boolean }> {
   return api.post(`${BASE}/landing-page/stats/reorder`, { orderedIds });
 }
 
-export function createNavItem(payload: UpsertLandingPageNavItemPayload): Promise<LandingPageNavItemDto> {
+export function createNavItem(
+  payload: UpsertLandingPageNavItemPayload,
+): Promise<LandingPageNavItemDto> {
   return api.post(`${BASE}/landing-page/nav-items`, payload);
 }
 export function updateNavItem(
@@ -340,7 +415,9 @@ export function updateNavItem(
 export function deleteNavItem(id: string): Promise<{ success: boolean }> {
   return api.delete(`${BASE}/landing-page/nav-items/${id}`);
 }
-export function reorderNavItems(orderedIds: string[]): Promise<{ success: boolean }> {
+export function reorderNavItems(
+  orderedIds: string[],
+): Promise<{ success: boolean }> {
   return api.post(`${BASE}/landing-page/nav-items/reorder`, { orderedIds });
 }
 

@@ -9,6 +9,7 @@ import {
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import type { AuditService } from '../audit/audit.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { RoleResolutionService } from '../roles/role-resolution.service';
 import type { WebhookEventsService } from '../webhooks/webhook-events.service';
 
 import type { PlansService } from './plans.service';
@@ -31,6 +32,8 @@ function makePlan(overrides: Partial<Record<string, unknown>> = {}) {
     isActive: true,
     displayOrder: 0,
     providerPlanId: null,
+    platformRoleId: null,
+    platformRole: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     limits: [],
@@ -66,6 +69,7 @@ describe('SubscriptionsService', () => {
   let config: { get: jest.Mock };
   let provider: jest.Mocked<BillingProvider>;
   let webhookEvents: { emit: jest.Mock };
+  let roleResolution: { syncStoredRole: jest.Mock };
   let service: SubscriptionsService;
 
   beforeEach(() => {
@@ -73,6 +77,13 @@ describe('SubscriptionsService', () => {
     prisma.user.findUniqueOrThrow.mockResolvedValue({
       email: 'user@example.com',
     });
+    // Every subscribe/changePlan/cancel/reactivate success path now calls
+    // syncOwnerRoles(), which queries workspaceMember for the workspace's
+    // OWNER(s) — an empty default here keeps every pre-existing test in
+    // this file behaviorally unchanged (no owners means syncOwnerRoles is
+    // a harmless no-op); tests exercising role assignment explicitly
+    // override this.
+    prisma.workspaceMember.findMany.mockResolvedValue([]);
     plans = {
       getBySlug: jest.fn(),
       getFreePlan: jest.fn(),
@@ -90,6 +101,7 @@ describe('SubscriptionsService', () => {
       verifyTransaction: jest.fn(),
     };
     webhookEvents = { emit: jest.fn().mockResolvedValue(undefined) };
+    roleResolution = { syncStoredRole: jest.fn().mockResolvedValue(undefined) };
     service = new SubscriptionsService(
       prisma as unknown as PrismaService,
       plans as unknown as PlansService,
@@ -97,6 +109,7 @@ describe('SubscriptionsService', () => {
       config as unknown as ConfigService,
       provider,
       webhookEvents as unknown as WebhookEventsService,
+      roleResolution as unknown as RoleResolutionService,
     );
   });
 

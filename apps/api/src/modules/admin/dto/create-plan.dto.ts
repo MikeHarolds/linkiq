@@ -8,6 +8,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
   Min,
@@ -105,4 +106,12 @@ export class CreatePlanDto {
   @IsOptional()
   @IsBoolean()
   syncToProvider?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      "The platform role a workspace's OWNER holds while this plan is effectively active on a workspace they own. Optional — an internal/custom plan can have no role, in which case subscribing to it never changes anyone's platformRole. Validated server-side to be an existing, active, non-reserved-slug role — see PlansService.create/updateForAdmin.",
+  })
+  @IsOptional()
+  @IsUUID()
+  platformRoleId?: string | null;
 }

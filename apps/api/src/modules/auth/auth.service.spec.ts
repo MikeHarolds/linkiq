@@ -10,6 +10,7 @@ import {
 } from '../../../test/mocks/prisma.mock';
 import type { AuditService } from '../audit/audit.service';
 import type { SubscriptionsService } from '../billing/subscriptions.service';
+import type { RoleResolutionService } from '../roles/role-resolution.service';
 
 import { AuthService } from './auth.service';
 import type { LoginDto } from './dto/login.dto';
@@ -30,6 +31,8 @@ function makeUser(overrides: Partial<Record<string, unknown>> = {}) {
     globalRole: USER_ROLE,
     isActive: true,
     emailVerified: false,
+    platformRoleId: null,
+    roleAssignmentSource: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
     ...overrides,
@@ -42,6 +45,7 @@ describe('AuthService', () => {
   let config: { get: jest.Mock };
   let audit: { record: jest.Mock };
   let subscriptions: { createDefaultSubscription: jest.Mock };
+  let roleResolution: { syncStoredRole: jest.Mock };
   let service: AuthService;
 
   beforeEach(() => {
@@ -51,6 +55,7 @@ describe('AuthService', () => {
     subscriptions = {
       createDefaultSubscription: jest.fn().mockResolvedValue(undefined),
     };
+    roleResolution = { syncStoredRole: jest.fn().mockResolvedValue(undefined) };
 
     const configValues: Record<string, unknown> = {
       'auth.bcryptSaltRounds': 4, // low rounds keep unit tests fast
@@ -67,6 +72,7 @@ describe('AuthService', () => {
       config as unknown as ConfigService,
       audit as unknown as AuditService,
       subscriptions as unknown as SubscriptionsService,
+      roleResolution as unknown as RoleResolutionService,
     );
   });
 

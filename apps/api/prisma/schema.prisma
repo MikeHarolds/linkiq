@@ -29,6 +29,54 @@ enum WorkspaceRole {
   VIEWER
 }
 
+/// Sprint 15 — a user's product-entitlement bundle. Deliberately
+/// independent of GlobalRole (platform administration) and WorkspaceRole
+/// (workspace-scoped collaboration) — see docs/architecture/
+/// roles-and-permissions.md for the full three-axis authorization model.
+/// Fixed, typed keys rather than admin-creatable free-text, so a
+/// @RequirePermission(...) check can never reference a permission that
+/// doesn't correspond to real application functionality. Only the
+/// modules that actually exist are represented here.
+enum PermissionKey {
+  LINKS_VIEW
+  LINKS_CREATE
+  LINKS_EDIT
+  LINKS_DELETE
+  ANALYTICS_VIEW
+  ANALYTICS_ADVANCED
+  DOMAINS_VIEW
+  DOMAINS_CREATE
+  DOMAINS_DELETE
+  QR_CODES_VIEW
+  QR_CODES_CREATE
+  QR_CODES_DELETE
+  CAMPAIGNS_VIEW
+  CAMPAIGNS_CREATE
+  CAMPAIGNS_EDIT
+  CAMPAIGNS_DELETE
+  API_VIEW
+  API_CREATE
+  API_REVOKE
+  WEBHOOKS_VIEW
+  WEBHOOKS_CREATE
+  WEBHOOKS_EDIT
+  WEBHOOKS_DELETE
+  BILLING_VIEW
+  BILLING_MANAGE
+}
+
+/// Sprint 15 — why a user currently has the platformRole they have.
+/// SUBSCRIPTION: derived from the current subscription on a workspace
+/// the user owns (see RoleResolutionService). ADMIN_ASSIGNED: a Super
+/// Admin override that subscription lifecycle events must never
+/// silently overwrite. SYSTEM_DEFAULT: the fallback (FREE_USER) applied
+/// when there is no active subscription and no manual override.
+enum RoleAssignmentSource {
+  SUBSCRIPTION
+  ADMIN_ASSIGNED
+  SYSTEM_DEFAULT
+}
+
 /// Stored lifecycle states for a Link. Deliberately does NOT include an
 /// EXPIRED value — expiry is derived from `expiresAt` at read time instead
 /// of being a stored state. Storing EXPIRED would require a background job
@@ -207,6 +255,20 @@ model User {
   globalRole    GlobalRole @default(USER)
   isActive      Boolean    @default(true)
   emailVerified Boolean    @default(false)
+
+  /// Sprint 15 — the user's resolved product entitlement. Null only
+  /// transiently (a user who has never been through RoleResolutionService
+  /// — resolution always assigns at least FREE_USER, so this is null in
+  /// practice only for rows that predate this sprint until the next
+  /// resolution trigger touches them). See roleAssignmentSource for why
+  /// this value is currently what it is, and RoleResolutionService for
+  /// the single place that ever writes it — never set directly anywhere
+  /// else, including here in the schema (no @default: the seed script
+  /// and RoleResolutionService are both explicit about which role and
+  /// source they're assigning, never an implicit one).
+  platformRoleId       String?               @db.Uuid
+  platformRole         PlatformRole?         @relation(fields: [platformRoleId], references: [id])
+  roleAssignmentSource RoleAssignmentSource?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -748,6 +810,16 @@ model Plan {
   /// columns already use.
   providerPlanId String?
 
+  /// Sprint 15 — the platform role a workspace's OWNER should hold while
+  /// this plan is effectively active on a workspace they own. Optional:
+  /// an internal/custom plan can exist with no role attached, in which
+  /// case subscribing to it never changes anyone's platformRole (see
+  /// RoleResolutionService). Deliberately never SUPER_ADMIN-capable —
+  /// enforced in PlansService/AdminPlansController, not just the schema,
+  /// since Prisma has no "role must not be this one specific row" constraint.
+  platformRoleId String?       @db.Uuid
+  platformRole   PlatformRole? @relation(fields: [platformRoleId], references: [id])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1256,4 +1328,51 @@ model SiteBranding {
   updatedAt DateTime @updatedAt
 
   @@map("site_branding")
+}
+
+/// Sprint 15 — a platform-level product-entitlement bundle. `isSystem`
+/// protects the seeded roles (FREE_USER/STARTER_USER/PROFESSIONAL_USER/
+/// BUSINESS_USER) from destructive deletion in PlatformRolesService —
+/// they're referenced by seeded Plans and by every existing user's
+/// resolved role, so deleting one out from under active assignments
+/// would be a platform-wide outage, not a recoverable admin mistake.
+/// Custom roles (isSystem: false) may be archived by deactivating them
+/// (isActive: false) the same way a Plan is "removed" — see
+/// PlatformRolesService's own docs for why there's no hard-delete
+/// either, once a role has ever been assigned to a user.
+model PlatformRole {
+  id          String  @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String  @unique
+  description String?
+  isSystem    Boolean @default(false)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  permissions RolePermission[]
+  users       User[]
+  plans       Plan[]
+
+  @@map("platform_roles")
+}
+
+/// Which permissions a PlatformRole grants — a fixed-enum key/value join
+/// row against a role, the same shape PlanLimit already uses against a
+/// Plan (key: PlanLimitKey, value) rather than a third Permission table:
+/// there is nothing to store about a permission beyond its key (no
+/// admin-configurable description, no per-permission metadata was
+/// asked for), so a separate lookup table would be a distinction
+/// without a difference.
+model RolePermission {
+  id             String        @id @default(uuid()) @db.Uuid
+  platformRoleId String        @db.Uuid
+  platformRole   PlatformRole  @relation(fields: [platformRoleId], references: [id], onDelete: Cascade)
+  permission     PermissionKey
+
+  createdAt DateTime @default(now())
+
+  @@unique([platformRoleId, permission])
+  @@map("role_permissions")
 }

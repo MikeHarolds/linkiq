@@ -16,6 +16,7 @@ import { generateOpaqueToken, hashToken } from '../../common/utils/token';
 import { AuditService } from '../audit/audit.service';
 import { SubscriptionsService } from '../billing/subscriptions.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RoleResolutionService } from '../roles/role-resolution.service';
 
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
@@ -51,6 +52,7 @@ export class AuthService {
     private readonly config: ConfigService,
     private readonly audit: AuditService,
     private readonly subscriptions: SubscriptionsService,
+    private readonly roleResolution: RoleResolutionService,
   ) {}
 
   private get bcryptRounds(): number {
@@ -61,6 +63,12 @@ export class AuthService {
     return email.trim().toLowerCase();
   }
 
+  /** Builds the login/register/refresh response shape. platformPermissions
+   * is deliberately always [] here (never a join query) — this reflects
+   * the user identity, not a fresh authorization decision; the very next
+   * authenticated request re-resolves permissions for real via
+   * JwtStrategy.validate(), which is the only place that's ever
+   * authoritative for them (see AuthenticatedUser's own docs). */
   toAuthenticatedUser(user: User): AuthenticatedUser {
     return {
       id: user.id,
@@ -68,6 +76,8 @@ export class AuthService {
       firstName: user.firstName,
       lastName: user.lastName,
       globalRole: user.globalRole,
+      platformRoleId: user.platformRoleId,
+      platformPermissions: [],
     };
   }
 
@@ -145,6 +155,12 @@ export class AuthService {
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
     });
+
+    // Outside the transaction above (RoleResolutionService uses its own
+    // PrismaService connection, not the transaction client — see its own
+    // docs) — safe here because the workspace/subscription it needs to
+    // read have already committed by this point.
+    await this.roleResolution.syncStoredRole(user.id, ctx);
 
     const session = await this.issueSession(user, ctx);
 

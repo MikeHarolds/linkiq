@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, WorkspaceRole, type GlobalRole } from '@prisma/client';
+import { Prisma, WorkspaceRole, type GlobalRole, type RoleAssignmentSource } from '@prisma/client';
 
 import type { RequestContext } from '../../../common/decorators/request-context.decorator';
 import {
@@ -30,6 +30,10 @@ export interface AdminUserListItem {
   createdAt: Date;
   workspaceCount: number;
   lastLoginAt: Date | null;
+  /** Sprint 15 — null only for a pre-Sprint-15 row RoleResolutionService
+   * hasn't touched yet. See docs/architecture/roles-and-permissions.md. */
+  platformRole: { id: string; name: string; slug: string } | null;
+  roleAssignmentSource: RoleAssignmentSource | null;
 }
 
 export interface AdminUserDetail extends AdminUserListItem {
@@ -56,6 +60,8 @@ const USER_SELECT = {
   emailVerified: true,
   createdAt: true,
   updatedAt: true,
+  roleAssignmentSource: true,
+  platformRole: { select: { id: true, name: true, slug: true } },
 } satisfies Prisma.UserSelect;
 
 /**
@@ -127,6 +133,8 @@ export class AdminUsersService {
         createdAt: u.createdAt,
         workspaceCount: u._count.memberships,
         lastLoginAt: lastLogins.get(u.id) ?? null,
+        platformRole: u.platformRole,
+        roleAssignmentSource: u.roleAssignmentSource,
       })),
       pagination: paginationMeta(query.page, query.pageSize, totalItems),
     };
@@ -166,6 +174,8 @@ export class AdminUsersService {
       updatedAt: user.updatedAt,
       workspaceCount: user._count.memberships,
       lastLoginAt: lastLoginAt ?? null,
+      platformRole: user.platformRole,
+      roleAssignmentSource: user.roleAssignmentSource,
       workspaces: memberships.map((m) => ({
         id: m.workspace.id,
         name: m.workspace.name,

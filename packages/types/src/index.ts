@@ -325,6 +325,9 @@ export interface PlanDto {
   displayOrder: number;
   limits: PlanLimitDto[];
   providerPlanId: string | null;
+  /** Sprint 15 — the platform role a workspace's OWNER holds while this
+   * plan is effectively active on a workspace they own, if any. */
+  platformRole: { id: string; name: string; slug: string } | null;
 }
 
 export interface UsageSnapshotDto {
@@ -647,6 +650,9 @@ export interface AdminUserListItemDto {
   createdAt: string;
   workspaceCount: number;
   lastLoginAt: string | null;
+  /** Sprint 15 */
+  platformRole: { id: string; name: string; slug: string } | null;
+  roleAssignmentSource: RoleAssignmentSource | null;
 }
 
 export interface AdminUserDetailDto extends AdminUserListItemDto {
@@ -847,6 +853,7 @@ export interface UpdatePlanPayload {
   displayOrder?: number;
   providerPlanId?: string | null;
   limits?: Partial<Record<PlanLimitKey, number | null>>;
+  platformRoleId?: string | null;
 }
 
 export interface SystemHealthDto {
@@ -876,6 +883,9 @@ export interface CreatePlanPayload {
    * (never fails plan creation) if the provider doesn't support it or
    * the call fails — see BillingProvider.createProviderPlan. */
   syncToProvider?: boolean;
+  /** Sprint 15 — the platform role a workspace's OWNER holds while this
+   * plan is effectively active on a workspace they own. */
+  platformRoleId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1098,4 +1108,85 @@ export interface PublicPlanDto {
   trialDays: number | null;
   displayOrder: number;
   limits: Array<{ key: PlanLimitKey; value: number | null }>;
+}
+
+// ---------------------------------------------------------------------------
+// Platform Roles & Permissions (Sprint 15)
+// ---------------------------------------------------------------------------
+
+/** Fixed, typed permission keys — never arbitrary strings. Every key
+ * corresponds to a module that genuinely exists in LinkIQ. Keep in sync
+ * with apps/api's PermissionKey Prisma enum (documented cross-boundary
+ * duplication, same convention as PlanLimitKey/LandingPageIconKey). */
+export const PERMISSION_KEYS = [
+  'LINKS_VIEW',
+  'LINKS_CREATE',
+  'LINKS_EDIT',
+  'LINKS_DELETE',
+  'ANALYTICS_VIEW',
+  'ANALYTICS_ADVANCED',
+  'DOMAINS_VIEW',
+  'DOMAINS_CREATE',
+  'DOMAINS_DELETE',
+  'QR_CODES_VIEW',
+  'QR_CODES_CREATE',
+  'QR_CODES_DELETE',
+  'CAMPAIGNS_VIEW',
+  'CAMPAIGNS_CREATE',
+  'CAMPAIGNS_EDIT',
+  'CAMPAIGNS_DELETE',
+  'API_VIEW',
+  'API_CREATE',
+  'API_REVOKE',
+  'WEBHOOKS_VIEW',
+  'WEBHOOKS_CREATE',
+  'WEBHOOKS_EDIT',
+  'WEBHOOKS_DELETE',
+  'BILLING_VIEW',
+  'BILLING_MANAGE',
+] as const;
+export type PermissionKey = (typeof PERMISSION_KEYS)[number];
+
+export type RoleAssignmentSource =
+  'SUBSCRIPTION' | 'ADMIN_ASSIGNED' | 'SYSTEM_DEFAULT';
+
+export interface PlatformRoleDto {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  isSystem: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  permissions: PermissionKey[];
+  userCount: number;
+  plans: Array<{ id: string; name: string; slug: string }>;
+}
+
+export interface CreateRolePayload {
+  name: string;
+  slug: string;
+  description?: string;
+  permissions?: PermissionKey[];
+  isActive?: boolean;
+}
+
+export interface UpdateRolePayload {
+  name?: string;
+  description?: string;
+  permissions?: PermissionKey[];
+  isActive?: boolean;
+}
+
+export interface AssignRolePayload {
+  platformRoleId: string;
+}
+
+/** GET /users/me/entitlement — the authenticated user's own resolved
+ * role, why they have it, and what it currently grants. */
+export interface MyEntitlementDto {
+  role: string | null;
+  source: RoleAssignmentSource;
+  permissions: PermissionKey[];
 }

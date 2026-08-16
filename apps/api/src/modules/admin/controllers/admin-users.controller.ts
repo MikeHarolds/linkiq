@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -14,6 +14,8 @@ import {
 import { PaginationDto } from '../../../common/dto/pagination.dto';
 import { SuperAdminGuard } from '../../../common/guards/super-admin.guard';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.type';
+import { AssignRoleDto } from '../../roles/dto/assign-role.dto';
+import { RoleResolutionService } from '../../roles/role-resolution.service';
 import { QueryUsersDto } from '../dto/query-users.dto';
 import { AdminUsersService } from '../services/admin-users.service';
 
@@ -28,7 +30,10 @@ import { AdminUsersService } from '../services/admin-users.service';
 @Controller('admin/users')
 @UseGuards(SuperAdminGuard)
 export class AdminUsersController {
-  constructor(private readonly adminUsers: AdminUsersService) {}
+  constructor(
+    private readonly adminUsers: AdminUsersService,
+    private readonly roleResolution: RoleResolutionService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List platform users (SUPER_ADMIN only)' })
@@ -91,5 +96,29 @@ export class AdminUsersController {
   ) {
     await this.adminUsers.forceLogout(userId, admin.id, ctx);
     return { success: true };
+  }
+
+  @Post(':userId/assign-role')
+  @ApiOperation({
+    summary:
+      'Manually assign a platform role (ADMIN_ASSIGNED) — subscription lifecycle events will not overwrite it until removed',
+  })
+  async assignRole(
+    @Param('userId') userId: string,
+    @Body() dto: AssignRoleDto,
+    @CurrentUser() admin: AuthenticatedUser,
+    @Ctx() ctx: RequestContext,
+  ) {
+    return this.roleResolution.assignManualRole(userId, dto.platformRoleId, admin.id, ctx);
+  }
+
+  @Post(':userId/remove-role-override')
+  @ApiOperation({ summary: "Remove a manual role override — resolves the role from the user's subscription again" })
+  async removeRoleOverride(
+    @Param('userId') userId: string,
+    @CurrentUser() admin: AuthenticatedUser,
+    @Ctx() ctx: RequestContext,
+  ) {
+    return this.roleResolution.clearManualRole(userId, admin.id, ctx);
   }
 }

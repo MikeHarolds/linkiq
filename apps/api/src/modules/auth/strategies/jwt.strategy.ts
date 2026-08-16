@@ -38,6 +38,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         lastName: true,
         globalRole: true,
         isActive: true,
+        platformRoleId: true,
+        // isActive on the join, not just the role row's own isActive —
+        // an inactive PlatformRole must never keep granting permissions
+        // just because a user was assigned it before it was deactivated
+        // (see RoleResolutionService's docs on resolution vs. granting).
+        platformRole: {
+          select: { isActive: true, permissions: { select: { permission: true } } },
+        },
       },
     });
 
@@ -51,6 +59,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       firstName: user.firstName,
       lastName: user.lastName,
       globalRole: user.globalRole,
+      platformRoleId: user.platformRoleId,
+      platformPermissions:
+        user.platformRole?.isActive ? user.platformRole.permissions.map((p) => p.permission) : [],
     };
   }
 }

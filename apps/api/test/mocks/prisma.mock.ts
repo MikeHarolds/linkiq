@@ -105,6 +105,18 @@ export function createMockPrismaService() {
       create: jest.fn(),
       upsert: jest.fn(),
     },
+    platformRole: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+    },
+    rolePermission: {
+      createMany: jest.fn(),
+      deleteMany: jest.fn(),
+    },
     subscription: {
       create: jest.fn(),
       findUnique: jest.fn(),

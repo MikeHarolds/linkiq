@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   BillingInterval,
   PlanTier,
@@ -12,7 +12,15 @@ import type { RequestContext } from '../../common/decorators/request-context.dec
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 
-export type PlanWithLimits = Plan & { limits: PlanLimit[] };
+export type PlanWithLimits = Plan & {
+  limits: PlanLimit[];
+  platformRole: { id: string; name: string; slug: string } | null;
+};
+
+const PLAN_WITH_LIMITS_INCLUDE = {
+  limits: true,
+  platformRole: { select: { id: true, name: true, slug: true } },
+} as const;
 
 /** slug/tier ARE settable here, unlike UpdatePlanInput — they're only
  * immutable once a plan exists (see updateForAdmin's own docs). */
@@ -29,6 +37,8 @@ export interface CreatePlanInput {
   displayOrder?: number;
   providerPlanId?: string | null;
   limits?: Partial<Record<PlanLimitKey, number | null>>;
+  /** Sprint 15 — see Plan.platformRoleId's own schema docs. */
+  platformRoleId?: string | null;
 }
 
 /** Every field optional — Super Admin edits are partial updates against
@@ -48,6 +58,7 @@ export interface UpdatePlanInput {
    * ambiguous (does an omitted key mean "leave alone" or "remove"?); the
    * admin UI always submits every PlanLimitKey it displays. */
   limits?: Partial<Record<PlanLimitKey, number | null>>;
+  platformRoleId?: string | null;
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -113,7 +124,7 @@ export class PlansService {
   async getByIdOrThrow(planId: string): Promise<PlanWithLimits> {
     const plan = await this.prisma.plan.findUnique({
       where: { id: planId },
-      include: { limits: true },
+      include: PLAN_WITH_LIMITS_INCLUDE,
     });
     if (!plan) {
       throw new NotFoundException('Plan not found');
@@ -140,6 +151,9 @@ export class PlansService {
     if (existing) {
       throw new ConflictException(`A plan with slug "${input.slug}" already exists`);
     }
+    if (input.platformRoleId) {
+      await this.assertValidPlanRole(input.platformRoleId);
+    }
 
     const plan = await this.prisma.$transaction(async (tx) => {
       const created = await tx.plan.create({
@@ -155,6 +169,7 @@ export class PlansService {
           isActive: input.isActive ?? true,
           displayOrder: input.displayOrder ?? 0,
           providerPlanId: input.providerPlanId,
+          platformRoleId: input.platformRoleId,
         },
       });
 
@@ -200,6 +215,9 @@ export class PlansService {
     ctx: RequestContext,
   ): Promise<PlanWithLimits> {
     const existing = await this.getByIdOrThrow(planId);
+    if (input.platformRoleId) {
+      await this.assertValidPlanRole(input.platformRoleId);
+    }
 
     await this.prisma.$transaction(async (tx) => {
       await tx.plan.update({
@@ -214,6 +232,7 @@ export class PlansService {
           isActive: input.isActive,
           displayOrder: input.displayOrder,
           providerPlanId: input.providerPlanId,
+          platformRoleId: input.platformRoleId,
         },
       });
 
@@ -245,13 +264,28 @@ export class PlansService {
     return this.getByIdOrThrow(planId);
   }
 
+  /** Sprint 15 — a plan's role must exist and be active. There is no
+   * "must not be SUPER_ADMIN" check needed here: PlatformRole is a
+   * completely separate table from the GlobalRole enum, so a plan can
+   * never reference SUPER_ADMIN even by accident — see
+   * docs/architecture/roles-and-permissions.md. */
+  private async assertValidPlanRole(platformRoleId: string): Promise<void> {
+    const role = await this.prisma.platformRole.findUnique({ where: { id: platformRoleId } });
+    if (!role) {
+      throw new NotFoundException('Selected role not found');
+    }
+    if (!role.isActive) {
+      throw new BadRequestException('Cannot attach an inactive role to a plan');
+    }
+  }
+
   private async getAllCached(): Promise<PlanWithLimits[]> {
     const now = Date.now();
     if (this.cache && this.cache.expiresAt > now) {
       return this.cache.plans;
     }
     const plans = await this.prisma.plan.findMany({
-      include: { limits: true },
+      include: PLAN_WITH_LIMITS_INCLUDE,
       orderBy: { displayOrder: 'asc' },
     });
     this.cache = { plans, expiresAt: now + CACHE_TTL_MS };

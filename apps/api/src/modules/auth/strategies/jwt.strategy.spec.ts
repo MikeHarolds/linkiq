@@ -20,6 +20,8 @@ function makeUser(overrides: Partial<Record<string, unknown>> = {}) {
     lastName: 'Doe',
     globalRole: USER_ROLE,
     isActive: true,
+    platformRoleId: null,
+    platformRole: null,
     ...overrides,
   };
 }
@@ -51,7 +53,39 @@ describe('JwtStrategy', () => {
       firstName: 'Jane',
       lastName: 'Doe',
       globalRole: USER_ROLE,
+      platformRoleId: null,
+      platformPermissions: [],
     });
+  });
+
+  it('includes the resolved platform permissions when the user has an active platform role', async () => {
+    prisma.user.findUnique.mockResolvedValue(
+      makeUser({
+        platformRoleId: 'role-1',
+        platformRole: {
+          isActive: true,
+          permissions: [{ permission: 'LINKS_VIEW' }, { permission: 'LINKS_CREATE' }],
+        },
+      }),
+    );
+
+    const result = await strategy.validate(payload);
+
+    expect(result.platformRoleId).toBe('role-1');
+    expect(result.platformPermissions).toEqual(['LINKS_VIEW', 'LINKS_CREATE']);
+  });
+
+  it('grants zero permissions when the assigned platform role is itself inactive', async () => {
+    prisma.user.findUnique.mockResolvedValue(
+      makeUser({
+        platformRoleId: 'role-1',
+        platformRole: { isActive: false, permissions: [{ permission: 'LINKS_VIEW' }] },
+      }),
+    );
+
+    const result = await strategy.validate(payload);
+
+    expect(result.platformPermissions).toEqual([]);
   });
 
   it('rejects a deactivated user even with a valid, unexpired access token', async () => {

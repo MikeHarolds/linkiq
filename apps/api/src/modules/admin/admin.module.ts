@@ -12,6 +12,7 @@ import { DomainsModule } from '../domains/domains.module';
 import { HealthModule } from '../health/health.module';
 import { LandingPageModule } from '../landing-page/landing-page.module';
 import { CLICK_EVENT_QUEUE } from '../links/queue/click-event.types';
+import { RolesModule } from '../roles/roles.module';
 import { WEBHOOK_DELIVERY_QUEUE } from '../webhooks/queue/webhook-delivery.types';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 
@@ -25,6 +26,7 @@ import { AdminLandingPageController } from './controllers/admin-landing-page.con
 import { AdminOverviewController } from './controllers/admin-overview.controller';
 import { AdminPaymentsController } from './controllers/admin-payments.controller';
 import { AdminPlansController } from './controllers/admin-plans.controller';
+import { AdminRolesController } from './controllers/admin-roles.controller';
 import { AdminSettingsController } from './controllers/admin-settings.controller';
 import { AdminSubscriptionsController } from './controllers/admin-subscriptions.controller';
 import { AdminUsersController } from './controllers/admin-users.controller';
@@ -68,6 +70,7 @@ import { AdminWorkspacesService } from './services/admin-workspaces.service';
     TerminusModule,
     LandingPageModule,
     BrandingModule,
+    RolesModule,
     BullModule.registerQueue(
       { name: CLICK_EVENT_QUEUE },
       { name: WEBHOOK_DELIVERY_QUEUE },
@@ -91,6 +94,7 @@ import { AdminWorkspacesService } from './services/admin-workspaces.service';
     AdminHealthController,
     AdminLandingPageController,
     AdminBrandingController,
+    AdminRolesController,
   ],
   providers: [
     AdminUsersService,

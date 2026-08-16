@@ -39,10 +39,12 @@ import {
   LandingPageNavPlacement,
   LandingPageSectionKey,
   LinkStatus,
+  PermissionKey,
   PlanTier,
   PrismaClient,
   QrErrorCorrectionLevel,
   QrFormat,
+  RoleAssignmentSource,
   SubscriptionStatus,
   WorkspaceRole,
 } from '@prisma/client';
@@ -50,6 +52,7 @@ import type { Plan, PlanLimitKey, Workspace, User, Link } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 import { computeVisitorHash } from '../src/modules/analytics/utils/visitor-hash';
+import { getEffectiveStatus, isEffectivelyOnPlan } from '../src/modules/billing/utils/effective-status';
 
 const prisma = new PrismaClient();
 
@@ -267,6 +270,233 @@ export async function seedPlans(
 
   console.log(`Seeded ${PLAN_CONFIGS.length} plans`);
   return bySlug;
+}
+
+interface RoleSeedConfig {
+  name: string;
+  slug: string;
+  description: string;
+  /** Which PLAN_CONFIGS slug this role attaches to — null for a role
+   * with no corresponding purchasable plan (none today; kept optional
+   * because Plan.platformRoleId itself is optional — see schema.prisma). */
+  planSlug: string | null;
+  permissions: PermissionKey[];
+}
+
+const FREE_PERMISSIONS: PermissionKey[] = [
+  PermissionKey.LINKS_VIEW,
+  PermissionKey.LINKS_CREATE,
+  PermissionKey.LINKS_EDIT,
+  PermissionKey.LINKS_DELETE,
+  PermissionKey.ANALYTICS_VIEW,
+  PermissionKey.QR_CODES_VIEW,
+  PermissionKey.QR_CODES_CREATE,
+  PermissionKey.QR_CODES_DELETE,
+  PermissionKey.CAMPAIGNS_VIEW,
+  PermissionKey.CAMPAIGNS_CREATE,
+  PermissionKey.CAMPAIGNS_EDIT,
+  PermissionKey.CAMPAIGNS_DELETE,
+  PermissionKey.DOMAINS_VIEW,
+  PermissionKey.API_VIEW,
+  PermissionKey.WEBHOOKS_VIEW,
+  PermissionKey.BILLING_VIEW,
+];
+const STARTER_PERMISSIONS: PermissionKey[] = [
+  ...FREE_PERMISSIONS,
+  PermissionKey.DOMAINS_CREATE,
+  PermissionKey.DOMAINS_DELETE,
+  PermissionKey.API_CREATE,
+  PermissionKey.WEBHOOKS_CREATE,
+  PermissionKey.WEBHOOKS_EDIT,
+];
+const PROFESSIONAL_PERMISSIONS: PermissionKey[] = [
+  ...STARTER_PERMISSIONS,
+  PermissionKey.API_REVOKE,
+  PermissionKey.WEBHOOKS_DELETE,
+  PermissionKey.ANALYTICS_ADVANCED,
+];
+const BUSINESS_PERMISSIONS: PermissionKey[] = [...PROFESSIONAL_PERMISSIONS, PermissionKey.BILLING_MANAGE];
+
+/** Sprint 15 — the four system roles, each a strict permission superset
+ * of the tier below it (see the *_PERMISSIONS constants above). Every
+ * key here corresponds to a module that genuinely exists in LinkIQ
+ * today — never invented for functionality that doesn't exist (see
+ * PermissionKey's own schema docs). No ENTERPRISE_USER role: Enterprise
+ * is contract-priced and not purchasable through automated checkout
+ * (see PLAN_CONFIGS's own "enterprise" entry) — its Plan.platformRoleId
+ * is deliberately left null rather than inventing a fifth role nobody
+ * asked for. */
+const ROLE_CONFIGS: RoleSeedConfig[] = [
+  {
+    name: 'Free User',
+    slug: 'free-user',
+    description: 'Default entitlement — no active paid subscription.',
+    planSlug: 'free',
+    permissions: FREE_PERMISSIONS,
+  },
+  {
+    name: 'Starter User',
+    slug: 'starter-user',
+    description: 'Starter plan subscriber.',
+    planSlug: 'starter',
+    permissions: STARTER_PERMISSIONS,
+  },
+  {
+    name: 'Professional User',
+    slug: 'professional-user',
+    description: 'Professional plan subscriber.',
+    planSlug: 'professional',
+    permissions: PROFESSIONAL_PERMISSIONS,
+  },
+  {
+    name: 'Business User',
+    slug: 'business-user',
+    description: 'Business plan subscriber.',
+    planSlug: 'business',
+    permissions: BUSINESS_PERMISSIONS,
+  },
+];
+
+/** Upserts the 4 system PlatformRoles and attaches each to its
+ * corresponding Plan. Idempotent — safe to call on every e2e test
+ * file's bootstrap alongside seedPlans (see test/setup-app.ts) and on
+ * every `npm run prisma:seed` re-run. Permission sets are fully
+ * replaced on every run (not merged) so an admin's earlier permission
+ * edit to a system role plus a later seed re-run converges back to the
+ * canonical set — the same "seed is the source of truth for system
+ * defaults" convention seedFeatureFlags already uses. */
+export async function seedPlatformRoles(
+  client: PrismaClient,
+  plansBySlug: Record<string, Plan>,
+): Promise<Record<string, { id: string; slug: string }>> {
+  const bySlug: Record<string, { id: string; slug: string }> = {};
+
+  for (const config of ROLE_CONFIGS) {
+    const role = await client.platformRole.upsert({
+      where: { slug: config.slug },
+      update: { name: config.name, description: config.description, isSystem: true },
+      create: {
+        name: config.name,
+        slug: config.slug,
+        description: config.description,
+        isSystem: true,
+      },
+    });
+    bySlug[config.slug] = role;
+
+    await client.rolePermission.deleteMany({ where: { platformRoleId: role.id } });
+    await client.rolePermission.createMany({
+      data: config.permissions.map((permission) => ({ platformRoleId: role.id, permission })),
+    });
+
+    const plan = config.planSlug ? plansBySlug[config.planSlug] : undefined;
+    if (plan) {
+      await client.plan.update({ where: { id: plan.id }, data: { platformRoleId: role.id } });
+    }
+  }
+
+  console.log(`Seeded ${ROLE_CONFIGS.length} platform roles`);
+  return bySlug;
+}
+
+function seedTierRank(tier: PlanTier): number {
+  switch (tier) {
+    case PlanTier.ENTERPRISE:
+      return 4;
+    case PlanTier.BUSINESS:
+      return 3;
+    case PlanTier.PROFESSIONAL:
+      return 2;
+    case PlanTier.STARTER:
+      return 1;
+    case PlanTier.FREE:
+      return 0;
+    default:
+      throw new Error(`Unknown plan tier: ${String(tier)}`);
+  }
+}
+
+/** Sets every existing user's platformRoleId/roleAssignmentSource —
+ * the seed-time equivalent of RoleResolutionService.syncStoredRole(),
+ * written standalone (no Nest DI in this script, same precedent as
+ * this file already importing computeVisitorHash/getEffectiveStatus as
+ * plain functions rather than the services that wrap them). For every
+ * user, resolves the highest-tier role among workspaces they OWN whose
+ * subscription is effectively active right now, falling back to
+ * free-user — see RoleResolutionService's own docs for why "highest
+ * tier among owned workspaces" rather than a "primary workspace" that
+ * doesn't exist anywhere in the schema. admin@linkiq.com owns no
+ * workspace (seedAdminUser creates none) and therefore resolves to
+ * free-user/SYSTEM_DEFAULT — harmless, since SuperAdminGuard/
+ * PlatformPermissionsGuard both key off globalRole, never platformRole,
+ * for a SUPER_ADMIN (see docs/architecture/roles-and-permissions.md). */
+async function seedUserRoles(
+  client: PrismaClient,
+  rolesBySlug: Record<string, { id: string; slug: string }>,
+): Promise<void> {
+  const freeRole = rolesBySlug['free-user'];
+  if (!freeRole) {
+    throw new Error('seedUserRoles: free-user role is missing');
+  }
+
+  // Never overwrite an ADMIN_ASSIGNED override on a re-seed — Part 14 of
+  // the sprint spec's "must NOT silently overwrite a manual assignment"
+  // rule applies here too, not just to live subscription webhooks.
+  const users = await client.user.findMany({
+    where: {
+      OR: [
+        { roleAssignmentSource: null },
+        { roleAssignmentSource: { not: RoleAssignmentSource.ADMIN_ASSIGNED } },
+      ],
+    },
+    select: { id: true },
+  });
+
+  for (const { id: userId } of users) {
+    const ownedMemberships = await client.workspaceMember.findMany({
+      where: { userId, role: WorkspaceRole.OWNER },
+      select: {
+        workspace: {
+          select: {
+            subscription: {
+              select: {
+                status: true,
+                trialEnd: true,
+                cancelAt: true,
+                pastDueSince: true,
+                plan: { select: { tier: true, platformRoleId: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    let bestRoleId: string | null = null;
+    let bestRank = -1;
+    for (const { workspace } of ownedMemberships) {
+      const sub = workspace.subscription;
+      if (!sub || !sub.plan.platformRoleId) continue;
+      if (!isEffectivelyOnPlan(getEffectiveStatus(sub))) continue;
+      const rank = seedTierRank(sub.plan.tier);
+      if (rank > bestRank) {
+        bestRank = rank;
+        bestRoleId = sub.plan.platformRoleId;
+      }
+    }
+
+    await client.user.update({
+      where: { id: userId },
+      data: {
+        platformRoleId: bestRoleId ?? freeRole.id,
+        roleAssignmentSource: bestRoleId
+          ? RoleAssignmentSource.SUBSCRIPTION
+          : RoleAssignmentSource.SYSTEM_DEFAULT,
+      },
+    });
+  }
+
+  console.log(`Resolved platform roles for ${users.length} user(s)`);
 }
 
 async function seedDemoUser() {
@@ -1347,6 +1577,7 @@ async function main() {
   console.log('Seeding LinkIQ database...\n');
 
   const plans = await seedPlans();
+  const roles = await seedPlatformRoles(prisma, plans);
   const { user, workspace } = await seedDemoUser();
   await seedDemoSubscription(workspace, plans);
   await seedAdminUser();
@@ -1357,6 +1588,7 @@ async function main() {
   await seedDemoQrCodes(workspace, user, links);
   await seedDemoCampaigns(workspace, user, links);
   await backfillMissingSubscriptions(plans);
+  await seedUserRoles(prisma, roles);
 
   // TODO (future milestones): seed AI insights, tags, notifications,
   // activity history, and custom domains for the demo account once

@@ -30,15 +30,19 @@ const STATUS_FILTERS = [
 
 function formatDate(value: string | null): string {
   if (!value) return '—';
-  return new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric' }).format(
-    new Date(value),
-  );
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(new Date(value));
 }
 
 export default function AdminUsersPage() {
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
-  const [isActive, setIsActive] = React.useState<'true' | 'false' | undefined>(undefined);
+  const [isActive, setIsActive] = React.useState<'true' | 'false' | undefined>(
+    undefined,
+  );
   const [page, setPage] = React.useState(1);
 
   React.useEffect(() => {
@@ -51,12 +55,21 @@ export default function AdminUsersPage() {
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['admin', 'users', page, debouncedSearch, isActive],
-    queryFn: () => listUsers({ page, pageSize: PAGE_SIZE, search: debouncedSearch || undefined, isActive }),
+    queryFn: () =>
+      listUsers({
+        page,
+        pageSize: PAGE_SIZE,
+        search: debouncedSearch || undefined,
+        isActive,
+      }),
   });
 
   return (
     <div>
-      <AdminPageHeader title="Users" description="Every account on the LinkIQ platform." />
+      <AdminPageHeader
+        title="Users"
+        description="Every account on the LinkIQ platform."
+      />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Input
@@ -82,7 +95,11 @@ export default function AdminUsersPage() {
       </div>
 
       {isLoading && (
-        <div role="status" aria-live="polite" className="py-12 text-center text-muted-foreground">
+        <div
+          role="status"
+          aria-live="polite"
+          className="py-12 text-center text-muted-foreground"
+        >
           Loading users…
         </div>
       )}
@@ -108,6 +125,7 @@ export default function AdminUsersPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
+                  <TableHead>Platform Role</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Workspaces</TableHead>
                   <TableHead>Last login</TableHead>
@@ -125,7 +143,9 @@ export default function AdminUsersPage() {
                         {user.firstName} {user.lastName}
                       </Link>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{user.email}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {user.email}
+                    </TableCell>
                     <TableCell>
                       {user.globalRole === 'SUPER_ADMIN' ? (
                         <Badge variant="warning">Super Admin</Badge>
@@ -134,7 +154,26 @@ export default function AdminUsersPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={user.isActive ? 'success' : 'destructive'}>
+                      {user.platformRole ? (
+                        <div>
+                          <span>{user.platformRole.name}</span>
+                          {user.roleAssignmentSource === 'ADMIN_ASSIGNED' && (
+                            <Badge
+                              variant="outline"
+                              className="ml-2 text-[10px]"
+                            >
+                              Manual
+                            </Badge>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={user.isActive ? 'success' : 'destructive'}
+                      >
                         {user.isActive ? 'Active' : 'Suspended'}
                       </Badge>
                     </TableCell>
@@ -150,7 +189,10 @@ export default function AdminUsersPage() {
               </TableBody>
             </Table>
           </div>
-          <PaginationFooter pagination={data.pagination} onPageChange={setPage} />
+          <PaginationFooter
+            pagination={data.pagination}
+            onPageChange={setPage}
+          />
         </>
       )}
     </div>

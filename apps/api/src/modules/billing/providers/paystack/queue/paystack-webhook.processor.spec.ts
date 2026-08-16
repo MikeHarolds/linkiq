@@ -11,6 +11,7 @@ import {
 } from '../../../../../../test/mocks/prisma.mock';
 import type { AuditService } from '../../../../audit/audit.service';
 import type { PrismaService } from '../../../../prisma/prisma.service';
+import type { RoleResolutionService } from '../../../../roles/role-resolution.service';
 import type { WebhookEventsService } from '../../../../webhooks/webhook-events.service';
 import type { BillingEventsService } from '../../../billing-events.service';
 import type { InvoicesService } from '../../../invoices.service';
@@ -69,6 +70,7 @@ describe('PaystackWebhookProcessor', () => {
   let plans: jest.Mocked<Pick<PlansService, 'getBySlug'>>;
   let audit: jest.Mocked<Pick<AuditService, 'record'>>;
   let webhookEvents: jest.Mocked<Pick<WebhookEventsService, 'emit'>>;
+  let roleResolution: { syncStoredRole: jest.Mock };
   let processor: PaystackWebhookProcessor;
 
   beforeEach(() => {
@@ -83,6 +85,10 @@ describe('PaystackWebhookProcessor', () => {
     plans = { getBySlug: jest.fn() };
     audit = { record: jest.fn().mockResolvedValue(undefined) };
     webhookEvents = { emit: jest.fn().mockResolvedValue(undefined) };
+    // See subscriptions.service.spec.ts's identical comment — every
+    // handler now calls syncOwnerRoles(), which queries workspaceMember.
+    prisma.workspaceMember.findMany.mockResolvedValue([]);
+    roleResolution = { syncStoredRole: jest.fn().mockResolvedValue(undefined) };
     processor = new PaystackWebhookProcessor(
       prisma as unknown as PrismaService,
       billingEvents as unknown as BillingEventsService,
@@ -90,6 +96,7 @@ describe('PaystackWebhookProcessor', () => {
       plans as unknown as PlansService,
       audit as unknown as AuditService,
       webhookEvents as unknown as WebhookEventsService,
+      roleResolution as unknown as RoleResolutionService,
     );
   });
 

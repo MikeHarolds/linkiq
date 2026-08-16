@@ -8,6 +8,7 @@ import {
   CreditCard,
   Globe2,
   ImageIcon,
+  KeyRound,
   LayoutDashboard,
   Menu,
   Newspaper,
@@ -30,8 +31,13 @@ import { useAuth } from '@/providers/auth-provider';
 const NAV_ITEMS = [
   { label: 'Overview', href: '/admin', icon: LayoutDashboard },
   { label: 'Users', href: '/admin/users', icon: Users },
+  { label: 'Roles', href: '/admin/roles', icon: KeyRound },
   { label: 'Workspaces', href: '/admin/workspaces', icon: Globe2 },
-  { label: 'Subscriptions', href: '/admin/subscriptions', icon: ArrowLeftRight },
+  {
+    label: 'Subscriptions',
+    href: '/admin/subscriptions',
+    icon: ArrowLeftRight,
+  },
   { label: 'Plans', href: '/admin/plans', icon: CreditCard },
   { label: 'Payments', href: '/admin/payments', icon: Wallet },
   { label: 'Invoices', href: '/admin/invoices', icon: ReceiptText },
@@ -135,7 +141,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       <aside className="hidden w-64 flex-col bg-slate-950 md:flex">
         <div className="flex h-16 items-center gap-2 px-5">
           <ShieldAlert className="h-5 w-5 text-amber-400" />
-          <span className="text-lg font-semibold tracking-tight text-white">LinkIQ Admin</span>
+          <span className="text-lg font-semibold tracking-tight text-white">
+            LinkIQ Admin
+          </span>
         </div>
         <Separator className="bg-slate-800" />
         {navList}
@@ -158,7 +166,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             <div className="flex h-16 items-center justify-between px-5">
               <div className="flex items-center gap-2">
                 <ShieldAlert className="h-5 w-5 text-amber-400" />
-                <span className="text-lg font-semibold text-white">LinkIQ Admin</span>
+                <span className="text-lg font-semibold text-white">
+                  LinkIQ Admin
+                </span>
               </div>
               <Button
                 variant="ghost"
@@ -207,7 +217,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               <p className="text-xs text-muted-foreground">{user.email}</p>
             </div>
             <Avatar>
-              <AvatarFallback>{initials(user.firstName, user.lastName)}</AvatarFallback>
+              <AvatarFallback>
+                {initials(user.firstName, user.lastName)}
+              </AvatarFallback>
             </Avatar>
             <Button variant="outline" size="sm" onClick={handleLogout}>
               Log out

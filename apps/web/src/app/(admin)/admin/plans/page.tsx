@@ -1,6 +1,12 @@
 'use client';
 
-import type { CreatePlanPayload, PlanDto, PlanLimitKey, PlanTier, UpdatePlanPayload } from '@linkiq/types';
+import type {
+  CreatePlanPayload,
+  PlanDto,
+  PlanLimitKey,
+  PlanTier,
+  UpdatePlanPayload,
+} from '@linkiq/types';
 import {
   Badge,
   Button,
@@ -23,10 +29,16 @@ import * as React from 'react';
 import { toast } from 'sonner';
 
 import { AdminPageHeader } from '@/components/admin/admin-page-header';
-import { createPlan, listPlans, updatePlan } from '@/lib/admin-api';
+import { createPlan, listPlans, listRoles, updatePlan } from '@/lib/admin-api';
 import { ApiError } from '@/providers/auth-provider';
 
-const PLAN_TIERS: PlanTier[] = ['FREE', 'STARTER', 'PROFESSIONAL', 'BUSINESS', 'ENTERPRISE'];
+const PLAN_TIERS: PlanTier[] = [
+  'FREE',
+  'STARTER',
+  'PROFESSIONAL',
+  'BUSINESS',
+  'ENTERPRISE',
+];
 
 const LIMIT_KEYS: PlanLimitKey[] = [
   'MAX_LINKS',
@@ -42,7 +54,43 @@ const LIMIT_KEYS: PlanLimitKey[] = [
 ];
 
 function formatMoney(amount: number, currency: string): string {
-  return (amount / 100).toLocaleString('en-US', { style: 'currency', currency });
+  return (amount / 100).toLocaleString('en-US', {
+    style: 'currency',
+    currency,
+  });
+}
+
+/** Shared by both dialogs — SUPER_ADMIN is never an option here at all:
+ * PlatformRole is a wholly separate table from GlobalRole, so the list
+ * this renders (every active PlatformRole) can never include it. */
+function RoleSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (roleId: string) => void;
+}) {
+  const { data: roles } = useQuery({
+    queryKey: ['admin', 'roles'],
+    queryFn: listRoles,
+  });
+  const activeRoles = (roles ?? []).filter((r) => r.isActive);
+
+  return (
+    <select
+      id="plan-role"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+    >
+      <option value="">No role (not tied to a plan entitlement)</option>
+      {activeRoles.map((role) => (
+        <option key={role.id} value={role.id}>
+          {role.name}
+        </option>
+      ))}
+    </select>
+  );
 }
 
 function EditPlanDialog({
@@ -56,15 +104,25 @@ function EditPlanDialog({
 }) {
   const [name, setName] = React.useState(plan.name);
   const [description, setDescription] = React.useState(plan.description ?? '');
-  const [priceAmount, setPriceAmount] = React.useState(String(plan.priceAmount));
-  const [trialDays, setTrialDays] = React.useState(plan.trialDays !== null ? String(plan.trialDays) : '');
+  const [priceAmount, setPriceAmount] = React.useState(
+    String(plan.priceAmount),
+  );
+  const [trialDays, setTrialDays] = React.useState(
+    plan.trialDays !== null ? String(plan.trialDays) : '',
+  );
   const [isActive, setIsActive] = React.useState(plan.isActive);
-  const [providerPlanId, setProviderPlanId] = React.useState(plan.providerPlanId ?? '');
+  const [providerPlanId, setProviderPlanId] = React.useState(
+    plan.providerPlanId ?? '',
+  );
+  const [platformRoleId, setPlatformRoleId] = React.useState(
+    plan.platformRole?.id ?? '',
+  );
   const [limits, setLimits] = React.useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
     for (const key of LIMIT_KEYS) {
       const existing = plan.limits.find((l) => l.key === key);
-      initial[key] = existing && existing.value !== null ? String(existing.value) : '';
+      initial[key] =
+        existing && existing.value !== null ? String(existing.value) : '';
     }
     return initial;
   });
@@ -80,8 +138,12 @@ function EditPlanDialog({
         trialDays: trialDays === '' ? null : Number(trialDays),
         isActive,
         providerPlanId: providerPlanId || null,
+        platformRoleId: platformRoleId || null,
         limits: Object.fromEntries(
-          LIMIT_KEYS.map((key) => [key, limits[key] === '' ? null : Number(limits[key])]),
+          LIMIT_KEYS.map((key) => [
+            key,
+            limits[key] === '' ? null : Number(limits[key]),
+          ]),
         ) as UpdatePlanPayload['limits'],
       };
       await updatePlan(plan.id, payload);
@@ -89,7 +151,9 @@ function EditPlanDialog({
       onSaved();
       onOpenChange(false);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Failed to update plan');
+      toast.error(
+        err instanceof ApiError ? err.message : 'Failed to update plan',
+      );
     } finally {
       setSaving(false);
     }
@@ -105,11 +169,19 @@ function EditPlanDialog({
         <div className="grid grid-cols-2 gap-4">
           <div className="col-span-2 space-y-1.5">
             <Label htmlFor="plan-name">Name</Label>
-            <Input id="plan-name" value={name} onChange={(e) => setName(e.target.value)} />
+            <Input
+              id="plan-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
           </div>
           <div className="col-span-2 space-y-1.5">
             <Label htmlFor="plan-description">Description</Label>
-            <Input id="plan-description" value={description} onChange={(e) => setDescription(e.target.value)} />
+            <Input
+              id="plan-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="plan-price">Price ({plan.currency} cents)</Label>
@@ -129,6 +201,10 @@ function EditPlanDialog({
               onChange={(e) => setTrialDays(e.target.value)}
               placeholder="No trial"
             />
+          </div>
+          <div className="col-span-2 space-y-1.5">
+            <Label htmlFor="plan-role">Platform role</Label>
+            <RoleSelect value={platformRoleId} onChange={setPlatformRoleId} />
           </div>
           <div className="col-span-2 space-y-1.5">
             <Label htmlFor="plan-provider-id">Paystack plan_code</Label>
@@ -151,7 +227,9 @@ function EditPlanDialog({
           </div>
 
           <div className="col-span-2">
-            <p className="mb-2 text-sm font-medium">Limits (blank = unlimited)</p>
+            <p className="mb-2 text-sm font-medium">
+              Limits (blank = unlimited)
+            </p>
             <div className="grid grid-cols-2 gap-3">
               {LIMIT_KEYS.map((key) => (
                 <div key={key} className="space-y-1.5">
@@ -162,7 +240,9 @@ function EditPlanDialog({
                     id={`limit-${key}`}
                     type="number"
                     value={limits[key] ?? ''}
-                    onChange={(e) => setLimits((prev) => ({ ...prev, [key]: e.target.value }))}
+                    onChange={(e) =>
+                      setLimits((prev) => ({ ...prev, [key]: e.target.value }))
+                    }
                     placeholder="Unlimited"
                   />
                 </div>
@@ -172,7 +252,11 @@ function EditPlanDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={saving}
+          >
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={saving}>
@@ -198,6 +282,7 @@ function CreatePlanDialog({
   const [priceAmount, setPriceAmount] = React.useState('0');
   const [trialDays, setTrialDays] = React.useState('');
   const [syncToProvider, setSyncToProvider] = React.useState(false);
+  const [platformRoleId, setPlatformRoleId] = React.useState('');
   const [limits, setLimits] = React.useState<Record<string, string>>({});
   const [saving, setSaving] = React.useState(false);
 
@@ -216,19 +301,21 @@ function CreatePlanDialog({
         priceAmount: Number(priceAmount) || 0,
         trialDays: trialDays === '' ? null : Number(trialDays),
         limits: Object.fromEntries(
-          LIMIT_KEYS.filter((key) => limits[key] !== undefined && limits[key] !== '').map((key) => [
-            key,
-            Number(limits[key]),
-          ]),
+          LIMIT_KEYS.filter(
+            (key) => limits[key] !== undefined && limits[key] !== '',
+          ).map((key) => [key, Number(limits[key])]),
         ) as CreatePlanPayload['limits'],
         syncToProvider,
+        platformRoleId: platformRoleId || null,
       };
       await createPlan(payload);
       toast.success('Plan created');
       onCreated();
       onOpenChange(false);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Failed to create plan');
+      toast.error(
+        err instanceof ApiError ? err.message : 'Failed to create plan',
+      );
     } finally {
       setSaving(false);
     }
@@ -244,16 +331,28 @@ function CreatePlanDialog({
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <Label htmlFor="new-plan-name">Name</Label>
-            <Input id="new-plan-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Growth" />
+            <Input
+              id="new-plan-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Growth"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="new-plan-slug">
-              Slug <span className="text-xs text-muted-foreground">(permanent once created)</span>
+              Slug{' '}
+              <span className="text-xs text-muted-foreground">
+                (permanent once created)
+              </span>
             </Label>
             <Input
               id="new-plan-slug"
               value={slug}
-              onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
+              onChange={(e) =>
+                setSlug(
+                  e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+                )
+              }
               placeholder="growth"
             />
           </div>
@@ -283,7 +382,15 @@ function CreatePlanDialog({
           </div>
           <div className="col-span-2 space-y-1.5">
             <Label htmlFor="new-plan-description">Description</Label>
-            <Input id="new-plan-description" value={description} onChange={(e) => setDescription(e.target.value)} />
+            <Input
+              id="new-plan-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+          <div className="col-span-2 space-y-1.5">
+            <Label htmlFor="new-plan-role">Platform role</Label>
+            <RoleSelect value={platformRoleId} onChange={setPlatformRoleId} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="new-plan-trial">Trial days</Label>
@@ -309,7 +416,9 @@ function CreatePlanDialog({
           </div>
 
           <div className="col-span-2">
-            <p className="mb-2 text-sm font-medium">Limits (blank = unlimited)</p>
+            <p className="mb-2 text-sm font-medium">
+              Limits (blank = unlimited)
+            </p>
             <div className="grid grid-cols-2 gap-3">
               {LIMIT_KEYS.map((key) => (
                 <div key={key} className="space-y-1.5">
@@ -320,7 +429,9 @@ function CreatePlanDialog({
                     id={`new-limit-${key}`}
                     type="number"
                     value={limits[key] ?? ''}
-                    onChange={(e) => setLimits((prev) => ({ ...prev, [key]: e.target.value }))}
+                    onChange={(e) =>
+                      setLimits((prev) => ({ ...prev, [key]: e.target.value }))
+                    }
                     placeholder="Unlimited"
                   />
                 </div>
@@ -330,7 +441,11 @@ function CreatePlanDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={saving}
+          >
             Cancel
           </Button>
           <Button onClick={handleCreate} disabled={saving}>
@@ -370,7 +485,11 @@ export default function AdminPlansPage() {
       />
 
       {isLoading && (
-        <div role="status" aria-live="polite" className="py-12 text-center text-muted-foreground">
+        <div
+          role="status"
+          aria-live="polite"
+          className="py-12 text-center text-muted-foreground"
+        >
           Loading plans…
         </div>
       )}
@@ -393,8 +512,11 @@ export default function AdminPlansPage() {
                   </Badge>
                 </CardTitle>
                 <CardDescription>
-                  {plan.priceAmount === 0 ? 'Free' : formatMoney(plan.priceAmount, plan.currency)}
-                  {plan.priceAmount > 0 && ` / ${plan.billingInterval === 'ANNUAL' ? 'year' : 'month'}`}
+                  {plan.priceAmount === 0
+                    ? 'Free'
+                    : formatMoney(plan.priceAmount, plan.currency)}
+                  {plan.priceAmount > 0 &&
+                    ` / ${plan.billingInterval === 'ANNUAL' ? 'year' : 'month'}`}
                   {plan.trialDays ? ` · ${plan.trialDays}-day trial` : ''}
                 </CardDescription>
               </CardHeader>
@@ -408,9 +530,18 @@ export default function AdminPlansPage() {
                   ))}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Paystack: {plan.providerPlanId ? plan.providerPlanId : 'Not configured'}
+                  Paystack:{' '}
+                  {plan.providerPlanId ? plan.providerPlanId : 'Not configured'}
                 </p>
-                <Button size="sm" variant="outline" className="w-full" onClick={() => setEditingPlan(plan)}>
+                <p className="text-xs text-muted-foreground">
+                  Role: {plan.platformRole ? plan.platformRole.name : 'None'}
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => setEditingPlan(plan)}
+                >
                   Edit
                 </Button>
               </CardContent>
@@ -428,7 +559,10 @@ export default function AdminPlansPage() {
       )}
 
       {creating && (
-        <CreatePlanDialog onOpenChange={(open) => setCreating(open)} onCreated={invalidate} />
+        <CreatePlanDialog
+          onOpenChange={(open) => setCreating(open)}
+          onCreated={invalidate}
+        />
       )}
     </div>
   );

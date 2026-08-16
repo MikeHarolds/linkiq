@@ -66,6 +66,13 @@ export class ApiKeysAuthService {
       firstName: apiKey.createdBy.firstName,
       lastName: apiKey.createdBy.lastName,
       globalRole: apiKey.createdBy.globalRole,
+      platformRoleId: apiKey.createdBy.platformRoleId,
+      // API-key auth resolves authorization entirely through
+      // ApiKeyAuthContext.permissions (a separate, workspace-scoped
+      // concept — see WorkspaceRolesGuard.handleApiKeyAuth) — never
+      // through platformPermissions, which no API-key-reachable route
+      // checks this sprint.
+      platformPermissions: [],
     };
 
     return {

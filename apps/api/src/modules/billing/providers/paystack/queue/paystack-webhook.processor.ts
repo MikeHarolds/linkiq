@@ -11,6 +11,7 @@ import type { Job } from 'bullmq';
 
 import { AuditService } from '../../../../audit/audit.service';
 import { PrismaService } from '../../../../prisma/prisma.service';
+import { RoleResolutionService } from '../../../../roles/role-resolution.service';
 import { WebhookEventsService } from '../../../../webhooks/webhook-events.service';
 import { BillingEventsService } from '../../../billing-events.service';
 import { InvoicesService } from '../../../invoices.service';
@@ -23,7 +24,9 @@ import {
 } from './paystack-webhook.types';
 
 const SUBSCRIPTION_WITH_PLAN_INCLUDE = {
-  plan: { include: { limits: true } },
+  plan: {
+    include: { limits: true, platformRole: { select: { id: true, name: true, slug: true } } },
+  },
 } as const;
 
 interface PaystackMetadata {
@@ -70,8 +73,23 @@ export class PaystackWebhookProcessor extends WorkerHost {
     private readonly plans: PlansService,
     private readonly audit: AuditService,
     private readonly webhookEvents: WebhookEventsService,
+    private readonly roleResolution: RoleResolutionService,
   ) {
     super();
+  }
+
+  /** Sprint 15 — re-resolves platformRole for every OWNER of a workspace
+   * after a webhook-driven subscription state change. No RequestContext
+   * exists for a background job (no ipAddress/userAgent to attribute
+   * this to) — syncStoredRole()'s ctx parameter is optional for exactly
+   * this caller. See SubscriptionsService.syncOwnerRoles for the
+   * request-driven equivalent. */
+  private async syncOwnerRoles(workspaceId: string): Promise<void> {
+    const owners = await this.prisma.workspaceMember.findMany({
+      where: { workspaceId, role: 'OWNER' },
+      select: { userId: true },
+    });
+    await Promise.all(owners.map((o) => this.roleResolution.syncStoredRole(o.userId)));
   }
 
   async process(job: Job<ProcessPaystackWebhookJobData>): Promise<void> {
@@ -190,6 +208,8 @@ export class PaystackWebhookProcessor extends WorkerHost {
       workspaceId,
       metadata: { planSlug, reference: reference ?? null },
     });
+
+    await this.syncOwnerRoles(workspaceId);
   }
 
   /** Fills in providerSubscriptionId/providerPriceId/currentPeriodEnd once
@@ -270,6 +290,8 @@ export class PaystackWebhookProcessor extends WorkerHost {
         trialing: false,
       },
     });
+
+    await this.syncOwnerRoles(updated.workspaceId);
   }
 
   /** subscription.disable fires both for a LinkIQ-initiated cancel()
@@ -330,6 +352,8 @@ export class PaystackWebhookProcessor extends WorkerHost {
       resourceId: updated.id,
       data: { id: updated.id, cancelAt: now.toISOString() },
     });
+
+    await this.syncOwnerRoles(updated.workspaceId);
   }
 
   /** No outbound WebhookEventType maps to "payment failed" — recorded via
@@ -393,5 +417,13 @@ export class PaystackWebhookProcessor extends WorkerHost {
       workspaceId: updated.workspaceId,
       metadata: { failureReason },
     });
+
+    // PAST_DUE is still "effectively on plan" (isEffectivelyOnPlan) —
+    // this is a no-op today, called for symmetry with the other three
+    // handlers and to correctly downgrade the role once the PAST_DUE
+    // grace period is exceeded and something next reads/syncs this
+    // workspace's owner (see getEffectiveStatus's PAST_DUE -> EXPIRED
+    // branch).
+    await this.syncOwnerRoles(updated.workspaceId);
   }
 }

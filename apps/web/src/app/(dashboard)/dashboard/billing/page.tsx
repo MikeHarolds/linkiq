@@ -30,6 +30,7 @@ import {
   changePlan,
   getBillingSummary,
   getInvoices,
+  getMyEntitlement,
   getPlans,
   reactivateSubscription,
   subscribe,
@@ -43,6 +44,18 @@ function invoiceStatusVariant(
   if (status === 'VOID' || status === 'UNCOLLECTIBLE') return 'destructive';
   if (status === 'REFUNDED') return 'secondary';
   return 'outline';
+}
+
+/** "professional-user" -> "Professional" — never the raw role slug or
+ * id, per Part 19 of the sprint spec ("Professional Plan," not
+ * "platformRoleId = uuid..."). */
+function formatRoleName(slug: string | null): string | null {
+  if (!slug) return null;
+  return slug
+    .replace(/-user$/, '')
+    .split('-')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
 }
 
 function formatDate(value: string | null): string {
@@ -82,6 +95,11 @@ export default function BillingDashboardPage() {
     queryKey: ['billing-invoices', currentWorkspaceId],
     queryFn: () => getInvoices(currentWorkspaceId!),
     enabled: Boolean(currentWorkspaceId),
+  });
+
+  const entitlementQuery = useQuery({
+    queryKey: ['my-entitlement'],
+    queryFn: getMyEntitlement,
   });
 
   function invalidate() {
@@ -233,6 +251,14 @@ export default function BillingDashboardPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
+          {entitlementQuery.data?.role && (
+            <p className="text-muted-foreground">
+              Your access level:{' '}
+              <span className="font-medium text-foreground">
+                {formatRoleName(entitlementQuery.data.role)}
+              </span>
+            </p>
+          )}
           {subscription && (
             <p className="text-muted-foreground">
               Current period: {formatDate(subscription.billingPeriod.start)} –{' '}

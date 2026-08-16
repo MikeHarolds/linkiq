@@ -8,6 +8,7 @@ import { ApiKeyAwareThrottlerGuard } from '../../common/guards/api-key-aware-thr
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
 import { BillingModule } from '../billing/billing.module';
+import { RolesModule } from '../roles/roles.module';
 
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -20,6 +21,7 @@ const disableRateLimitForTests =
   imports: [
     PassportModule,
     BillingModule,
+    RolesModule,
     // JwtAuthGuard's API-key branch needs ApiKeysAuthService — see
     // common/guards/jwt-auth.guard.ts.
     ApiKeysModule,
