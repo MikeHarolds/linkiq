@@ -1,10 +1,11 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { User } from '@prisma/client';
+import type { Currency, User } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import { AuditService } from '../audit/audit.service';
+import { CurrencyService } from '../currency/currency.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 import type { ChangePasswordDto } from './dto/change-password.dto';
@@ -16,6 +17,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly audit: AuditService,
+    private readonly currencies: CurrencyService,
   ) {}
 
   private get bcryptRounds(): number {
@@ -95,6 +97,57 @@ export class UsersService {
 
     await this.audit.record({
       action: 'user.password_changed',
+      entity: 'User',
+      entityId: userId,
+      userId,
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent,
+    });
+  }
+
+  /**
+   * Sprint 16 §7 — an authenticated user's explicit, persisted currency
+   * choice. This is the ONLY thing that ever writes
+   * User.preferredCurrencyId — CurrencyResolutionService only ever
+   * reads it, never sets it (see that service's own docs on why IP
+   * detection must never silently override an explicit choice).
+   */
+  async setCurrencyPreference(
+    userId: string,
+    currencyCode: string,
+    ctx: RequestContext,
+  ): Promise<Currency> {
+    const currency = await this.currencies.getByCodeOrThrow(currencyCode);
+    if (!currency.isActive) {
+      throw new BadRequestException(`Currency "${currencyCode}" is not currently available`);
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { preferredCurrencyId: currency.id },
+    });
+
+    await this.audit.record({
+      action: 'user.currency_preference_set',
+      entity: 'User',
+      entityId: userId,
+      userId,
+      metadata: { currencyCode: currency.code },
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent,
+    });
+
+    return currency;
+  }
+
+  async clearCurrencyPreference(userId: string, ctx: RequestContext): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { preferredCurrencyId: null },
+    });
+
+    await this.audit.record({
+      action: 'user.currency_preference_cleared',
       entity: 'User',
       entityId: userId,
       userId,

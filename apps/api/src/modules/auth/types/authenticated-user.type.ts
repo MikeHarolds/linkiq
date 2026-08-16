@@ -20,6 +20,12 @@ export interface AuthenticatedUser {
   globalRole: GlobalRole;
   platformRoleId: string | null;
   platformPermissions: PermissionKey[];
+  /** Sprint 16 — the user's persisted currency preference (ISO 4217
+   * code), populated the same per-request way as platformRoleId above.
+   * Null = no explicit preference; CurrencyResolutionService is the
+   * only place that decides what applies in that case (see its docs) —
+   * this field is never itself a fallback/default computation. */
+  preferredCurrencyCode: string | null;
 }
 
 /** Claims encoded in the access token JWT payload. */

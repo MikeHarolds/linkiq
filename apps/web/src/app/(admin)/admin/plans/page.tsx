@@ -1,10 +1,12 @@
 'use client';
 
 import type {
+  AdminCurrencyDto,
   CreatePlanPayload,
   PlanDto,
   PlanLimitKey,
   PlanTier,
+  SetPlanPricePayload,
   UpdatePlanPayload,
 } from '@linkiq/types';
 import {
@@ -22,14 +24,30 @@ import {
   DialogTitle,
   Input,
   Label,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from '@linkiq/ui';
+import { formatCurrency } from '@linkiq/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import * as React from 'react';
 import { toast } from 'sonner';
 
 import { AdminPageHeader } from '@/components/admin/admin-page-header';
-import { createPlan, listPlans, listRoles, updatePlan } from '@/lib/admin-api';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import {
+  createPlan,
+  listCurrencies,
+  listPlans,
+  listRoles,
+  removePlanPrice,
+  setPlanPrice,
+  updatePlan,
+} from '@/lib/admin-api';
 import { ApiError } from '@/providers/auth-provider';
 
 const PLAN_TIERS: PlanTier[] = [
@@ -457,18 +475,241 @@ function CreatePlanDialog({
   );
 }
 
+function SetPlanPriceDialog({
+  plan,
+  currencies,
+  onOpenChange,
+  onSaved,
+}: {
+  plan: PlanDto;
+  currencies: AdminCurrencyDto[];
+  onOpenChange: (open: boolean) => void;
+  onSaved: () => void;
+}) {
+  const eligible = currencies.filter(
+    (c) => c.isActive && c.code !== plan.currency,
+  );
+  const [currencyId, setCurrencyId] = React.useState(eligible[0]?.id ?? '');
+  const [amount, setAmount] = React.useState('');
+  const [useExchangeRate, setUseExchangeRate] = React.useState(false);
+  const [syncToProvider, setSyncToProvider] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+
+  async function handleSave() {
+    if (!currencyId) {
+      toast.error('Choose a currency first');
+      return;
+    }
+    if (!useExchangeRate && amount === '') {
+      toast.error('Enter an amount, or use exchange-rate conversion');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: SetPlanPricePayload = {
+        currencyId,
+        amount: useExchangeRate ? undefined : Number(amount),
+        useExchangeRate,
+        syncToProvider,
+      };
+      await setPlanPrice(plan.id, payload);
+      toast.success('Price saved');
+      onSaved();
+      onOpenChange(false);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Failed to save price');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add a price for {plan.name}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="price-currency">Currency</Label>
+            <select
+              id="price-currency"
+              value={currencyId}
+              onChange={(e) => setCurrencyId(e.target.value)}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              {eligible.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.code} — {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              id="price-use-rate"
+              type="checkbox"
+              checked={useExchangeRate}
+              onChange={(e) => setUseExchangeRate(e.target.checked)}
+              className="h-4 w-4"
+            />
+            <Label htmlFor="price-use-rate" className="text-sm">
+              Derive from the base price via exchange rate (requires a configured
+              provider)
+            </Label>
+          </div>
+          {!useExchangeRate && (
+            <div className="space-y-1.5">
+              <Label htmlFor="price-amount">Amount (smallest unit)</Label>
+              <Input
+                id="price-amount"
+                type="number"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="7500000"
+              />
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <input
+              id="price-sync"
+              type="checkbox"
+              checked={syncToProvider}
+              onChange={(e) => setSyncToProvider(e.target.checked)}
+              className="h-4 w-4"
+            />
+            <Label htmlFor="price-sync" className="text-sm">
+              Also create this price on Paystack
+            </Label>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Phase 14's worked example table — Currency / Price / Provider /
+ * Status — shown per plan. The base currency row is always first and
+ * cannot be removed here (edit the plan's base price via "Edit"
+ * instead); additional PlanPrice rows can be added/removed freely. */
+function PlanPricesTable({
+  plan,
+  currenciesByCode,
+  onRemove,
+}: {
+  plan: PlanDto;
+  currenciesByCode: Map<string, AdminCurrencyDto>;
+  onRemove: (currencyCode: string) => void;
+}) {
+  function format(code: string, amount: number): string {
+    const meta = currenciesByCode.get(code);
+    if (!meta) return `${amount} ${code}`;
+    return formatCurrency(amount, meta);
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Currency</TableHead>
+            <TableHead>Price</TableHead>
+            <TableHead>Provider</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow>
+            <TableCell className="font-mono">{plan.currency} (base)</TableCell>
+            <TableCell>{format(plan.currency, plan.priceAmount)}</TableCell>
+            <TableCell>{plan.providerPlanId ? 'Paystack' : '—'}</TableCell>
+            <TableCell>
+              <Badge variant={plan.providerAvailable ? 'success' : 'secondary'}>
+                {plan.providerAvailable ? 'Available' : 'Unavailable'}
+              </Badge>
+            </TableCell>
+            <TableCell />
+          </TableRow>
+          {plan.prices.map((price) => (
+            <TableRow key={price.currencyCode}>
+              <TableCell className="font-mono">{price.currencyCode}</TableCell>
+              <TableCell>{format(price.currencyCode, price.amount)}</TableCell>
+              <TableCell>Paystack</TableCell>
+              <TableCell>
+                <Badge variant={price.providerAvailable ? 'success' : 'secondary'}>
+                  {price.providerAvailable ? 'Available' : 'Unavailable'}
+                </Badge>
+              </TableCell>
+              <TableCell className="text-right">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onRemove(price.currencyCode)}
+                >
+                  Remove
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 export default function AdminPlansPage() {
   const queryClient = useQueryClient();
   const [editingPlan, setEditingPlan] = React.useState<PlanDto | null>(null);
   const [creating, setCreating] = React.useState(false);
+  const [pricingPlan, setPricingPlan] = React.useState<PlanDto | null>(null);
+  const [removingPrice, setRemovingPrice] = React.useState<{
+    plan: PlanDto;
+    currencyCode: string;
+  } | null>(null);
+  const [removeBusy, setRemoveBusy] = React.useState(false);
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['admin', 'plans'],
     queryFn: listPlans,
   });
+  const { data: currencies } = useQuery({
+    queryKey: ['admin', 'currencies'],
+    queryFn: () => listCurrencies(),
+  });
+  const currenciesByCode = React.useMemo(() => {
+    const map = new Map<string, AdminCurrencyDto>();
+    for (const c of currencies ?? []) map.set(c.code, c);
+    return map;
+  }, [currencies]);
 
   function invalidate() {
     queryClient.invalidateQueries({ queryKey: ['admin', 'plans'] });
+  }
+
+  async function handleRemovePrice() {
+    if (!removingPrice) return;
+    const currency = currenciesByCode.get(removingPrice.currencyCode);
+    if (!currency) return;
+    setRemoveBusy(true);
+    try {
+      await removePlanPrice(removingPrice.plan.id, currency.id);
+      toast.success('Price removed');
+      invalidate();
+      setRemovingPrice(null);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Failed to remove price');
+    } finally {
+      setRemoveBusy(false);
+    }
   }
 
   return (
@@ -514,7 +755,12 @@ export default function AdminPlansPage() {
                 <CardDescription>
                   {plan.priceAmount === 0
                     ? 'Free'
-                    : formatMoney(plan.priceAmount, plan.currency)}
+                    : (() => {
+                        const meta = currenciesByCode.get(plan.currency);
+                        return meta
+                          ? formatCurrency(plan.priceAmount, meta)
+                          : formatMoney(plan.priceAmount, plan.currency);
+                      })()}
                   {plan.priceAmount > 0 &&
                     ` / ${plan.billingInterval === 'ANNUAL' ? 'year' : 'month'}`}
                   {plan.trialDays ? ` · ${plan.trialDays}-day trial` : ''}
@@ -536,14 +782,36 @@ export default function AdminPlansPage() {
                 <p className="text-xs text-muted-foreground">
                   Role: {plan.platformRole ? plan.platformRole.name : 'None'}
                 </p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => setEditingPlan(plan)}
-                >
-                  Edit
-                </Button>
+
+                <div>
+                  <p className="mb-1.5 text-xs font-medium">Currency pricing</p>
+                  <PlanPricesTable
+                    plan={plan}
+                    currenciesByCode={currenciesByCode}
+                    onRemove={(currencyCode) =>
+                      setRemovingPrice({ plan, currencyCode })
+                    }
+                  />
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => setEditingPlan(plan)}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => setPricingPlan(plan)}
+                  >
+                    Add price
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -564,6 +832,26 @@ export default function AdminPlansPage() {
           onCreated={invalidate}
         />
       )}
+
+      {pricingPlan && (
+        <SetPlanPriceDialog
+          plan={pricingPlan}
+          currencies={currencies ?? []}
+          onOpenChange={(open) => !open && setPricingPlan(null)}
+          onSaved={invalidate}
+        />
+      )}
+
+      <ConfirmDialog
+        open={Boolean(removingPrice)}
+        onOpenChange={(open) => !open && setRemovingPrice(null)}
+        title={`Remove ${removingPrice?.currencyCode} price?`}
+        description={`This plan will no longer be purchasable in ${removingPrice?.currencyCode}.`}
+        confirmLabel="Remove"
+        destructive
+        busy={removeBusy}
+        onConfirm={handleRemovePrice}
+      />
     </div>
   );
 }

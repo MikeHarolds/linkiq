@@ -1,6 +1,7 @@
 import type {
   BillingSummaryDto,
   CheckoutCallbackResultDto,
+  CurrencyDto,
   InvoiceDto,
   MyEntitlementDto,
   PlanDto,
@@ -16,6 +17,20 @@ import { api } from './api-client';
  * workspace's plan on the billing page per Part 19 of the sprint spec. */
 export function getMyEntitlement(): Promise<MyEntitlementDto> {
   return api.get('/users/me/entitlement');
+}
+
+/** Sprint 16 — the authenticated user's persisted currency preference,
+ * also not workspace-scoped (a user preference, not a workspace one). */
+export function getMyCurrencyPreference(): Promise<{ currencyCode: string | null }> {
+  return api.get('/users/me/currency-preference');
+}
+
+export function setMyCurrencyPreference(currency: string): Promise<CurrencyDto> {
+  return api.patch('/users/me/currency-preference', { currency });
+}
+
+export function clearMyCurrencyPreference(): Promise<void> {
+  return api.delete('/users/me/currency-preference');
 }
 
 /** Nested under /workspaces/:workspaceId/billing — matches the API's own
@@ -45,15 +60,19 @@ export function getInvoices(workspaceId: string): Promise<InvoiceDto[]> {
 /** `checkoutUrl` is non-null when a real payment provider requires the
  * browser to complete payment before anything is applied — the caller
  * must redirect there instead of treating `subscription` as the new
- * state. Always null with no payment provider configured (dev mode). */
+ * state. Always null with no payment provider configured (dev mode).
+ * `currency` (Sprint 16) is optional — omitted uses the plan's own
+ * base currency, exactly as before this sprint. */
 export function subscribe(
   workspaceId: string,
   planSlug: string,
+  currency?: string,
 ): Promise<SubscriptionMutationResultDto> {
   return api.post<SubscriptionMutationResultDto>(
     `${basePath(workspaceId)}/subscribe`,
     {
       planSlug,
+      currency,
     },
   );
 }
@@ -61,11 +80,13 @@ export function subscribe(
 export function changePlan(
   workspaceId: string,
   planSlug: string,
+  currency?: string,
 ): Promise<SubscriptionMutationResultDto> {
   return api.post<SubscriptionMutationResultDto>(
     `${basePath(workspaceId)}/change-plan`,
     {
       planSlug,
+      currency,
     },
   );
 }

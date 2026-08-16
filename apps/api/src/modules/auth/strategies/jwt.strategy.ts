@@ -46,6 +46,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         platformRole: {
           select: { isActive: true, permissions: { select: { permission: true } } },
         },
+        // Sprint 16 — the join, not just the stored id, so an
+        // authenticated request can show the currency's code without a
+        // second round trip; see AuthenticatedUser.preferredCurrencyCode.
+        preferredCurrency: { select: { code: true } },
       },
     });
 
@@ -62,6 +66,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       platformRoleId: user.platformRoleId,
       platformPermissions:
         user.platformRole?.isActive ? user.platformRole.permissions.map((p) => p.permission) : [],
+      preferredCurrencyCode: user.preferredCurrency?.code ?? null,
     };
   }
 }

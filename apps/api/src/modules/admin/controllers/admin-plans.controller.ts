@@ -1,4 +1,16 @@
-import { Body, Controller, Get, Inject, Logger, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Logger,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -13,10 +25,36 @@ import {
 } from '../../../common/decorators/request-context.decorator';
 import { SuperAdminGuard } from '../../../common/guards/super-admin.guard';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.type';
-import { PlansService } from '../../billing/plans.service';
+import { PlansService, type PlanWithLimits } from '../../billing/plans.service';
 import { BILLING_PROVIDER, type BillingProvider } from '../../billing/providers/billing-provider.interface';
+import { CurrencyService } from '../../currency/currency.service';
+import { ExchangeRateService } from '../../currency/exchange-rate/exchange-rate.service';
 import { CreatePlanDto } from '../dto/create-plan.dto';
+import { SetPlanPriceDto } from '../dto/set-plan-price.dto';
 import { UpdatePlanDto } from '../dto/update-plan.dto';
+
+/**
+ * Sprint 16 — unlike the customer-facing `planResponse()` in
+ * billing.controller.ts (which deliberately omits providerPlanId/
+ * platformRole — internal wiring details a workspace member doesn't
+ * need), the admin plan catalog needs the FULL raw Plan row (Paystack
+ * plan_code, attached role, ...) — this only reshapes `prices` into
+ * the flat, currency-aware DTO shape the admin UI's PlanPricesTable
+ * expects (see packages/types PlanPriceDto), never strips a field the
+ * pre-Sprint-16 raw-Prisma-object response already exposed.
+ */
+function toAdminPlanDto(plan: PlanWithLimits, providerCurrencies: string[] | undefined) {
+  return {
+    ...plan,
+    prices: plan.prices.map((p) => ({
+      currencyCode: p.currency.code,
+      amount: p.amount,
+      isConverted: p.isConverted,
+      providerAvailable: !providerCurrencies || providerCurrencies.includes(p.currency.code),
+    })),
+    providerAvailable: !providerCurrencies || providerCurrencies.includes(plan.currency),
+  };
+}
 
 /**
  * Platform plan catalog management — SUPER_ADMIN only.
@@ -42,7 +80,13 @@ export class AdminPlansController {
   constructor(
     private readonly plans: PlansService,
     @Inject(BILLING_PROVIDER) private readonly billingProvider: BillingProvider,
+    private readonly exchangeRates: ExchangeRateService,
+    private readonly currencies: CurrencyService,
   ) {}
+
+  private get providerCurrencies(): string[] | undefined {
+    return this.billingProvider.getSupportedCurrencies?.();
+  }
 
   @Get()
   @ApiOperation({
@@ -50,13 +94,15 @@ export class AdminPlansController {
   })
   @ApiResponse({ status: 200, description: 'Full plan catalog with limits' })
   async list() {
-    return this.plans.listAllForAdmin();
+    const plans = await this.plans.listAllForAdmin();
+    return plans.map((plan) => toAdminPlanDto(plan, this.providerCurrencies));
   }
 
   @Get(':planId')
   @ApiOperation({ summary: 'View a single plan' })
   async getOne(@Param('planId') planId: string) {
-    return this.plans.getByIdOrThrow(planId);
+    const plan = await this.plans.getByIdOrThrow(planId);
+    return toAdminPlanDto(plan, this.providerCurrencies);
   }
 
   @Post()
@@ -95,7 +141,7 @@ export class AdminPlansController {
       }
     }
 
-    return plan;
+    return toAdminPlanDto(plan, this.providerCurrencies);
   }
 
   @Patch(':planId')
@@ -108,6 +154,111 @@ export class AdminPlansController {
     @CurrentUser() admin: AuthenticatedUser,
     @Ctx() ctx: RequestContext,
   ) {
-    return this.plans.updateForAdmin(planId, dto, admin.id, ctx);
+    const plan = await this.plans.updateForAdmin(planId, dto, admin.id, ctx);
+    return toAdminPlanDto(plan, this.providerCurrencies);
+  }
+
+  /**
+   * Sprint 16 — sets (or replaces) this plan's price in a specific
+   * currency. `useExchangeRate: true` derives `amount` from the plan's
+   * OWN base price via ExchangeRateService.convert() instead of the
+   * caller supplying one directly — returns 400 with a clear message
+   * when no exchange rate is available (NullExchangeRateProvider today
+   * — see that provider's own docs), never silently falls back to a
+   * fixed price the admin didn't actually type in. `syncToProvider`
+   * mirrors `create()`'s own best-effort provider-plan sync, scoped to
+   * this one currency's Paystack plan_code.
+   */
+  @Post(':planId/prices')
+  @ApiOperation({ summary: "Set a plan's price in a specific currency" })
+  async setPrice(
+    @Param('planId') planId: string,
+    @Body() dto: SetPlanPriceDto,
+    @CurrentUser() admin: AuthenticatedUser,
+    @Ctx() ctx: RequestContext,
+  ) {
+    const plan = await this.plans.getByIdOrThrow(planId);
+
+    let amount = dto.amount;
+    let exchangeRate: number | null = null;
+    let exchangeRateAsOf: Date | null = null;
+
+    if (dto.useExchangeRate) {
+      const targetCurrency = await this.currencies.getByIdOrThrow(dto.currencyId);
+      const conversion = await this.exchangeRates.convert(
+        plan.priceAmount,
+        plan.currency,
+        targetCurrency.code,
+      );
+      if (!conversion) {
+        throw new BadRequestException(
+          `No exchange rate is available to convert ${plan.currency} to ${targetCurrency.code} — set a fixed amount instead.`,
+        );
+      }
+      amount = conversion.amount;
+      exchangeRate = conversion.rate;
+      exchangeRateAsOf = conversion.timestamp;
+    } else if (amount === undefined) {
+      throw new BadRequestException('amount is required unless useExchangeRate is true');
+    }
+
+    let updatedPlan = await this.plans.setPrice(
+      planId,
+      {
+        currencyId: dto.currencyId,
+        amount: amount!,
+        isConverted: dto.useExchangeRate ?? false,
+        exchangeRate,
+        exchangeRateAsOf,
+        providerPlanId: dto.providerPlanId,
+      },
+      admin.id,
+      ctx,
+    );
+
+    if (dto.syncToProvider && this.billingProvider.createProviderPlan) {
+      const price = updatedPlan.prices.find((p) => p.currencyId === dto.currencyId);
+      if (price) {
+        try {
+          const result = await this.billingProvider.createProviderPlan({
+            name: updatedPlan.name,
+            priceAmount: price.amount,
+            currency: price.currency.code,
+            billingInterval: updatedPlan.billingInterval,
+          });
+          updatedPlan = await this.plans.setPrice(
+            planId,
+            {
+              currencyId: dto.currencyId,
+              amount: price.amount,
+              isConverted: price.isConverted,
+              exchangeRate: price.exchangeRate ? Number(price.exchangeRate) : null,
+              exchangeRateAsOf: price.exchangeRateAsOf,
+              providerPlanId: result.providerPlanId,
+            },
+            admin.id,
+            ctx,
+          );
+        } catch (error) {
+          this.logger.warn(
+            `Provider plan sync failed for "${updatedPlan.slug}" in ${price.currency.code} — price saved locally without a providerPlanId: ${String(error)}`,
+          );
+        }
+      }
+    }
+
+    return toAdminPlanDto(updatedPlan, this.providerCurrencies);
+  }
+
+  @Delete(':planId/prices/:currencyId')
+  @ApiOperation({ summary: "Remove a plan's price in a specific currency" })
+  async removePrice(
+    @Param('planId') planId: string,
+    @Param('currencyId') currencyId: string,
+    @CurrentUser() admin: AuthenticatedUser,
+    @Ctx() ctx: RequestContext,
+  ) {
+    const plan = await this.plans.removePrice(planId, currencyId, admin.id, ctx);
+    return toAdminPlanDto(plan, this.providerCurrencies);
   }
 }

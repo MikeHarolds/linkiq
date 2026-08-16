@@ -25,7 +25,11 @@ import {
 
 const SUBSCRIPTION_WITH_PLAN_INCLUDE = {
   plan: {
-    include: { limits: true, platformRole: { select: { id: true, name: true, slug: true } } },
+    include: {
+      limits: true,
+      platformRole: { select: { id: true, name: true, slug: true } },
+      prices: { include: { currency: true } },
+    },
   },
 } as const;
 
@@ -179,6 +183,14 @@ export class PaystackWebhookProcessor extends WorkerHost {
           pastDueSince: null,
           cancelAt: null,
           canceledAt: null,
+          // Sprint 16 — the REAL currency/amount Paystack actually
+          // charged, straight off the webhook payload, not re-derived
+          // from LinkIQ's own Plan/PlanPrice rows (which could have
+          // changed since checkout was initiated). This is the
+          // authoritative write for a real-provider subscription; the
+          // dev-flow apply path in SubscriptionsService.subscribe sets
+          // the same fields for the no-provider case.
+          ...(amount !== undefined ? { amount, currency } : {}),
         },
         include: SUBSCRIPTION_WITH_PLAN_INCLUDE,
       });

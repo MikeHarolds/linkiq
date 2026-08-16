@@ -63,6 +63,7 @@ describe('ApiKeysAuthService', () => {
       globalRole: GlobalRole.USER,
       platformRoleId: undefined,
       platformPermissions: [],
+      preferredCurrencyCode: null,
     });
     expect(result.apiKeyAuth).toEqual({
       authenticationType: 'api_key',

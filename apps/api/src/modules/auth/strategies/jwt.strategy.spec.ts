@@ -22,6 +22,7 @@ function makeUser(overrides: Partial<Record<string, unknown>> = {}) {
     isActive: true,
     platformRoleId: null,
     platformRole: null,
+    preferredCurrency: null,
     ...overrides,
   };
 }
@@ -55,7 +56,18 @@ describe('JwtStrategy', () => {
       globalRole: USER_ROLE,
       platformRoleId: null,
       platformPermissions: [],
+      preferredCurrencyCode: null,
     });
+  });
+
+  it('resolves the joined currency code when a preference is set', async () => {
+    prisma.user.findUnique.mockResolvedValue(
+      makeUser({ preferredCurrency: { code: 'NGN' } }),
+    );
+
+    const result = await strategy.validate(payload);
+
+    expect(result.preferredCurrencyCode).toBe('NGN');
   });
 
   it('includes the resolved platform permissions when the user has an active platform role', async () => {

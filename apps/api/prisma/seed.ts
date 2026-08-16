@@ -48,7 +48,7 @@ import {
   SubscriptionStatus,
   WorkspaceRole,
 } from '@prisma/client';
-import type { Plan, PlanLimitKey, Workspace, User, Link } from '@prisma/client';
+import type { Currency, Plan, PlanLimitKey, Workspace, User, Link } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 import { computeVisitorHash } from '../src/modules/analytics/utils/visitor-hash';
@@ -270,6 +270,204 @@ export async function seedPlans(
 
   console.log(`Seeded ${PLAN_CONFIGS.length} plans`);
   return bySlug;
+}
+
+// ---------------------------------------------------------------------------
+// Currency, Localization & Multi-Currency Payments (Sprint 16)
+// ---------------------------------------------------------------------------
+
+interface CurrencySeedConfig {
+  code: string;
+  name: string;
+  symbol: string;
+  numericCode: string;
+  decimalPlaces?: number;
+  region: string;
+}
+
+/** ISO 4217 codes/names/symbols/numeric codes — see docs/architecture/
+ * currency.md. Not exhaustive; the database is the source of truth
+ * (CurrencyService.create lets an admin add more later with no code
+ * change) — this is the initial catalogue only. */
+const CURRENCY_CONFIGS: CurrencySeedConfig[] = [
+  { code: 'USD', name: 'US Dollar', symbol: '$', numericCode: '840', region: 'North America' },
+  // West Africa
+  { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', numericCode: '566', region: 'West Africa' },
+  { code: 'GHS', name: 'Ghanaian Cedi', symbol: 'GH₵', numericCode: '936', region: 'West Africa' },
+  {
+    code: 'XOF',
+    name: 'West African CFA Franc',
+    symbol: 'CFA',
+    numericCode: '952',
+    decimalPlaces: 0,
+    region: 'West Africa',
+  },
+  // Europe
+  { code: 'EUR', name: 'Euro', symbol: '€', numericCode: '978', region: 'Europe' },
+  { code: 'GBP', name: 'British Pound', symbol: '£', numericCode: '826', region: 'Europe' },
+  { code: 'CHF', name: 'Swiss Franc', symbol: 'CHF', numericCode: '756', region: 'Europe' },
+  { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', numericCode: '752', region: 'Europe' },
+  { code: 'NOK', name: 'Norwegian Krone', symbol: 'kr', numericCode: '578', region: 'Europe' },
+  { code: 'DKK', name: 'Danish Krone', symbol: 'kr', numericCode: '208', region: 'Europe' },
+  { code: 'PLN', name: 'Polish Złoty', symbol: 'zł', numericCode: '985', region: 'Europe' },
+  { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', numericCode: '203', region: 'Europe' },
+  { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', numericCode: '348', region: 'Europe' },
+  { code: 'RON', name: 'Romanian Leu', symbol: 'lei', numericCode: '946', region: 'Europe' },
+];
+
+/** Upserts the currency catalogue, idempotent across re-runs — same
+ * "seed is the source of truth for these fields, safe to re-run"
+ * convention as seedPlans/seedPlatformRoles. Returns a code -> Currency
+ * map for seedCountryMappings/seedCurrencySettings/seedPlanPrices. */
+export async function seedCurrencies(
+  client: PrismaClient = prisma,
+): Promise<Record<string, Currency>> {
+  const currencies = await Promise.all(
+    CURRENCY_CONFIGS.map((config) =>
+      client.currency.upsert({
+        where: { code: config.code },
+        update: {
+          name: config.name,
+          symbol: config.symbol,
+          numericCode: config.numericCode,
+          decimalPlaces: config.decimalPlaces ?? 2,
+          region: config.region,
+          isActive: true,
+        },
+        create: {
+          code: config.code,
+          name: config.name,
+          symbol: config.symbol,
+          numericCode: config.numericCode,
+          decimalPlaces: config.decimalPlaces ?? 2,
+          region: config.region,
+        },
+      }),
+    ),
+  );
+
+  const byCode: Record<string, Currency> = {};
+  currencies.forEach((currency, i) => {
+    byCode[CURRENCY_CONFIGS[i]!.code] = currency;
+  });
+
+  console.log(`Seeded ${CURRENCY_CONFIGS.length} currencies`);
+  return byCode;
+}
+
+const COUNTRY_MAPPING_CONFIGS: Array<{ countryCode: string; countryName: string; currencyCode: string }> = [
+  { countryCode: 'NG', countryName: 'Nigeria', currencyCode: 'NGN' },
+  { countryCode: 'GH', countryName: 'Ghana', currencyCode: 'GHS' },
+  { countryCode: 'CI', countryName: "Côte d'Ivoire", currencyCode: 'XOF' },
+  { countryCode: 'SN', countryName: 'Senegal', currencyCode: 'XOF' },
+  { countryCode: 'BJ', countryName: 'Benin', currencyCode: 'XOF' },
+  { countryCode: 'TG', countryName: 'Togo', currencyCode: 'XOF' },
+  { countryCode: 'FR', countryName: 'France', currencyCode: 'EUR' },
+  { countryCode: 'DE', countryName: 'Germany', currencyCode: 'EUR' },
+  { countryCode: 'ES', countryName: 'Spain', currencyCode: 'EUR' },
+  { countryCode: 'IT', countryName: 'Italy', currencyCode: 'EUR' },
+  { countryCode: 'GB', countryName: 'United Kingdom', currencyCode: 'GBP' },
+  { countryCode: 'CH', countryName: 'Switzerland', currencyCode: 'CHF' },
+  { countryCode: 'SE', countryName: 'Sweden', currencyCode: 'SEK' },
+  { countryCode: 'NO', countryName: 'Norway', currencyCode: 'NOK' },
+  { countryCode: 'DK', countryName: 'Denmark', currencyCode: 'DKK' },
+  { countryCode: 'PL', countryName: 'Poland', currencyCode: 'PLN' },
+  { countryCode: 'CZ', countryName: 'Czech Republic', currencyCode: 'CZK' },
+  { countryCode: 'HU', countryName: 'Hungary', currencyCode: 'HUF' },
+  { countryCode: 'RO', countryName: 'Romania', currencyCode: 'RON' },
+  { countryCode: 'US', countryName: 'United States', currencyCode: 'USD' },
+];
+
+/** One row per country (never per currency — see Sprint 16 §3's "do not
+ * create unnecessary duplicate currency records" instruction; every
+ * XOF country here shares the exact same Currency row). */
+export async function seedCountryMappings(
+  client: PrismaClient,
+  currenciesByCode: Record<string, Currency>,
+): Promise<void> {
+  await Promise.all(
+    COUNTRY_MAPPING_CONFIGS.map((config) => {
+      const currency = currenciesByCode[config.currencyCode];
+      if (!currency) return Promise.resolve();
+      return client.currencyCountryMapping.upsert({
+        where: { countryCode: config.countryCode },
+        update: { countryName: config.countryName, currencyId: currency.id },
+        create: {
+          countryCode: config.countryCode,
+          countryName: config.countryName,
+          currencyId: currency.id,
+        },
+      });
+    }),
+  );
+
+  console.log(`Seeded ${COUNTRY_MAPPING_CONFIGS.length} country -> currency mappings`);
+}
+
+/** Fixed id — same enforced-singleton pattern SiteBranding uses (see
+ * that model's own docs). `update: {}` on every re-run deliberately
+ * never overwrites an admin's already-configured default/fallback/
+ * auto-detect settings — only the FIRST run (a fresh database) actually
+ * sets these values, exactly like seedLandingPageContent's SiteBranding
+ * upsert. */
+export async function seedCurrencySettings(
+  client: PrismaClient,
+  currenciesByCode: Record<string, Currency>,
+): Promise<void> {
+  const usd = currenciesByCode.USD;
+  if (!usd) return;
+
+  await client.currencySettings.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000002' },
+    update: {},
+    create: {
+      id: '00000000-0000-0000-0000-000000000002',
+      defaultCurrencyId: usd.id,
+      fallbackCurrencyId: usd.id,
+      autoDetectEnabled: true,
+    },
+  });
+
+  console.log('Seeded currency settings (default/fallback: USD, auto-detect: on)');
+}
+
+/** Demonstration per-currency pricing (Sprint 16 §9's worked example) —
+ * placeholder figures, not final commercial pricing, same disclaimer as
+ * PLAN_CONFIGS itself. FREE/ENTERPRISE deliberately get no additional
+ * prices (FREE is 0 in every currency by definition; ENTERPRISE is
+ * contract-priced, never purchasable through automated checkout — see
+ * docs/architecture/paystack-integration.md). No providerPlanId is set
+ * here — a real per-currency Paystack plan_code is a SUPER_ADMIN action
+ * via the admin UI's "sync to provider" flow, never fabricated by seed
+ * data. */
+const PLAN_PRICE_CONFIGS: Record<string, Partial<Record<'NGN' | 'EUR', number>>> = {
+  starter: { NGN: 2_900_000, EUR: 1800 },
+  professional: { NGN: 7_500_000, EUR: 4500 },
+  business: { NGN: 22_900_000, EUR: 13_900 },
+};
+
+export async function seedPlanPrices(
+  client: PrismaClient,
+  plansBySlug: Record<string, Plan>,
+  currenciesByCode: Record<string, Currency>,
+): Promise<void> {
+  let count = 0;
+  for (const [planSlug, prices] of Object.entries(PLAN_PRICE_CONFIGS)) {
+    const plan = plansBySlug[planSlug];
+    if (!plan) continue;
+    for (const [currencyCode, amount] of Object.entries(prices)) {
+      const currency = currenciesByCode[currencyCode];
+      if (!currency || amount === undefined) continue;
+      await client.planPrice.upsert({
+        where: { planId_currencyId: { planId: plan.id, currencyId: currency.id } },
+        update: { amount },
+        create: { planId: plan.id, currencyId: currency.id, amount },
+      });
+      count += 1;
+    }
+  }
+
+  console.log(`Seeded ${count} additional per-currency plan prices`);
 }
 
 interface RoleSeedConfig {
@@ -1577,6 +1775,10 @@ async function main() {
   console.log('Seeding LinkIQ database...\n');
 
   const plans = await seedPlans();
+  const currencies = await seedCurrencies();
+  await seedCountryMappings(prisma, currencies);
+  await seedCurrencySettings(prisma, currencies);
+  await seedPlanPrices(prisma, plans, currencies);
   const roles = await seedPlatformRoles(prisma, plans);
   const { user, workspace } = await seedDemoUser();
   await seedDemoSubscription(workspace, plans);

@@ -18,7 +18,7 @@ import { CtaSection } from '@/components/marketing/cta-section';
 import { FaqSection } from '@/components/marketing/faq-section';
 import { FeatureGrid } from '@/components/marketing/feature-grid';
 import { HeroSection } from '@/components/marketing/hero-section';
-import { PricingCard } from '@/components/marketing/pricing-card';
+import { PricingCurrencyGrid } from '@/components/marketing/pricing-currency-grid';
 import { StatStrip } from '@/components/marketing/stat-strip';
 import { getServerLandingPageContent, getServerPlans } from '@/lib/server/landing-page-data';
 
@@ -359,12 +359,6 @@ const PRICING_CARD_LIMIT_ORDER: Array<keyof typeof FEATURE_LABELS> = [
   'MAX_TEAM_MEMBERS',
 ];
 
-function formatPlanPrice(plan: PublicPlanDto): { price: string; priceSuffix?: string } {
-  if (plan.priceAmount === 0) return { price: '$0' };
-  const major = Math.round(plan.priceAmount / 100);
-  return { price: `$${major}`, priceSuffix: plan.billingInterval === 'ANNUAL' ? '/yr' : '/mo' };
-}
-
 function planToFeatureList(plan: PublicPlanDto): string[] {
   const byKey = new Map(plan.limits.map((l) => [l.key, l.value]));
   const features = PRICING_CARD_LIMIT_ORDER.map((key) => {
@@ -404,23 +398,14 @@ function PricingSection({ content, plans }: { content?: SectionContent; plans: P
           </h2>
         </div>
 
-        <div className="mx-auto mt-14 grid max-w-6xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {purchasable.map((plan) => {
-            const { price, priceSuffix } = formatPlanPrice(plan);
-            return (
-              <PricingCard
-                key={plan.id}
-                name={plan.name}
-                price={price}
-                priceSuffix={priceSuffix}
-                description={plan.description ?? ''}
-                features={planToFeatureList(plan)}
-                ctaLabel="Start for free"
-                href="/register"
-                highlighted={plan.slug === 'professional'}
-              />
-            );
-          })}
+        <div className="mx-auto mt-14 max-w-6xl">
+          <PricingCurrencyGrid
+            plans={purchasable.map((plan) => ({
+              ...plan,
+              features: planToFeatureList(plan),
+            }))}
+            ctaHref="/register"
+          />
         </div>
 
         <div className="mx-auto mt-6 flex max-w-6xl flex-col items-center justify-between gap-3 rounded-xl border border-white/10 bg-card p-6 sm:flex-row">

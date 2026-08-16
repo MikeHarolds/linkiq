@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
   Param,
   Post,
   Query,
@@ -32,6 +33,7 @@ import { BillingUsageService } from './billing-usage.service';
 import { PlanSlugDto } from './dto/plan-slug.dto';
 import { InvoicesService } from './invoices.service';
 import { PlansService, type PlanWithLimits } from './plans.service';
+import { BILLING_PROVIDER, type BillingProvider } from './providers/billing-provider.interface';
 import {
   SubscriptionsService,
   type SubscriptionMutationResult,
@@ -39,7 +41,11 @@ import {
 } from './subscriptions.service';
 import { getEffectiveStatus } from './utils/effective-status';
 
-function planResponse(plan: PlanWithLimits) {
+/** Sprint 16 — `providerCurrencies: undefined` means "every active
+ * LinkIQ currency" (no supported-currency allowlist configured, e.g.
+ * DevelopmentBillingProvider) rather than an empty/false-negative list
+ * — see BillingProvider.getSupportedCurrencies's own docs. */
+function planResponse(plan: PlanWithLimits, providerCurrencies: string[] | undefined) {
   return {
     id: plan.id,
     name: plan.name,
@@ -53,6 +59,13 @@ function planResponse(plan: PlanWithLimits) {
     isActive: plan.isActive,
     displayOrder: plan.displayOrder,
     limits: plan.limits.map((l) => ({ key: l.key, value: l.value })),
+    prices: plan.prices.map((p) => ({
+      currencyCode: p.currency.code,
+      amount: p.amount,
+      isConverted: p.isConverted,
+      providerAvailable: !providerCurrencies || providerCurrencies.includes(p.currency.code),
+    })),
+    providerAvailable: !providerCurrencies || providerCurrencies.includes(plan.currency),
   };
 }
 
@@ -70,7 +83,9 @@ function subscriptionResponse(
     workspaceId: subscription.workspaceId,
     status: subscription.status,
     effectiveStatus,
-    plan: planResponse(subscription.plan),
+    plan: planResponse(subscription.plan, undefined),
+    currency: subscription.currency,
+    amount: subscription.amount,
     billingPeriod: {
       start: subscription.currentPeriodStart,
       end: subscription.currentPeriodEnd,
@@ -120,7 +135,12 @@ export class BillingController {
     private readonly plans: PlansService,
     private readonly invoices: InvoicesService,
     private readonly config: ConfigService,
+    @Inject(BILLING_PROVIDER) private readonly billingProvider: BillingProvider,
   ) {}
+
+  private get providerCurrencies(): string[] | undefined {
+    return this.billingProvider.getSupportedCurrencies?.();
+  }
 
   private get pastDueGraceDays(): number {
     return this.config.get<number>('paystack.pastDueGraceDays') ?? 7;
@@ -142,7 +162,7 @@ export class BillingController {
       subscription: subscription
         ? subscriptionResponse(subscription, this.pastDueGraceDays)
         : null,
-      plan: planResponse(plan),
+      plan: planResponse(plan, this.providerCurrencies),
       usage: usageSnapshot,
       invoiceCount: invoiceHistory.length,
     };
@@ -164,7 +184,7 @@ export class BillingController {
   @ApiResponse({ status: 200, description: 'Active plans' })
   async getPlans() {
     const active = await this.plans.listActive();
-    return active.map(planResponse);
+    return active.map((plan) => planResponse(plan, this.providerCurrencies));
   }
 
   @Get('invoices')
@@ -230,6 +250,7 @@ export class BillingController {
       user.id,
       dto.planSlug,
       ctx,
+      dto.currency,
     );
     return mutationResponse(result, this.pastDueGraceDays);
   }
@@ -252,6 +273,7 @@ export class BillingController {
       user.id,
       dto.planSlug,
       ctx,
+      dto.currency,
     );
     return mutationResponse(result, this.pastDueGraceDays);
   }

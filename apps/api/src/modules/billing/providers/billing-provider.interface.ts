@@ -9,6 +9,17 @@ export interface CreateCheckoutSessionInput {
    * create a customer/checkout session. Unused by
    * DevelopmentBillingProvider. */
   email: string;
+  /** Sprint 16 — which currency to check out in. Undefined = use the
+   * plan's base currency/providerPlanId, exactly as every provider
+   * behaved before this sprint (fully backward compatible). When set,
+   * the provider resolves the matching PlanPrice (and its own
+   * per-currency providerPlanId) instead — see
+   * PaystackBillingProvider.createCheckoutSession. Callers
+   * (SubscriptionsService) are responsible for having already
+   * confirmed the currency is active AND provider-supported before
+   * reaching here; a provider implementation may still reject a
+   * currency it cannot process. */
+  currencyCode?: string;
   successUrl?: string;
   cancelUrl?: string;
 }
@@ -102,4 +113,17 @@ export interface BillingProvider {
    * either way.
    */
   createProviderPlan?(input: CreateProviderPlanInput): Promise<CreateProviderPlanResult>;
+  /**
+   * Optional (Sprint 16): which ISO 4217 currency codes this provider
+   * can actually process a checkout in, for the CURRENTLY configured
+   * merchant account/credentials — distinct from whether a currency is
+   * active in LinkIQ's own Currency catalogue (see
+   * docs/architecture/currency.md §11: "LinkIQ currency status vs
+   * payment provider currency capability"). Providers that omit this
+   * method (DevelopmentBillingProvider) are treated as supporting every
+   * LinkIQ-active currency, since dev-flow never actually charges
+   * anyone. Never fabricates support — PaystackBillingProvider's
+   * implementation is a configured allowlist, not a guess.
+   */
+  getSupportedCurrencies?(): string[];
 }

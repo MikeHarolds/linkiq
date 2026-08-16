@@ -20,6 +20,7 @@ import {
   type PaginatedResult,
 } from '../../common/dto/pagination.dto';
 import { AuditService } from '../audit/audit.service';
+import { CurrencyService } from '../currency/currency.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RoleResolutionService } from '../roles/role-resolution.service';
 import { WebhookEventsService } from '../webhooks/webhook-events.service';
@@ -71,7 +72,11 @@ export interface ListSubscriptionsQuery {
 
 const SUBSCRIPTION_WITH_PLAN_INCLUDE = {
   plan: {
-    include: { limits: true, platformRole: { select: { id: true, name: true, slug: true } } },
+    include: {
+      limits: true,
+      platformRole: { select: { id: true, name: true, slug: true } },
+      prices: { include: { currency: true } },
+    },
   },
 } as const;
 
@@ -95,10 +100,54 @@ export class SubscriptionsService {
     @Inject(forwardRef(() => WebhookEventsService))
     private readonly webhookEvents: WebhookEventsService,
     private readonly roleResolution: RoleResolutionService,
+    private readonly currencies: CurrencyService,
   ) {}
 
   private get pastDueGraceDays(): number {
     return this.config.get<number>('paystack.pastDueGraceDays') ?? 7;
+  }
+
+  /**
+   * Sprint 16 §11 — resolves which currency/amount a subscribe/
+   * changePlan call should actually use, in the exact required order:
+   * currency exists -> currency active -> plan has a valid price for it.
+   * Provider-support (step 4) is deliberately NOT checked here — it's
+   * only relevant on the path that actually reaches the provider (a
+   * TRIALING subscribe never does), see assertProviderSupportsCurrency.
+   * Undefined `requestedCode` means "use the plan's own base currency,"
+   * preserving every pre-Sprint-16 call site's behavior exactly.
+   */
+  private async resolvePlanPrice(
+    plan: PlanWithLimits,
+    requestedCode: string | undefined,
+  ): Promise<{ code: string; amount: number }> {
+    const code = requestedCode ?? plan.currency;
+    const currency = await this.currencies.getByCodeOrThrow(code);
+    if (!currency.isActive) {
+      throw new BadRequestException(`Currency "${code}" is not currently available`);
+    }
+    if (code === plan.currency) {
+      return { code, amount: plan.priceAmount };
+    }
+    const price = plan.prices.find((p) => p.currency.code === code);
+    if (!price) {
+      throw new BadRequestException(`Plan "${plan.slug}" has no price configured for ${code}`);
+    }
+    return { code, amount: price.amount };
+  }
+
+  /** Sprint 16 §11 step 4 — never assumes an active LinkIQ currency is
+   * automatically processable by the configured payment provider. A
+   * provider that omits getSupportedCurrencies (DevelopmentBillingProvider)
+   * is treated as supporting everything, since nothing is ever actually
+   * charged in dev mode. */
+  private assertProviderSupportsCurrency(code: string): void {
+    const supported = this.provider.getSupportedCurrencies?.();
+    if (supported && !supported.includes(code)) {
+      throw new BadRequestException(
+        `${code} is not currently supported by the configured payment provider`,
+      );
+    }
   }
 
   /**
@@ -160,6 +209,8 @@ export class SubscriptionsService {
         workspaceId,
         planId: freePlan.id,
         status: SubscriptionStatus.ACTIVE,
+        currency: freePlan.currency,
+        amount: freePlan.priceAmount,
       },
     });
   }
@@ -251,6 +302,7 @@ export class SubscriptionsService {
     userId: string,
     planSlug: string,
     ctx: RequestContext,
+    currencyCode?: string,
   ): Promise<SubscriptionMutationResult> {
     const plan = await this.plans.getBySlug(planSlug);
     if (!plan.isActive) {
@@ -258,13 +310,16 @@ export class SubscriptionsService {
     }
 
     const isTrialing = plan.trialDays != null && plan.trialDays > 0;
+    const resolvedPrice = await this.resolvePlanPrice(plan, currencyCode);
 
     if (!isTrialing) {
+      this.assertProviderSupportsCurrency(resolvedPrice.code);
       const email = await this.getUserEmail(userId);
       const session = await this.provider.createCheckoutSession({
         workspaceId,
         planSlug,
         email,
+        currencyCode: resolvedPrice.code,
       });
       if (!session.devFlow) {
         const current = await this.getForWorkspace(workspaceId);
@@ -304,6 +359,8 @@ export class SubscriptionsService {
       trialEnd: isTrialing ? addDays(now, plan.trialDays!) : null,
       cancelAt: null,
       canceledAt: null,
+      currency: resolvedPrice.code,
+      amount: resolvedPrice.amount,
     };
 
     const subscription = await this.prisma.subscription.upsert({
@@ -369,6 +426,7 @@ export class SubscriptionsService {
     userId: string,
     planSlug: string,
     ctx: RequestContext,
+    currencyCode?: string,
   ): Promise<SubscriptionMutationResult> {
     const existing = await this.getForWorkspace(workspaceId);
     if (!existing) {
@@ -378,13 +436,16 @@ export class SubscriptionsService {
     if (!plan.isActive) {
       throw new BadRequestException('This plan is not currently available');
     }
+    const resolvedPrice = await this.resolvePlanPrice(plan, currencyCode);
 
     if (existing.providerSubscriptionId) {
+      this.assertProviderSupportsCurrency(resolvedPrice.code);
       const email = await this.getUserEmail(userId);
       const session = await this.provider.createCheckoutSession({
         workspaceId,
         planSlug: plan.slug,
         email,
+        currencyCode: resolvedPrice.code,
       });
       if (!session.devFlow) {
         await this.audit.record({
@@ -411,6 +472,8 @@ export class SubscriptionsService {
         status: SubscriptionStatus.ACTIVE,
         cancelAt: null,
         canceledAt: null,
+        currency: resolvedPrice.code,
+        amount: resolvedPrice.amount,
       },
       include: SUBSCRIPTION_WITH_PLAN_INCLUDE,
     });
@@ -532,11 +595,17 @@ export class SubscriptionsService {
     }
 
     if (existing.providerSubscriptionId) {
+      // Reactivating resumes THIS subscription — it must never silently
+      // switch currency (Sprint 16 §12), so the fresh checkout reuses
+      // whatever currency this subscription already recorded rather
+      // than accepting a caller-supplied one.
+      this.assertProviderSupportsCurrency(existing.currency);
       const email = await this.getUserEmail(userId);
       const session = await this.provider.createCheckoutSession({
         workspaceId,
         planSlug: existing.plan.slug,
         email,
+        currencyCode: existing.currency,
       });
       if (!session.devFlow) {
         await this.audit.record({
@@ -611,7 +680,11 @@ export class SubscriptionsService {
 
     const include = {
       plan: {
-        include: { limits: true, platformRole: { select: { id: true, name: true, slug: true } } },
+        include: {
+          limits: true,
+          platformRole: { select: { id: true, name: true, slug: true } },
+          prices: { include: { currency: true } },
+        },
       },
       workspace: {
         select: {

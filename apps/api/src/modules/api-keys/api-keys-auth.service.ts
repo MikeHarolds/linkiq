@@ -73,6 +73,10 @@ export class ApiKeysAuthService {
       // through platformPermissions, which no API-key-reachable route
       // checks this sprint.
       platformPermissions: [],
+      // Sprint 16 — API-key-authenticated requests never resolve a
+      // currency preference (no browser session to apply it to); always
+      // null, same treatment as platformPermissions above.
+      preferredCurrencyCode: null,
     };
 
     return {

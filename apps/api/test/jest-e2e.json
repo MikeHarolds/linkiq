@@ -2,7 +2,7 @@
   "moduleFileExtensions": ["js", "json", "ts"],
   "rootDir": ".",
   "testEnvironment": "node",
-  "testRegex": "(auth|workspaces|links|redirect|analytics|qr-codes|campaigns|custom-domains|billing|api-keys|webhooks|paystack-webhooks|paystack-checkout|admin|landing-page-cms|roles-and-permissions)\\.e2e-spec\\.ts$",
+  "testRegex": "(auth|workspaces|links|redirect|analytics|qr-codes|campaigns|custom-domains|billing|api-keys|webhooks|paystack-webhooks|paystack-checkout|admin|landing-page-cms|roles-and-permissions|currency)\\.e2e-spec\\.ts$",
   "setupFiles": ["<rootDir>/jest.e2e.setup.ts"],
   "testTimeout": 20000,
   "transform": {

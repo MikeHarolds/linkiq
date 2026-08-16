@@ -300,5 +300,11 @@ Full request/response schemas are in Swagger at `/api/v1/docs`.
   `DevelopmentBillingProvider`/trials only (`addDays(now, 30)` or `365`)
   — a real Paystack subscription uses the period Paystack itself reports
   (`next_payment_date`).
-- **Currency and annual pricing are open product decisions**, not
-  invented — see paystack-integration.md §12.
+- **Multi-currency pricing** (Sprint 16) — `Plan.currency`/`priceAmount`
+  remain a plan's base price; additional per-currency prices,
+  IP-based currency detection, user currency preference, and the
+  payment-provider currency-capability check all live in
+  `docs/architecture/currency.md`, integrated into this same
+  `BillingProvider`/`SubscriptionsService` architecture rather than a
+  second billing system. Annual pricing per currency remains an open
+  product decision, not invented.

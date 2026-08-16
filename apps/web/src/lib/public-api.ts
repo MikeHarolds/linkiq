@@ -1,4 +1,10 @@
-import type { PublicLandingPageContentDto, PublicPlanDto, PublicSiteConfigDto } from '@linkiq/types';
+import type {
+  CurrencyDto,
+  DetectedCurrencyDto,
+  PublicLandingPageContentDto,
+  PublicPlanDto,
+  PublicSiteConfigDto,
+} from '@linkiq/types';
 
 import { api } from './api-client';
 
@@ -18,4 +24,18 @@ export function getSiteConfig(): Promise<PublicSiteConfigDto> {
 
 export function getPublicPlans(): Promise<PublicPlanDto[]> {
   return api.get('/public/plans');
+}
+
+/** Sprint 16 — the active currency catalogue, for any currency
+ * selector (pricing page, dashboard). */
+export function getPublicCurrencies(): Promise<CurrencyDto[]> {
+  return api.get('/public/currencies');
+}
+
+/** Resolves the caller's currency (explicit choice > user preference >
+ * IP detection > platform fallback — see CurrencyResolutionService).
+ * Never persists anything itself. */
+export function detectCurrency(explicitCode?: string): Promise<DetectedCurrencyDto> {
+  const query = explicitCode ? `?currency=${encodeURIComponent(explicitCode)}` : '';
+  return api.get(`/public/currencies/detect${query}`);
 }

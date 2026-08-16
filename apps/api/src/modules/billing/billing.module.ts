@@ -1,6 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { forwardRef, Module } from '@nestjs/common';
 
+import { CurrencyModule } from '../currency/currency.module';
 import { RolesModule } from '../roles/roles.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 
@@ -49,6 +50,7 @@ import { SubscriptionsService } from './subscriptions.service';
   imports: [
     forwardRef(() => WebhooksModule),
     RolesModule,
+    CurrencyModule,
     BullModule.registerQueue({ name: PAYSTACK_WEBHOOK_QUEUE }),
   ],
   controllers: [BillingController, PaystackWebhookController],

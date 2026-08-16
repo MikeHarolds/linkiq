@@ -310,6 +310,19 @@ export interface PlanLimitDto {
   value: number | null;
 }
 
+/** Sprint 16 — one of a plan's additional currency-specific prices,
+ * beyond its base `currency`/`priceAmount`. */
+export interface PlanPriceDto {
+  currencyCode: string;
+  /** Smallest currency unit. */
+  amount: number;
+  isConverted: boolean;
+  /** Whether the currently-configured payment provider can actually
+   * process a charge in this currency — distinct from the currency
+   * being active in LinkIQ's own catalogue (see Sprint 16 §11). */
+  providerAvailable: boolean;
+}
+
 export interface PlanDto {
   id: string;
   name: string;
@@ -328,6 +341,12 @@ export interface PlanDto {
   /** Sprint 15 — the platform role a workspace's OWNER holds while this
    * plan is effectively active on a workspace they own, if any. */
   platformRole: { id: string; name: string; slug: string } | null;
+  /** Sprint 16 — additional currency-specific prices; empty when the
+   * plan is only priced in its base currency. */
+  prices: PlanPriceDto[];
+  /** Sprint 16 — whether the base `currency` above is processable by
+   * the configured payment provider. */
+  providerAvailable: boolean;
 }
 
 export interface UsageSnapshotDto {
@@ -348,6 +367,12 @@ export interface SubscriptionDto {
   status: SubscriptionStatus;
   effectiveStatus: SubscriptionStatus;
   plan: PlanDto;
+  /** Sprint 16 — the currency/amount THIS subscription actually
+   * applies in, set once at subscribe/checkout time and never silently
+   * changed by a later currency preference change or plan price edit
+   * (see Sprint 16 §12). */
+  currency: string;
+  amount: number;
   billingPeriod: { start: string; end: string | null };
   trial: { start: string | null; end: string | null } | null;
   cancellation: { cancelAt: string; canceledAt: string | null } | null;
@@ -394,6 +419,11 @@ export interface InvoiceDto {
   provider: string | null;
   providerInvoiceId: string | null;
   hostedInvoiceUrl: string | null;
+  /** Sprint 16 — set only when `amount`/`currency` were produced via
+   * exchange-rate conversion rather than a fixed price. Historical —
+   * never recomputed after the fact. */
+  exchangeRate: string | null;
+  exchangeRateAsOf: string | null;
 }
 
 /** Structured billing/limit error body — see
@@ -1108,6 +1138,9 @@ export interface PublicPlanDto {
   trialDays: number | null;
   displayOrder: number;
   limits: Array<{ key: PlanLimitKey; value: number | null }>;
+  /** Sprint 16 — additional currency-specific prices for the pricing
+   * page's currency selector. */
+  prices: Array<{ currencyCode: string; amount: number }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1189,4 +1222,107 @@ export interface MyEntitlementDto {
   role: string | null;
   source: RoleAssignmentSource;
   permissions: PermissionKey[];
+}
+
+// ---------------------------------------------------------------------------
+// Currency, Localization & Multi-Currency Payments (Sprint 16)
+// ---------------------------------------------------------------------------
+
+export interface CurrencyDto {
+  id: string;
+  code: string;
+  name: string;
+  symbol: string;
+  numericCode: string | null;
+  decimalPlaces: number;
+  region: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Returned by GET /admin/currencies only — the plain list/detail
+ * reads (GET /public/currencies, /admin/currencies/:id) return
+ * CurrencyDto without these computed fields. */
+export interface AdminCurrencyDto extends CurrencyDto {
+  isDefault: boolean;
+  isFallback: boolean;
+  providerAvailable: boolean;
+}
+
+export interface CreateCurrencyPayload {
+  code: string;
+  name: string;
+  symbol: string;
+  numericCode?: string;
+  decimalPlaces?: number;
+  region?: string;
+  isActive?: boolean;
+}
+
+export interface UpdateCurrencyPayload {
+  name?: string;
+  symbol?: string;
+  numericCode?: string;
+  decimalPlaces?: number;
+  region?: string;
+  isActive?: boolean;
+}
+
+export interface CurrencySettingsDto {
+  id: string;
+  defaultCurrencyId: string;
+  defaultCurrency: CurrencyDto;
+  fallbackCurrencyId: string;
+  fallbackCurrency: CurrencyDto;
+  autoDetectEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateCurrencySettingsPayload {
+  defaultCurrencyId?: string;
+  fallbackCurrencyId?: string;
+  autoDetectEnabled?: boolean;
+}
+
+export interface CurrencyCountryMappingDto {
+  id: string;
+  countryCode: string;
+  countryName: string;
+  currencyId: string;
+  currency: CurrencyDto;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCountryMappingPayload {
+  countryCode: string;
+  countryName: string;
+  currencyId: string;
+}
+
+export interface UpdateCountryMappingPayload {
+  countryName?: string;
+  currencyId?: string;
+}
+
+export interface SetPlanPricePayload {
+  currencyId: string;
+  amount?: number;
+  useExchangeRate?: boolean;
+  providerPlanId?: string | null;
+  syncToProvider?: boolean;
+}
+
+export type CurrencyResolutionSource =
+  'EXPLICIT' | 'USER_PREFERENCE' | 'IP_DETECTED' | 'FALLBACK';
+
+/** GET /public/currencies/detect — never persists anything; a
+ * separate explicit action (PATCH /users/me/currency-preference)
+ * is what saves a user's choice (see Sprint 16 §6/§7). */
+export interface DetectedCurrencyDto {
+  currency: CurrencyDto;
+  source: CurrencyResolutionSource;
+  detectedCountry: string | null;
 }

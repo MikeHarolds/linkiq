@@ -8,6 +8,7 @@ import {
 } from '../../../test/mocks/prisma.mock';
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import type { AuditService } from '../audit/audit.service';
+import type { CurrencyService } from '../currency/currency.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { RoleResolutionService } from '../roles/role-resolution.service';
 import type { WebhookEventsService } from '../webhooks/webhook-events.service';
@@ -37,6 +38,7 @@ function makePlan(overrides: Partial<Record<string, unknown>> = {}) {
     createdAt: new Date(),
     updatedAt: new Date(),
     limits: [],
+    prices: [],
     ...overrides,
   };
 }
@@ -57,6 +59,8 @@ function makeSubscription(overrides: Partial<Record<string, unknown>> = {}) {
     providerCustomerId: null,
     providerSubscriptionId: null,
     providerPriceId: null,
+    currency: 'USD',
+    amount: 0,
     plan: makePlan(),
     ...overrides,
   };
@@ -70,6 +74,7 @@ describe('SubscriptionsService', () => {
   let provider: jest.Mocked<BillingProvider>;
   let webhookEvents: { emit: jest.Mock };
   let roleResolution: { syncStoredRole: jest.Mock };
+  let currencies: { getByCodeOrThrow: jest.Mock };
   let service: SubscriptionsService;
 
   beforeEach(() => {
@@ -102,6 +107,14 @@ describe('SubscriptionsService', () => {
     };
     webhookEvents = { emit: jest.fn().mockResolvedValue(undefined) };
     roleResolution = { syncStoredRole: jest.fn().mockResolvedValue(undefined) };
+    // Every subscribe/changePlan/reactivate call now resolves a
+    // currency via CurrencyService — an active-currency default keeps
+    // every pre-existing test in this file (all of which use the
+    // default 'USD' plan currency) behaviorally unchanged; tests
+    // exercising multi-currency behavior explicitly override this.
+    currencies = {
+      getByCodeOrThrow: jest.fn((code: string) => Promise.resolve({ code, isActive: true })),
+    };
     service = new SubscriptionsService(
       prisma as unknown as PrismaService,
       plans as unknown as PlansService,
@@ -110,6 +123,7 @@ describe('SubscriptionsService', () => {
       provider,
       webhookEvents as unknown as WebhookEventsService,
       roleResolution as unknown as RoleResolutionService,
+      currencies as unknown as CurrencyService,
     );
   });
 
@@ -127,6 +141,8 @@ describe('SubscriptionsService', () => {
           workspaceId: 'ws-1',
           planId: 'plan-free',
           status: SubscriptionStatus.ACTIVE,
+          currency: 'USD',
+          amount: 0,
         },
       });
     });
@@ -338,6 +354,76 @@ describe('SubscriptionsService', () => {
       );
       expect(webhookEvents.emit).not.toHaveBeenCalled();
     });
+
+    it('Sprint 16 — stamps the resolved currency/amount onto the created subscription', async () => {
+      plans.getBySlug.mockResolvedValue(makePlan({ slug: 'starter', trialDays: null }));
+      prisma.subscription.upsert.mockResolvedValue(makeSubscription());
+
+      await service.subscribe('ws-1', 'user-1', 'starter', ctx);
+
+      const upsertCall = prisma.subscription.upsert.mock.calls[0][0];
+      expect(upsertCall.create.currency).toBe('USD');
+      expect(upsertCall.create.amount).toBe(0);
+    });
+
+    it('Sprint 16 — resolves a currency-specific PlanPrice when a non-base currency is requested', async () => {
+      plans.getBySlug.mockResolvedValue(
+        makePlan({
+          slug: 'professional',
+          trialDays: null,
+          currency: 'USD',
+          priceAmount: 4900,
+          prices: [{ currency: { code: 'NGN' }, amount: 7_500_000 }],
+        }),
+      );
+      prisma.subscription.upsert.mockResolvedValue(makeSubscription());
+
+      await service.subscribe('ws-1', 'user-1', 'professional', ctx, 'NGN');
+
+      expect(provider.createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({ currencyCode: 'NGN' }),
+      );
+      const upsertCall = prisma.subscription.upsert.mock.calls[0][0];
+      expect(upsertCall.create.currency).toBe('NGN');
+      expect(upsertCall.create.amount).toBe(7_500_000);
+    });
+
+    it('Sprint 16 §11 — rejects a currency the plan has no price configured for', async () => {
+      plans.getBySlug.mockResolvedValue(
+        makePlan({ slug: 'professional', trialDays: null, currency: 'USD', prices: [] }),
+      );
+
+      await expect(
+        service.subscribe('ws-1', 'user-1', 'professional', ctx, 'EUR'),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.subscription.upsert).not.toHaveBeenCalled();
+    });
+
+    it('Sprint 16 §11 — rejects a currency the payment provider does not support', async () => {
+      plans.getBySlug.mockResolvedValue(
+        makePlan({
+          slug: 'professional',
+          trialDays: null,
+          currency: 'USD',
+          prices: [{ currency: { code: 'EUR' }, amount: 4500 }],
+        }),
+      );
+      provider.getSupportedCurrencies = jest.fn().mockReturnValue(['NGN', 'USD']);
+
+      await expect(
+        service.subscribe('ws-1', 'user-1', 'professional', ctx, 'EUR'),
+      ).rejects.toThrow(BadRequestException);
+      expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+    });
+
+    it('Sprint 16 §11 — rejects an inactive currency even if it is the plan base currency', async () => {
+      plans.getBySlug.mockResolvedValue(makePlan({ slug: 'starter', trialDays: null }));
+      currencies.getByCodeOrThrow.mockResolvedValue({ code: 'USD', isActive: false });
+
+      await expect(service.subscribe('ws-1', 'user-1', 'starter', ctx)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
   });
 
   describe('changePlan', () => {
@@ -405,6 +491,24 @@ describe('SubscriptionsService', () => {
         expect.objectContaining({
           planSlug: 'professional',
           email: 'user@example.com',
+        }),
+      );
+    });
+
+    it('Sprint 16 — a dev-flow plan change stamps the new plan\'s resolved currency/amount, not the previous subscription\'s', async () => {
+      prisma.subscription.findUnique.mockResolvedValue(
+        makeSubscription({ currency: 'USD', amount: 1900 }),
+      );
+      plans.getBySlug.mockResolvedValue(
+        makePlan({ id: 'plan-pro', slug: 'professional', currency: 'USD', priceAmount: 4900 }),
+      );
+      prisma.subscription.update.mockResolvedValue(makeSubscription({ planId: 'plan-pro' }));
+
+      await service.changePlan('ws-1', 'user-1', 'professional', ctx);
+
+      expect(prisma.subscription.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ currency: 'USD', amount: 4900 }),
         }),
       );
     });
@@ -512,6 +616,26 @@ describe('SubscriptionsService', () => {
           planSlug: existing.plan.slug,
           email: 'user@example.com',
         }),
+      );
+    });
+
+    it("Sprint 16 §12 — reuses the subscription's own already-recorded currency, never a caller-supplied one", async () => {
+      const existing = makeSubscription({
+        cancelAt: new Date(Date.now() + 86_400_000),
+        providerSubscriptionId: 'SUB_abc:tok_abc',
+        currency: 'NGN',
+        amount: 7_500_000,
+      });
+      prisma.subscription.findUnique.mockResolvedValue(existing);
+      provider.createCheckoutSession.mockResolvedValue({
+        devFlow: false,
+        checkoutUrl: 'https://checkout.paystack.com/xyz',
+      });
+
+      await service.reactivate('ws-1', 'user-1', ctx);
+
+      expect(provider.createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({ currencyCode: 'NGN' }),
       );
     });
   });

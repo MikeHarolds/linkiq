@@ -4,7 +4,14 @@ import { Test, type TestingModuleBuilder } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import type Redis from 'ioredis';
 
-import { seedPlans, seedPlatformRoles } from '../prisma/seed';
+import {
+  seedCountryMappings,
+  seedCurrencies,
+  seedCurrencySettings,
+  seedPlanPrices,
+  seedPlans,
+  seedPlatformRoles,
+} from '../prisma/seed';
 import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { registerRedirectRoute } from '../src/modules/links/redirect-route';
@@ -84,6 +91,15 @@ export async function createTestApp(
   // so every e2e file gets the canonical system roles + plan attachments
   // regardless of what a previous file's run left behind.
   await seedPlatformRoles(prisma, plans);
+  // Sprint 16 — same rationale again: resetDatabase() never touches
+  // Currency/CurrencyCountryMapping/CurrencySettings/PlanPrice rows
+  // either, so every e2e file gets the canonical currency catalogue,
+  // country mappings, and settings singleton regardless of what a
+  // previous file's run left behind.
+  const currencies = await seedCurrencies(prisma);
+  await seedCountryMappings(prisma, currencies);
+  await seedCurrencySettings(prisma, currencies);
+  await seedPlanPrices(prisma, plans, currencies);
 
   return { app, prisma, redis };
 }

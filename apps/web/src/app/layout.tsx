@@ -4,6 +4,7 @@ import { Inter } from 'next/font/google';
 import type { ReactNode } from 'react';
 
 import { AuthProvider } from '@/providers/auth-provider';
+import { CurrencyProvider } from '@/providers/currency-provider';
 import { QueryProvider } from '@/providers/query-provider';
 
 import '../styles/globals.css';
@@ -54,8 +55,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <ThemeProvider>
           <QueryProvider>
             <AuthProvider>
-              {children}
-              <Toaster position="top-right" />
+              <CurrencyProvider>
+                {children}
+                <Toaster position="top-right" />
+              </CurrencyProvider>
             </AuthProvider>
           </QueryProvider>
         </ThemeProvider>

@@ -32,6 +32,7 @@ describe('PaystackBillingProvider', () => {
     >
   >;
   let plans: { getBySlug: jest.Mock };
+  let config: { get: jest.Mock };
   let provider: PaystackBillingProvider;
 
   beforeEach(() => {
@@ -42,9 +43,11 @@ describe('PaystackBillingProvider', () => {
       verifyTransaction: jest.fn(),
     };
     plans = { getBySlug: jest.fn() };
+    config = { get: jest.fn().mockReturnValue(undefined) };
     provider = new PaystackBillingProvider(
       api as unknown as PaystackApiClient,
       plans as never,
+      config as never,
     );
   });
 
@@ -121,6 +124,72 @@ describe('PaystackBillingProvider', () => {
           callbackUrl: 'https://app.linkiq.com/dashboard/billing/callback',
         }),
       );
+    });
+
+    it('resolves a currency-specific PlanPrice and its own providerPlanId when currencyCode differs from the base', async () => {
+      plans.getBySlug.mockResolvedValue({
+        slug: 'professional',
+        currency: 'USD',
+        priceAmount: 4900,
+        providerPlanId: 'PLN_pro_usd',
+        billingInterval: 'MONTHLY',
+        prices: [
+          {
+            currencyId: 'cur-ngn',
+            currency: { code: 'NGN' },
+            amount: 7_500_000,
+            providerPlanId: 'PLN_pro_ngn',
+          },
+        ],
+      });
+      api.initializeTransaction.mockResolvedValue({
+        authorizationUrl: 'https://checkout.paystack.com/xyz',
+        accessCode: 'access_xyz',
+        reference: 'txn-abc',
+      });
+
+      await provider.createCheckoutSession({
+        workspaceId: 'ws-1',
+        planSlug: 'professional',
+        email: 'a@b.com',
+        currencyCode: 'NGN',
+      });
+
+      expect(api.initializeTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({ amountKobo: 7_500_000, planCode: 'PLN_pro_ngn' }),
+      );
+    });
+
+    it('throws when no PlanPrice exists for the requested currency', async () => {
+      plans.getBySlug.mockResolvedValue({
+        slug: 'professional',
+        currency: 'USD',
+        priceAmount: 4900,
+        providerPlanId: 'PLN_pro_usd',
+        prices: [],
+      });
+
+      await expect(
+        provider.createCheckoutSession({
+          workspaceId: 'ws-1',
+          planSlug: 'professional',
+          email: 'a@b.com',
+          currencyCode: 'EUR',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(api.initializeTransaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getSupportedCurrencies', () => {
+    it('returns the configured allowlist', () => {
+      config.get.mockReturnValue(['NGN', 'USD']);
+      expect(provider.getSupportedCurrencies()).toEqual(['NGN', 'USD']);
+    });
+
+    it('falls back to NGN/USD when unconfigured', () => {
+      config.get.mockReturnValue(undefined);
+      expect(provider.getSupportedCurrencies()).toEqual(['NGN', 'USD']);
     });
   });
 

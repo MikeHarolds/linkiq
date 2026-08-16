@@ -194,6 +194,10 @@ describe('PaystackWebhookProcessor', () => {
             provider: 'paystack',
             providerCustomerId: 'CUS_abc',
             pastDueSince: null,
+            // Sprint 16 — the real charge currency/amount from Paystack's
+            // own payload, not re-derived from LinkIQ's Plan row.
+            amount: 190000,
+            currency: 'USD',
           }),
         }),
       );

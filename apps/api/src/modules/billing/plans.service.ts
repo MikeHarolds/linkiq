@@ -3,23 +3,33 @@ import {
   BillingInterval,
   PlanTier,
   Prisma,
+  type Currency,
   type Plan,
   type PlanLimit,
   type PlanLimitKey,
+  type PlanPrice,
 } from '@prisma/client';
 
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import { AuditService } from '../audit/audit.service';
+import { CurrencyService } from '../currency/currency.service';
 import { PrismaService } from '../prisma/prisma.service';
+
+export type PlanPriceWithCurrency = PlanPrice & { currency: Currency };
 
 export type PlanWithLimits = Plan & {
   limits: PlanLimit[];
   platformRole: { id: string; name: string; slug: string } | null;
+  /** Sprint 16 — additional currency-specific prices beyond the base
+   * `currency`/`priceAmount` above; always present (possibly empty),
+   * never a separate lookup callers have to remember to make. */
+  prices: PlanPriceWithCurrency[];
 };
 
 const PLAN_WITH_LIMITS_INCLUDE = {
   limits: true,
   platformRole: { select: { id: true, name: true, slug: true } },
+  prices: { include: { currency: true } },
 } as const;
 
 /** slug/tier ARE settable here, unlike UpdatePlanInput — they're only
@@ -77,6 +87,7 @@ export class PlansService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly currencies: CurrencyService,
   ) {}
 
   async listActive(): Promise<PlanWithLimits[]> {
@@ -277,6 +288,106 @@ export class PlansService {
     if (!role.isActive) {
       throw new BadRequestException('Cannot attach an inactive role to a plan');
     }
+  }
+
+  /**
+   * Sprint 16 — sets (creates or replaces) this plan's price in a
+   * specific currency. Deliberately upsert-by-(planId, currencyId)
+   * rather than separate create/update methods with different id
+   * shapes: the admin UI always addresses a price by which currency
+   * it's for, never by the PlanPrice row's own id (see AdminPlansController).
+   * `isConverted`/`exchangeRate*` are set here only when the caller
+   * actually used ExchangeRateService.convert() to derive `amount` —
+   * see AdminPlansController's own docs for that flow; a directly-typed
+   * fixed price always has isConverted: false.
+   */
+  async setPrice(
+    planId: string,
+    input: {
+      currencyId: string;
+      amount: number;
+      isConverted?: boolean;
+      exchangeRate?: number | null;
+      exchangeRateAsOf?: Date | null;
+      providerPlanId?: string | null;
+    },
+    adminUserId: string,
+    ctx: RequestContext,
+  ): Promise<PlanWithLimits> {
+    const plan = await this.getByIdOrThrow(planId);
+    const currency = await this.currencies.getByIdOrThrow(input.currencyId);
+    if (!currency.isActive) {
+      throw new BadRequestException('Cannot set a plan price in an inactive currency');
+    }
+
+    const existing = plan.prices.find((p) => p.currencyId === input.currencyId);
+
+    await this.prisma.planPrice.upsert({
+      where: { planId_currencyId: { planId, currencyId: input.currencyId } },
+      create: {
+        planId,
+        currencyId: input.currencyId,
+        amount: input.amount,
+        isConverted: input.isConverted ?? false,
+        exchangeRate: input.exchangeRate,
+        exchangeRateAsOf: input.exchangeRateAsOf,
+        providerPlanId: input.providerPlanId,
+      },
+      update: {
+        amount: input.amount,
+        isConverted: input.isConverted ?? false,
+        exchangeRate: input.exchangeRate,
+        exchangeRateAsOf: input.exchangeRateAsOf,
+        providerPlanId: input.providerPlanId,
+      },
+    });
+
+    this.cache = null;
+
+    await this.audit.record({
+      action: existing ? 'admin.plan_price_updated' : 'admin.plan_price_created',
+      entity: 'PlanPrice',
+      entityId: planId,
+      userId: adminUserId,
+      metadata: {
+        planSlug: plan.slug,
+        currencyCode: currency.code,
+        amount: input.amount,
+        previousAmount: existing?.amount ?? null,
+      },
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent,
+    });
+
+    return this.getByIdOrThrow(planId);
+  }
+
+  async removePrice(
+    planId: string,
+    currencyId: string,
+    adminUserId: string,
+    ctx: RequestContext,
+  ): Promise<PlanWithLimits> {
+    const plan = await this.getByIdOrThrow(planId);
+    const price = plan.prices.find((p) => p.currencyId === currencyId);
+    if (!price) {
+      throw new NotFoundException('No price configured for this plan in that currency');
+    }
+
+    await this.prisma.planPrice.delete({ where: { id: price.id } });
+    this.cache = null;
+
+    await this.audit.record({
+      action: 'admin.plan_price_removed',
+      entity: 'PlanPrice',
+      entityId: planId,
+      userId: adminUserId,
+      metadata: { planSlug: plan.slug, currencyCode: price.currency.code },
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent,
+    });
+
+    return this.getByIdOrThrow(planId);
   }
 
   private async getAllCached(): Promise<PlanWithLimits[]> {

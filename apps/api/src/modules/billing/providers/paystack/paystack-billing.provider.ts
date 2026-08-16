@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import { PlansService } from '../../plans.service';
 import type {
@@ -62,18 +63,41 @@ export class PaystackBillingProvider implements BillingProvider {
   constructor(
     private readonly api: PaystackApiClient,
     private readonly plans: PlansService,
+    private readonly config: ConfigService,
   ) {}
 
   async createCheckoutSession(
     input: CreateCheckoutSessionInput,
   ): Promise<CheckoutSessionResult> {
     const plan = await this.plans.getBySlug(input.planSlug);
-    if (!plan.providerPlanId) {
+
+    // Sprint 16 — a currency other than the plan's base currency
+    // resolves to its own PlanPrice row (and that row's OWN Paystack
+    // plan_code, since a Paystack Plan object is single-currency — see
+    // docs/architecture/currency.md). No currencyCode, or a currencyCode
+    // matching the base currency, keeps pre-Sprint-16 behavior exactly.
+    let amountKobo = plan.priceAmount;
+    let providerPlanId = plan.providerPlanId;
+    let currencyCode = plan.currency;
+
+    if (input.currencyCode && input.currencyCode !== plan.currency) {
+      const price = plan.prices.find((p) => p.currency.code === input.currencyCode);
+      if (!price) {
+        throw new BadRequestException(
+          `Plan "${plan.slug}" has no price configured for ${input.currencyCode}.`,
+        );
+      }
+      amountKobo = price.amount;
+      providerPlanId = price.providerPlanId;
+      currencyCode = input.currencyCode;
+    }
+
+    if (!providerPlanId) {
       // Deliberately not silently falling back to a one-off, non-recurring
       // charge — see §4/§12 of the plan: only plans with a real Paystack
       // plan_code configured are purchasable through automated checkout.
       throw new BadRequestException(
-        `Plan "${plan.slug}" is not configured for automated checkout yet (no Paystack plan code set).`,
+        `Plan "${plan.slug}" is not configured for automated checkout in ${currencyCode} yet (no Paystack plan code set).`,
       );
     }
 
@@ -83,18 +107,25 @@ export class PaystackBillingProvider implements BillingProvider {
 
     const result = await this.api.initializeTransaction({
       email: input.email,
-      amountKobo: plan.priceAmount,
+      amountKobo,
       reference,
-      planCode: plan.providerPlanId,
+      planCode: providerPlanId,
       callbackUrl,
-      metadata: { workspaceId: input.workspaceId, planSlug: plan.slug },
+      metadata: { workspaceId: input.workspaceId, planSlug: plan.slug, currency: currencyCode },
     });
 
     this.logger.debug(
-      `Checkout initialized for workspace ${input.workspaceId}, plan ${plan.slug}, reference ${reference}`,
+      `Checkout initialized for workspace ${input.workspaceId}, plan ${plan.slug}, currency ${currencyCode}, reference ${reference}`,
     );
 
     return { devFlow: false, checkoutUrl: result.authorizationUrl };
+  }
+
+  /** Sprint 16 §11 — an explicit, operator-configured allowlist (see
+   * paystack.config.ts) — never a fabricated "yes" for a currency this
+   * merchant account can't actually process. */
+  getSupportedCurrencies(): string[] {
+    return this.config.get<string[]>('paystack.supportedCurrencies') ?? ['NGN', 'USD'];
   }
 
   async cancelSubscription(providerSubscriptionId: string): Promise<void> {

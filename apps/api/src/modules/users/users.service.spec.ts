@@ -8,6 +8,7 @@ import {
   type MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
 import type { AuditService } from '../audit/audit.service';
+import type { CurrencyService } from '../currency/currency.service';
 
 import { UsersService } from './users.service';
 
@@ -35,16 +36,19 @@ describe('UsersService', () => {
   let prisma: MockPrismaService;
   let audit: { record: jest.Mock };
   let config: { get: jest.Mock };
+  let currencies: { getByCodeOrThrow: jest.Mock };
   let service: UsersService;
 
   beforeEach(() => {
     prisma = createMockPrismaService();
     audit = { record: jest.fn().mockResolvedValue(undefined) };
     config = { get: jest.fn(() => 4) }; // low bcrypt rounds for fast tests
+    currencies = { getByCodeOrThrow: jest.fn() };
     service = new UsersService(
       prisma as unknown as never,
       config as unknown as ConfigService,
       audit as unknown as AuditService,
+      currencies as unknown as CurrencyService,
     );
   });
 

@@ -270,6 +270,16 @@ model User {
   platformRole         PlatformRole?         @relation(fields: [platformRoleId], references: [id])
   roleAssignmentSource RoleAssignmentSource?
 
+  /// Sprint 16 — an authenticated user's manually-selected display/
+  /// checkout currency. Null means "no explicit preference yet" — the
+  /// frontend/CurrencyResolutionService then falls through to IP
+  /// detection, then the platform fallback (see
+  /// docs/architecture/currency.md). Deliberately never auto-overwritten
+  /// by IP/GeoIP detection once set — only an explicit user action
+  /// changes it.
+  preferredCurrencyId String?   @db.Uuid
+  preferredCurrency   Currency? @relation(fields: [preferredCurrencyId], references: [id])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -807,7 +817,10 @@ model Plan {
   /// docs/architecture/paystack-integration.md). One new column here
   /// rather than a join table: a plan has at most one active provider
   /// plan code at a time, the same 1:1 shape Subscription's provider*
-  /// columns already use.
+  /// columns already use. Sprint 16 — this remains the plan's base/
+  /// default price in `currency`; additional currency-specific prices
+  /// live in PlanPrice and never overwrite this row, so every plan
+  /// seeded before Sprint 16 keeps working unmodified.
   providerPlanId String?
 
   /// Sprint 15 — the platform role a workspace's OWNER should hold while
@@ -825,6 +838,11 @@ model Plan {
 
   limits        PlanLimit[]
   subscriptions Subscription[]
+  /// Sprint 16 — additional fixed or converted per-currency prices. The
+  /// base `currency`/`priceAmount` above are never removed or
+  /// duplicated into this list; a currency with no PlanPrice row simply
+  /// isn't purchasable in that currency (see CurrencyService).
+  prices        PlanPrice[]
 
   @@index([isActive])
   @@map("plans")
@@ -893,6 +911,22 @@ model Subscription {
   providerSubscriptionId String?
   providerPriceId        String?
 
+  /// Sprint 16 — the currency/amount this subscription actually
+  /// applies (or was actually charged) in, set once at
+  /// subscribe/changePlan/charge-confirmation time and never re-derived
+  /// live from `plan` afterwards. Before this sprint every Plan had
+  /// exactly one currency, so "the subscription's currency" was always
+  /// trivially `plan.currency`; once a Plan can carry multiple
+  /// PlanPrice rows that's no longer true, and re-deriving live would
+  /// mean an admin editing a plan's price catalog could silently change
+  /// what an existing paying subscription is shown as owing — exactly
+  /// what Sprint 16 §12/§13 forbids. Backfilled for every pre-existing
+  /// row from its plan's currency/priceAmount in this sprint's
+  /// migration; see PlansService/SubscriptionsService for every write
+  /// site going forward.
+  currency String @default("USD")
+  amount   Int    @default(0)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -960,6 +994,15 @@ model Invoice {
   /// gateway_response), surfaced on the dashboard and to support. Null
   /// for anything that never failed.
   failureReason String?
+
+  /// Sprint 16 — set only when `amount`/`currency` above were produced
+  /// via ExchangeRateService conversion rather than a fixed
+  /// currency-specific price an admin configured directly. Historical
+  /// record only — never recomputed after the fact, so a later change
+  /// to the live exchange rate never alters a past invoice (see
+  /// Sprint 16 §13's immutability requirement).
+  exchangeRate     Decimal?  @db.Decimal(18, 8)
+  exchangeRateAsOf DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1375,4 +1418,133 @@ model RolePermission {
 
   @@unique([platformRoleId, permission])
   @@map("role_permissions")
+}
+
+// ---------------------------------------------------------------------------
+// Currency, Localization & Multi-Currency Payments (Sprint 16)
+// ---------------------------------------------------------------------------
+
+/// The database-backed currency catalogue — the single source of truth
+/// referenced everywhere else in this sprint (PlanPrice, User
+/// preference, CurrencySettings, country mappings). Deliberately no
+/// hardcoded currency list anywhere else in the app: adding a currency
+/// here (CurrencyService.create, SUPER_ADMIN only) makes it available
+/// platform-wide with no code change, exactly as the spec requires.
+/// `isDefault`/`isFallback` are intentionally NOT stored here — see
+/// CurrencySettings, the single place those pointers live, so there is
+/// only ever one source of truth for "the" default/fallback currency
+/// rather than a boolean that could drift out of sync across rows.
+model Currency {
+  id            String  @id @default(uuid()) @db.Uuid
+  /// ISO 4217 alpha code, e.g. "NGN". Immutable in practice (nothing
+  /// else keys off a currency's id well enough to survive a code
+  /// change) — CurrencyService.update never accepts a new code.
+  code          String  @unique
+  name          String
+  symbol        String
+  /// ISO 4217 numeric code, e.g. "566" for NGN. Optional — informational
+  /// only, nothing in this sprint requires it.
+  numericCode   String?
+  /// How many minor units make one major unit (2 for USD/NGN/EUR, 0 for
+  /// a hypothetical zero-decimal currency). Drives both
+  /// formatCurrency() on the frontend and amount validation on the
+  /// backend — never hardcoded per-currency-code anywhere else.
+  decimalPlaces Int     @default(2)
+  /// Free-text grouping for the admin catalogue's region filter (Sprint
+  /// 16 §4), e.g. "West Africa", "Europe" — display/filter metadata
+  /// only, never used in any authorization or payment decision.
+  region        String?
+  isActive      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  countryMappings     CurrencyCountryMapping[]
+  planPrices          PlanPrice[]
+  usersPreferring     User[]
+  defaultForSettings  CurrencySettings[]       @relation("DefaultCurrency")
+  fallbackForSettings CurrencySettings[]       @relation("FallbackCurrency")
+
+  @@index([isActive])
+  @@map("currencies")
+}
+
+/// ISO 3166-1 alpha-2 country -> Currency. One row per country
+/// (`countryCode` unique) rather than per currency, so multiple
+/// countries sharing a currency (e.g. every XOF country) point at the
+/// same single Currency row instead of duplicating it — see Sprint 16
+/// §3's explicit "do not create unnecessary duplicate currency records"
+/// instruction.
+model CurrencyCountryMapping {
+  id          String   @id @default(uuid()) @db.Uuid
+  countryCode String   @unique
+  countryName String
+  currencyId  String   @db.Uuid
+  currency    Currency @relation(fields: [currencyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([currencyId])
+  @@map("currency_country_mappings")
+}
+
+/// Enforced singleton (fixed id, same pattern as SiteBranding — see
+/// that model's own docs) holding the platform-wide currency
+/// configuration: the default currency shown to a visitor with no
+/// other signal, the fallback used whenever detection fails/is
+/// unsupported, and whether IP-based auto-detection runs at all. Both
+/// currency pointers are required (never null) so the platform can
+/// never end up without a valid fallback — see Sprint 16 §5.
+model CurrencySettings {
+  id                 String   @id @default(uuid()) @db.Uuid
+  defaultCurrencyId  String   @db.Uuid
+  defaultCurrency    Currency @relation("DefaultCurrency", fields: [defaultCurrencyId], references: [id])
+  fallbackCurrencyId String   @db.Uuid
+  fallbackCurrency   Currency @relation("FallbackCurrency", fields: [fallbackCurrencyId], references: [id])
+  autoDetectEnabled  Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("currency_settings")
+}
+
+/// A plan's price in a currency other than (or including, if an admin
+/// chooses) its base `Plan.currency`. Never required: a plan with no
+/// PlanPrice rows is still fully purchasable in its own base currency
+/// exactly as before this sprint. `providerPlanId` is per-(plan,
+/// currency) rather than reusing Plan.providerPlanId because a Paystack
+/// Plan object is single-currency — see
+/// docs/architecture/paystack-integration.md and
+/// docs/architecture/currency.md.
+model PlanPrice {
+  id         String   @id @default(uuid()) @db.Uuid
+  planId     String   @db.Uuid
+  plan       Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  currencyId String   @db.Uuid
+  currency   Currency @relation(fields: [currencyId], references: [id])
+
+  /// Smallest currency unit — same convention as Plan.priceAmount.
+  amount Int
+
+  /// True when `amount` was produced by ExchangeRateService.convert()
+  /// rather than typed in directly by an admin — informational only,
+  /// never changes how the price is used at checkout.
+  isConverted      Boolean   @default(false)
+  exchangeRate     Decimal?  @db.Decimal(18, 8)
+  exchangeRateAsOf DateTime?
+
+  /// The Paystack (or future provider) plan_code for this specific
+  /// (plan, currency) pair. Null = not yet synced / not purchasable in
+  /// this currency through automated checkout, mirroring
+  /// Plan.providerPlanId's own null convention.
+  providerPlanId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([planId, currencyId])
+  @@index([currencyId])
+  @@map("plan_prices")
 }

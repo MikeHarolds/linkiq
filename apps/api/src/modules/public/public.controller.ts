@@ -1,9 +1,12 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { Public } from '../../common/decorators/public.decorator';
+import { Ctx, type RequestContext } from '../../common/decorators/request-context.decorator';
 import { PlansService, type PlanWithLimits } from '../billing/plans.service';
 import { BrandingService } from '../branding/branding.service';
+import { CurrencyResolutionService } from '../currency/currency-resolution.service';
+import { CurrencyService } from '../currency/currency.service';
 import { LandingPageService, type PublicLandingPageContent } from '../landing-page/landing-page.service';
 
 export interface PublicSiteConfig {
@@ -24,6 +27,9 @@ export interface PublicPlan {
   trialDays: number | null;
   displayOrder: number;
   limits: Array<{ key: string; value: number | null }>;
+  /** Sprint 16 — additional currency-specific prices, for the pricing
+   * page's currency selector (see CurrencyResolutionService). */
+  prices: Array<{ currencyCode: string; amount: number }>;
 }
 
 function toPublicPlan(plan: PlanWithLimits): PublicPlan {
@@ -43,6 +49,7 @@ function toPublicPlan(plan: PlanWithLimits): PublicPlan {
     trialDays: plan.trialDays,
     displayOrder: plan.displayOrder,
     limits: plan.limits.map((l) => ({ key: l.key, value: l.value })),
+    prices: plan.prices.map((p) => ({ currencyCode: p.currency.code, amount: p.amount })),
   };
 }
 
@@ -66,6 +73,8 @@ export class PublicController {
     private readonly landingPage: LandingPageService,
     private readonly branding: BrandingService,
     private readonly plans: PlansService,
+    private readonly currencies: CurrencyService,
+    private readonly currencyResolution: CurrencyResolutionService,
   ) {}
 
   @Public()
@@ -92,6 +101,40 @@ export class PublicController {
       siteName: branding.siteName,
       logoUrl: branding.logoUrl,
       faviconUrl: branding.faviconUrl,
+    };
+  }
+
+  @Public()
+  @Get('currencies')
+  @ApiOperation({ summary: 'Active currency catalogue, for the currency selector' })
+  async getCurrencies() {
+    return this.currencies.listActive();
+  }
+
+  /**
+   * Sprint 16 — read-only currency resolution for an anonymous or
+   * authenticated visitor. Never persists anything itself (an explicit
+   * user selection is saved via a separate PATCH on UsersController) —
+   * see CurrencyResolutionService's own docs for the full precedence
+   * chain. `explicit` lets the frontend re-resolve after a user picks a
+   * currency from the selector without a page reload; `userId` is
+   * intentionally NOT accepted as a query param (an anonymous caller
+   * has no user to look up, and an authenticated one is identified via
+   * their own session on the non-public /users/me endpoints instead —
+   * this route never trusts a caller-supplied user id).
+   */
+  @Public()
+  @Get('currencies/detect')
+  @ApiOperation({ summary: "Resolve the caller's currency from an explicit choice, then IP, then the platform fallback" })
+  async detectCurrency(@Ctx() ctx: RequestContext, @Query('currency') explicit?: string) {
+    const resolved = await this.currencyResolution.resolve({
+      explicitCurrencyCode: explicit,
+      ipAddress: ctx.ipAddress,
+    });
+    return {
+      currency: resolved.currency,
+      source: resolved.source,
+      detectedCountry: resolved.detectedCountry,
     };
   }
 }

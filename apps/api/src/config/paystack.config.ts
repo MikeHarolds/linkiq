@@ -27,4 +27,20 @@ export default registerAs('paystack', () => ({
   /** Paystack's own base API origin — not expected to ever change, but
    * kept configurable rather than hardcoded inline in the HTTP client. */
   apiBaseUrl: process.env.PAYSTACK_API_BASE_URL ?? 'https://api.paystack.co',
+
+  /**
+   * Sprint 16 — which ISO 4217 currencies the configured Paystack
+   * merchant account can actually process (a single account bills in
+   * one base currency, with USD addable alongside it for NG/KE
+   * accounts — see docs/architecture/paystack-integration.md §2). No
+   * confirmed "list supported currencies" API endpoint exists, so this
+   * is an explicit, operator-configured allowlist rather than a guess —
+   * see PaystackBillingProvider.getSupportedCurrencies. Defaults to the
+   * realistic NG-account setup this project's research already
+   * documented.
+   */
+  supportedCurrencies: (process.env.PAYSTACK_SUPPORTED_CURRENCIES ?? 'NGN,USD')
+    .split(',')
+    .map((code) => code.trim().toUpperCase())
+    .filter(Boolean),
 }));

@@ -22,13 +22,23 @@ function makePlan(overrides: Partial<Record<string, unknown>> = {}) {
     billingInterval: 'MONTHLY',
     providerPlanId: null,
     limits: [],
+    prices: [],
     ...overrides,
   };
 }
 
 describe('AdminPlansController', () => {
-  let plans: { create: jest.Mock; updateForAdmin: jest.Mock; listAllForAdmin: jest.Mock; getByIdOrThrow: jest.Mock };
+  let plans: {
+    create: jest.Mock;
+    updateForAdmin: jest.Mock;
+    listAllForAdmin: jest.Mock;
+    getByIdOrThrow: jest.Mock;
+    setPrice: jest.Mock;
+    removePrice: jest.Mock;
+  };
   let billingProvider: { createProviderPlan?: jest.Mock };
+  let exchangeRates: { convert: jest.Mock };
+  let currencies: { getByIdOrThrow: jest.Mock };
   let controller: AdminPlansController;
 
   beforeEach(() => {
@@ -37,11 +47,17 @@ describe('AdminPlansController', () => {
       updateForAdmin: jest.fn(),
       listAllForAdmin: jest.fn(),
       getByIdOrThrow: jest.fn(),
+      setPrice: jest.fn(),
+      removePrice: jest.fn(),
     };
     billingProvider = { createProviderPlan: jest.fn() };
+    exchangeRates = { convert: jest.fn() };
+    currencies = { getByIdOrThrow: jest.fn() };
     controller = new AdminPlansController(
       plans as unknown as PlansService,
       billingProvider as unknown as BillingProvider,
+      exchangeRates as never,
+      currencies as never,
     );
   });
 

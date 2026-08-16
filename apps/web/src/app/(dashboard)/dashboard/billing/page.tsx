@@ -1,6 +1,6 @@
 'use client';
 
-import type { PlanDto } from '@linkiq/types';
+import type { CurrencyDto, PlanDto } from '@linkiq/types';
 import {
   Badge,
   Button,
@@ -16,6 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from '@linkiq/ui';
+import { formatCurrency } from '@linkiq/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as React from 'react';
 import { toast } from 'sonner';
@@ -24,6 +25,7 @@ import { USAGE_BAR_KEYS } from '@/components/billing/feature-labels';
 import { PlanCard } from '@/components/billing/plan-card';
 import { SubscriptionStatusBadge } from '@/components/billing/subscription-status-badge';
 import { UsageRow } from '@/components/billing/usage-row';
+import { CurrencySelect } from '@/components/currency/currency-select';
 import { DashboardPageHeader } from '@/components/dashboard/dashboard-page-header';
 import {
   cancelSubscription,
@@ -36,6 +38,14 @@ import {
   subscribe,
 } from '@/lib/billing-api';
 import { ApiError, useAuth } from '@/providers/auth-provider';
+import { useCurrency } from '@/providers/currency-provider';
+
+function formatAmount(amount: number, code: string, currencies: CurrencyDto[]): string {
+  const meta = currencies.find((c) => c.code === code);
+  return meta
+    ? formatCurrency(amount, meta)
+    : (amount / 100).toLocaleString('en-US', { style: 'currency', currency: code });
+}
 
 function invoiceStatusVariant(
   status: string,
@@ -76,8 +86,10 @@ export default function BillingDashboardPage() {
   // view but not mutate. See docs/architecture/billing.md §RBAC.
   const canManage = currentRole === 'OWNER' || currentRole === 'ADMIN';
 
+  const { currency, currencies, setCurrency } = useCurrency();
   const [busyPlanSlug, setBusyPlanSlug] = React.useState<string | null>(null);
   const [cancelBusy, setCancelBusy] = React.useState(false);
+  const checkoutCurrencyCode = currency?.code ?? 'USD';
 
   const summaryQuery = useQuery({
     queryKey: ['billing', currentWorkspaceId],
@@ -117,8 +129,8 @@ export default function BillingDashboardPage() {
     try {
       const hasSubscription = Boolean(summaryQuery.data?.subscription);
       const result = hasSubscription
-        ? await changePlan(currentWorkspaceId, plan.slug)
-        : await subscribe(currentWorkspaceId, plan.slug);
+        ? await changePlan(currentWorkspaceId, plan.slug, checkoutCurrencyCode)
+        : await subscribe(currentWorkspaceId, plan.slug, checkoutCurrencyCode);
       if (result.checkoutUrl) {
         // A real payment provider is configured — nothing is applied yet,
         // the browser must complete checkout there. The inbound webhook
@@ -242,12 +254,16 @@ export default function BillingDashboardPage() {
             )}
           </CardTitle>
           <CardDescription>
-            {summary.plan.priceAmount === 0
-              ? 'Free'
-              : `${(summary.plan.priceAmount / 100).toLocaleString('en-US', {
-                  style: 'currency',
-                  currency: summary.plan.currency,
-                })} / ${summary.plan.billingInterval === 'ANNUAL' ? 'year' : 'month'}`}
+            {/* Sprint 16 — the SUBSCRIPTION's own recorded currency/amount
+                (immutable once set — see Sprint 16 §12), never re-derived
+                from the plan's current price catalog or the visitor's
+                currency preference. */}
+            {(() => {
+              const amount = subscription ? subscription.amount : summary.plan.priceAmount;
+              const code = subscription ? subscription.currency : summary.plan.currency;
+              if (amount === 0) return 'Free';
+              return `${formatAmount(amount, code, currencies)} / ${summary.plan.billingInterval === 'ANNUAL' ? 'year' : 'month'}`;
+            })()}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
@@ -329,7 +345,18 @@ export default function BillingDashboardPage() {
       </Card>
 
       <div>
-        <h2 className="mb-3 text-lg font-semibold tracking-tight">Plans</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold tracking-tight">Plans</h2>
+          {currencies.length > 1 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Currency</span>
+              <CurrencySelect
+                value={checkoutCurrencyCode}
+                onChange={(code) => void setCurrency(code)}
+              />
+            </div>
+          )}
+        </div>
         {plansQuery.isLoading ? (
           <p className="text-sm text-muted-foreground">Loading plans…</p>
         ) : (
@@ -342,6 +369,8 @@ export default function BillingDashboardPage() {
                 canManage={canManage}
                 busy={busyPlanSlug === plan.slug}
                 onSelect={() => handleSelectPlan(plan)}
+                displayCurrencyCode={checkoutCurrencyCode}
+                currencies={currencies}
               />
             ))}
           </div>
@@ -381,10 +410,7 @@ export default function BillingDashboardPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="font-semibold tabular-nums">
-                      {(invoice.amount / 100).toLocaleString('en-US', {
-                        style: 'currency',
-                        currency: invoice.currency,
-                      })}
+                      {formatAmount(invoice.amount, invoice.currency, currencies)}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {formatDate(invoice.issueDate)}

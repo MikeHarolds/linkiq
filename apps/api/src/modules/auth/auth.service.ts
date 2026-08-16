@@ -78,6 +78,12 @@ export class AuthService {
       globalRole: user.globalRole,
       platformRoleId: user.platformRoleId,
       platformPermissions: [],
+      // Sprint 16 — same "identity at login time, not a fresh
+      // authorization/preference decision" treatment as
+      // platformPermissions above; this plain User row has no joined
+      // currency code, and JwtStrategy.validate() re-resolves it for
+      // real on the very next request anyway.
+      preferredCurrencyCode: null,
     };
   }
 

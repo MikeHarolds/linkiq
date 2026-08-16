@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -27,6 +28,7 @@ import { PlatformPermissionsGuard } from '../roles/guards/platform-permissions.g
 import { RoleResolutionService } from '../roles/role-resolution.service';
 
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { SetCurrencyPreferenceDto } from './dto/set-currency-preference.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UsersService } from './users.service';
 
@@ -81,6 +83,36 @@ export class UsersController {
       lastName: updated.lastName,
       avatarUrl: updated.avatarUrl,
     };
+  }
+
+  @Get('me/currency-preference')
+  @ApiOperation({ summary: "The authenticated user's persisted currency preference, if any" })
+  async getCurrencyPreference(@CurrentUser() user: AuthenticatedUser) {
+    return { currencyCode: user.preferredCurrencyCode ?? null };
+  }
+
+  @Patch('me/currency-preference')
+  @ApiOperation({
+    summary: "Set the authenticated user's preferred currency — overrides IP-based detection",
+  })
+  async setCurrencyPreference(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SetCurrencyPreferenceDto,
+    @Ctx() ctx: RequestContext,
+  ) {
+    return this.usersService.setCurrencyPreference(user.id, dto.currency, ctx);
+  }
+
+  @Delete('me/currency-preference')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Clear the currency preference — falls back to IP detection / the platform default again',
+  })
+  async clearCurrencyPreference(
+    @CurrentUser() user: AuthenticatedUser,
+    @Ctx() ctx: RequestContext,
+  ): Promise<void> {
+    await this.usersService.clearCurrencyPreference(user.id, ctx);
   }
 
   @Post('me/change-password')

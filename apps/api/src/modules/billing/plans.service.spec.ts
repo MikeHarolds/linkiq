@@ -7,6 +7,7 @@ import {
 } from '../../../test/mocks/prisma.mock';
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
 import type { AuditService } from '../audit/audit.service';
+import type { CurrencyService } from '../currency/currency.service';
 import type { PrismaService } from '../prisma/prisma.service';
 
 import { PlansService } from './plans.service';
@@ -29,6 +30,7 @@ function makePlan(overrides: Partial<Record<string, unknown>> = {}) {
     createdAt: new Date(),
     updatedAt: new Date(),
     limits: [],
+    prices: [],
     ...overrides,
   };
 }
@@ -36,14 +38,17 @@ function makePlan(overrides: Partial<Record<string, unknown>> = {}) {
 describe('PlansService', () => {
   let prisma: MockPrismaService;
   let audit: { record: jest.Mock };
+  let currencies: { getByIdOrThrow: jest.Mock };
   let service: PlansService;
 
   beforeEach(() => {
     prisma = createMockPrismaService();
     audit = { record: jest.fn().mockResolvedValue(undefined) };
+    currencies = { getByIdOrThrow: jest.fn() };
     service = new PlansService(
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
+      currencies as unknown as CurrencyService,
     );
   });
 
@@ -230,6 +235,102 @@ describe('PlansService', () => {
         expect.objectContaining({
           data: expect.objectContaining({ currency: 'USD', billingInterval: 'MONTHLY', displayOrder: 0, isActive: true }),
         }),
+      );
+    });
+  });
+
+  describe('setPrice', () => {
+    it('rejects setting a price in an inactive currency', async () => {
+      prisma.plan.findUnique.mockResolvedValue(makePlan({ id: 'plan-1' }));
+      currencies.getByIdOrThrow.mockResolvedValue({ id: 'cur-eur', code: 'EUR', isActive: false });
+
+      await expect(
+        service.setPrice(
+          'plan-1',
+          { currencyId: 'cur-eur', amount: 4500 },
+          'admin-1',
+          ctx,
+        ),
+      ).rejects.toThrow('Cannot set a plan price in an inactive currency');
+      expect(prisma.planPrice.upsert).not.toHaveBeenCalled();
+    });
+
+    it('upserts the price, invalidates the cache, and audits creation vs. update distinctly', async () => {
+      prisma.plan.findUnique
+        .mockResolvedValueOnce(makePlan({ id: 'plan-1', slug: 'professional', prices: [] })) // getByIdOrThrow before upsert
+        .mockResolvedValueOnce(
+          makePlan({
+            id: 'plan-1',
+            slug: 'professional',
+            prices: [{ currencyId: 'cur-ngn', amount: 7_500_000, currency: { code: 'NGN' } }],
+          }),
+        ); // getByIdOrThrow after upsert
+      currencies.getByIdOrThrow.mockResolvedValue({ id: 'cur-ngn', code: 'NGN', isActive: true });
+      prisma.planPrice.upsert.mockResolvedValue(undefined);
+
+      const result = await service.setPrice(
+        'plan-1',
+        { currencyId: 'cur-ngn', amount: 7_500_000 },
+        'admin-1',
+        ctx,
+      );
+
+      expect(result.prices).toHaveLength(1);
+      expect(prisma.planPrice.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { planId_currencyId: { planId: 'plan-1', currencyId: 'cur-ngn' } },
+        }),
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'admin.plan_price_created' }),
+      );
+    });
+
+    it('audits as an update (not a create) when a price already exists for that currency', async () => {
+      const existingPrice = { currencyId: 'cur-ngn', amount: 7_000_000, currency: { code: 'NGN' } };
+      prisma.plan.findUnique
+        .mockResolvedValueOnce(makePlan({ id: 'plan-1', slug: 'professional', prices: [existingPrice] }))
+        .mockResolvedValueOnce(
+          makePlan({
+            id: 'plan-1',
+            slug: 'professional',
+            prices: [{ ...existingPrice, amount: 7_500_000 }],
+          }),
+        );
+      currencies.getByIdOrThrow.mockResolvedValue({ id: 'cur-ngn', code: 'NGN', isActive: true });
+      prisma.planPrice.upsert.mockResolvedValue(undefined);
+
+      await service.setPrice('plan-1', { currencyId: 'cur-ngn', amount: 7_500_000 }, 'admin-1', ctx);
+
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'admin.plan_price_updated' }),
+      );
+    });
+  });
+
+  describe('removePrice', () => {
+    it('throws NotFoundException when the plan has no price in that currency', async () => {
+      prisma.plan.findUnique.mockResolvedValue(makePlan({ id: 'plan-1', prices: [] }));
+
+      await expect(service.removePrice('plan-1', 'cur-ngn', 'admin-1', ctx)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(prisma.planPrice.delete).not.toHaveBeenCalled();
+    });
+
+    it('removes the price, invalidates the cache, and audits it', async () => {
+      const price = { id: 'price-1', currencyId: 'cur-ngn', currency: { code: 'NGN' } };
+      prisma.plan.findUnique
+        .mockResolvedValueOnce(makePlan({ id: 'plan-1', slug: 'professional', prices: [price] }))
+        .mockResolvedValueOnce(makePlan({ id: 'plan-1', slug: 'professional', prices: [] }));
+      prisma.planPrice.delete.mockResolvedValue(undefined);
+
+      const result = await service.removePrice('plan-1', 'cur-ngn', 'admin-1', ctx);
+
+      expect(result.prices).toHaveLength(0);
+      expect(prisma.planPrice.delete).toHaveBeenCalledWith({ where: { id: 'price-1' } });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'admin.plan_price_removed' }),
       );
     });
   });

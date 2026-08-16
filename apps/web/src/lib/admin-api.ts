@@ -1,5 +1,6 @@
 import type {
   AdminAuditLogDto,
+  AdminCurrencyDto,
   AdminDomainListItemDto,
   AdminLandingPageContentDto,
   AdminSubscriptionListItemDto,
@@ -10,8 +11,13 @@ import type {
   AdminWorkspaceListItemDto,
   ApiUsageOverviewDto,
   AssignRolePayload,
+  CreateCountryMappingPayload,
+  CreateCurrencyPayload,
   CreatePlanPayload,
   CreateRolePayload,
+  CurrencyCountryMappingDto,
+  CurrencyDto,
+  CurrencySettingsDto,
   DomainStatus,
   GlobalRole,
   InvoiceStatus,
@@ -28,12 +34,16 @@ import type {
   PlatformOverviewDto,
   PlatformRoleDto,
   PlatformSettingsDto,
+  SetPlanPricePayload,
   SiteBrandingDto,
   SubscriptionMutationResultDto,
   SubscriptionStatus,
   SubscriptionDto,
   SystemHealthDto,
   TimeRangeValue,
+  UpdateCountryMappingPayload,
+  UpdateCurrencyPayload,
+  UpdateCurrencySettingsPayload,
   UpdateLandingPageSectionPayload,
   UpdatePlanPayload,
   UpdateRolePayload,
@@ -189,6 +199,20 @@ export function updatePlan(
   return api.patch(`${BASE}/plans/${planId}`, payload);
 }
 
+// --- Plan currency pricing (Sprint 16) ---
+export function setPlanPrice(
+  planId: string,
+  payload: SetPlanPricePayload,
+): Promise<PlanDto> {
+  return api.post(`${BASE}/plans/${planId}/prices`, payload);
+}
+export function removePlanPrice(
+  planId: string,
+  currencyId: string,
+): Promise<PlanDto> {
+  return api.delete(`${BASE}/plans/${planId}/prices/${currencyId}`);
+}
+
 // --- Roles (Sprint 15) ---
 export function listRoles(): Promise<PlatformRoleDto[]> {
   return api.get(`${BASE}/roles`);
@@ -209,6 +233,60 @@ export function updateRole(
 }
 export function deleteRole(roleId: string): Promise<{ success: boolean }> {
   return api.delete(`${BASE}/roles/${roleId}`);
+}
+
+// --- Currencies (Sprint 16) ---
+export function listCurrencies(params?: {
+  search?: string;
+  isActive?: boolean;
+  region?: string;
+}): Promise<AdminCurrencyDto[]> {
+  const query = new URLSearchParams();
+  if (params?.search) query.set('search', params.search);
+  if (params?.isActive !== undefined) query.set('isActive', String(params.isActive));
+  if (params?.region) query.set('region', params.region);
+  const qs = query.toString();
+  return api.get(`${BASE}/currencies${qs ? `?${qs}` : ''}`);
+}
+export function getCurrency(currencyId: string): Promise<CurrencyDto> {
+  return api.get(`${BASE}/currencies/${currencyId}`);
+}
+export function createCurrency(payload: CreateCurrencyPayload): Promise<CurrencyDto> {
+  return api.post(`${BASE}/currencies`, payload);
+}
+export function updateCurrency(
+  currencyId: string,
+  payload: UpdateCurrencyPayload,
+): Promise<CurrencyDto> {
+  return api.patch(`${BASE}/currencies/${currencyId}`, payload);
+}
+export function deleteCurrency(currencyId: string): Promise<{ success: boolean }> {
+  return api.delete(`${BASE}/currencies/${currencyId}`);
+}
+export function getCurrencySettings(): Promise<CurrencySettingsDto> {
+  return api.get(`${BASE}/currencies/settings`);
+}
+export function updateCurrencySettings(
+  payload: UpdateCurrencySettingsPayload,
+): Promise<CurrencySettingsDto> {
+  return api.patch(`${BASE}/currencies/settings`, payload);
+}
+export function listCountryMappings(): Promise<CurrencyCountryMappingDto[]> {
+  return api.get(`${BASE}/currencies/country-mappings`);
+}
+export function createCountryMapping(
+  payload: CreateCountryMappingPayload,
+): Promise<CurrencyCountryMappingDto> {
+  return api.post(`${BASE}/currencies/country-mappings`, payload);
+}
+export function updateCountryMapping(
+  mappingId: string,
+  payload: UpdateCountryMappingPayload,
+): Promise<CurrencyCountryMappingDto> {
+  return api.patch(`${BASE}/currencies/country-mappings/${mappingId}`, payload);
+}
+export function deleteCountryMapping(mappingId: string): Promise<{ success: boolean }> {
+  return api.delete(`${BASE}/currencies/country-mappings/${mappingId}`);
 }
 
 // --- Payments & Invoices (same underlying data) ---
