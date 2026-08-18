@@ -81,7 +81,9 @@ export class PaystackBillingProvider implements BillingProvider {
     let currencyCode = plan.currency;
 
     if (input.currencyCode && input.currencyCode !== plan.currency) {
-      const price = plan.prices.find((p) => p.currency.code === input.currencyCode);
+      const price = plan.prices.find(
+        (p) => p.currency.code === input.currencyCode,
+      );
       if (!price) {
         throw new BadRequestException(
           `Plan "${plan.slug}" has no price configured for ${input.currencyCode}.`,
@@ -111,7 +113,11 @@ export class PaystackBillingProvider implements BillingProvider {
       reference,
       planCode: providerPlanId,
       callbackUrl,
-      metadata: { workspaceId: input.workspaceId, planSlug: plan.slug, currency: currencyCode },
+      metadata: {
+        workspaceId: input.workspaceId,
+        planSlug: plan.slug,
+        currency: currencyCode,
+      },
     });
 
     this.logger.debug(
@@ -125,7 +131,19 @@ export class PaystackBillingProvider implements BillingProvider {
    * paystack.config.ts) — never a fabricated "yes" for a currency this
    * merchant account can't actually process. */
   getSupportedCurrencies(): string[] {
-    return this.config.get<string[]>('paystack.supportedCurrencies') ?? ['NGN', 'USD'];
+    return (
+      this.config.get<string[]>('paystack.supportedCurrencies') ?? [
+        'NGN',
+        'USD',
+      ]
+    );
+  }
+
+  /** Sprint 17 §6 — surfaced to the checkout confirmation UI so it can
+   * show "Paystack" as the (currently only) real gateway rather than a
+   * hardcoded frontend string. */
+  getProviderName(): string {
+    return 'paystack';
   }
 
   async cancelSubscription(providerSubscriptionId: string): Promise<void> {

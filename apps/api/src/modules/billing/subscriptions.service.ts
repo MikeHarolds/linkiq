@@ -124,14 +124,18 @@ export class SubscriptionsService {
     const code = requestedCode ?? plan.currency;
     const currency = await this.currencies.getByCodeOrThrow(code);
     if (!currency.isActive) {
-      throw new BadRequestException(`Currency "${code}" is not currently available`);
+      throw new BadRequestException(
+        `Currency "${code}" is not currently available`,
+      );
     }
     if (code === plan.currency) {
       return { code, amount: plan.priceAmount };
     }
     const price = plan.prices.find((p) => p.currency.code === code);
     if (!price) {
-      throw new BadRequestException(`Plan "${plan.slug}" has no price configured for ${code}`);
+      throw new BadRequestException(
+        `Plan "${plan.slug}" has no price configured for ${code}`,
+      );
     }
     return { code, amount: price.amount };
   }
@@ -151,6 +155,72 @@ export class SubscriptionsService {
   }
 
   /**
+   * Sprint 17 §5 — the single decision point for "does moving this
+   * workspace to `plan` at `resolvedAmount` require real payment right
+   * now," used identically by subscribe() and changePlan() so the two
+   * entry points can never disagree. An upgrade (resolvedAmount higher
+   * than what the workspace is currently paying — `currentAmount`, the
+   * Subscription's own immutable Sprint 16 `amount`, never the plan's
+   * live price) always requires payment UNLESS this is the workspace's
+   * first-ever trial on a plan that offers one (`trialUsed` — see that
+   * field's own schema docs for why `trialStart` alone can't answer
+   * this). A downgrade or lateral move (resolvedAmount <= currentAmount)
+   * never requires payment — see applyDowngradeIfNeeded for what happens
+   * to an existing real provider subscription in that case.
+   */
+  private determinePaymentRequirement(
+    existing: Pick<Subscription, 'amount' | 'trialUsed'> | null,
+    plan: PlanWithLimits,
+    resolvedAmount: number,
+  ): { isUpgrade: boolean; trialEligible: boolean; requiresPayment: boolean } {
+    const currentAmount = existing?.amount ?? 0;
+    const isUpgrade = resolvedAmount > currentAmount;
+    const trialEligible =
+      isUpgrade &&
+      resolvedAmount > 0 &&
+      plan.trialDays != null &&
+      plan.trialDays > 0 &&
+      !(existing?.trialUsed ?? false);
+    return {
+      isUpgrade,
+      trialEligible,
+      requiresPayment: isUpgrade && !trialEligible,
+    };
+  }
+
+  /** Sprint 17 §5 — a real downgrade (moving to a cheaper resolved
+   * amount) away from an already-confirmed Paystack subscription must
+   * stop the OLD recurring charge, since Paystack has no proration
+   * primitive to adjust it in place (see paystack-integration.md §13).
+   * Immediate, no-charge downgrade — a deliberate, documented
+   * simplification over a scheduled-at-renewal downgrade (which would
+   * need a new scheduling mechanism this sprint doesn't add); the
+   * workspace keeps the LOWER tier's access right away and is never
+   * billed the old, higher amount again. Returns the provider fields to
+   * clear, or an empty object when there's nothing to cancel. */
+  private async applyDowngradeIfNeeded(
+    existing: Pick<Subscription, 'providerSubscriptionId' | 'amount'> | null,
+    resolvedAmount: number,
+  ): Promise<
+    Partial<
+      Record<'provider' | 'providerSubscriptionId' | 'providerPriceId', null>
+    >
+  > {
+    if (
+      !existing?.providerSubscriptionId ||
+      resolvedAmount >= existing.amount
+    ) {
+      return {};
+    }
+    await this.provider.cancelSubscription(existing.providerSubscriptionId);
+    return {
+      provider: null,
+      providerSubscriptionId: null,
+      providerPriceId: null,
+    };
+  }
+
+  /**
    * Re-resolves platformRole (Sprint 15) for every OWNER of this
    * workspace after a subscription mutation — never the acting `userId`
    * directly, since subscribe/changePlan/cancel/reactivate are reachable
@@ -163,12 +233,17 @@ export class SubscriptionsService {
    * actually changed via getEffectiveStatus, and syncStoredRole() is a
    * no-op when the resolved role already matches what's stored.
    */
-  private async syncOwnerRoles(workspaceId: string, ctx: RequestContext): Promise<void> {
+  private async syncOwnerRoles(
+    workspaceId: string,
+    ctx: RequestContext,
+  ): Promise<void> {
     const owners = await this.prisma.workspaceMember.findMany({
       where: { workspaceId, role: 'OWNER' },
       select: { userId: true },
     });
-    await Promise.all(owners.map((o) => this.roleResolution.syncStoredRole(o.userId, ctx)));
+    await Promise.all(
+      owners.map((o) => this.roleResolution.syncStoredRole(o.userId, ctx)),
+    );
   }
 
   private async getUserEmail(userId: string): Promise<string> {
@@ -286,16 +361,16 @@ export class SubscriptionsService {
 
   /**
    * Establishes a subscribe intent within LinkIQ's own billing domain.
-   * With no real payment provider configured (BillingProvider.
-   * createCheckoutSession's devFlow:true), this applies directly rather
-   * than redirecting anywhere — idempotent-ish, calling it again just
-   * updates the one-per-workspace Subscription row, exactly as before
-   * Sprint 10. With a real provider AND a trial-less plan, this instead
-   * returns a checkoutUrl and leaves the Subscription row untouched — see
-   * SubscriptionMutationResult's docs and §7/§8 of
-   * docs/architecture/paystack-integration.md. Trials remain entirely
-   * LinkIQ-side (no provider call at all) regardless of which provider is
-   * configured, since Paystack has no trial primitive to hand off to.
+   * Sprint 17 §5 — whether this applies immediately or requires a real
+   * checkout is decided by determinePaymentRequirement() against the
+   * WORKSPACE's own current amount (0 for the seeded FREE default),
+   * never merely "does plan.trialDays exist": a workspace only ever
+   * gets ONE free trial, ever (see Subscription.trialUsed). With no
+   * real payment provider configured (BillingProvider.
+   * createCheckoutSession's devFlow:true), payment-required moves still
+   * apply directly rather than redirecting anywhere, exactly as before
+   * Sprint 10 — see SubscriptionMutationResult's docs and §7/§8 of
+   * docs/architecture/paystack-integration.md.
    */
   async subscribe(
     workspaceId: string,
@@ -309,10 +384,15 @@ export class SubscriptionsService {
       throw new BadRequestException('This plan is not currently available');
     }
 
-    const isTrialing = plan.trialDays != null && plan.trialDays > 0;
+    const existing = await this.getForWorkspace(workspaceId);
     const resolvedPrice = await this.resolvePlanPrice(plan, currencyCode);
+    const { trialEligible, requiresPayment } = this.determinePaymentRequirement(
+      existing,
+      plan,
+      resolvedPrice.amount,
+    );
 
-    if (!isTrialing) {
+    if (requiresPayment) {
       this.assertProviderSupportsCurrency(resolvedPrice.code);
       const email = await this.getUserEmail(userId);
       const session = await this.provider.createCheckoutSession({
@@ -322,8 +402,7 @@ export class SubscriptionsService {
         currencyCode: resolvedPrice.code,
       });
       if (!session.devFlow) {
-        const current = await this.getForWorkspace(workspaceId);
-        if (!current) {
+        if (!existing) {
           throw new NotFoundException(
             'No subscription found for this workspace',
           );
@@ -331,7 +410,7 @@ export class SubscriptionsService {
         await this.audit.record({
           action: 'billing.checkout_initiated',
           entity: 'Subscription',
-          entityId: current.id,
+          entityId: existing.id,
           userId,
           workspaceId,
           metadata: { planSlug: plan.slug },
@@ -339,7 +418,7 @@ export class SubscriptionsService {
           userAgent: ctx.userAgent,
         });
         return {
-          subscription: current,
+          subscription: existing,
           checkoutUrl: session.checkoutUrl ?? null,
         };
       }
@@ -347,20 +426,26 @@ export class SubscriptionsService {
 
     const now = new Date();
     const periodDays = plan.billingInterval === 'ANNUAL' ? 365 : 30;
+    const downgradeProviderFields = await this.applyDowngradeIfNeeded(
+      existing,
+      resolvedPrice.amount,
+    );
 
     const data = {
       planId: plan.id,
-      status: isTrialing
+      status: trialEligible
         ? SubscriptionStatus.TRIALING
         : SubscriptionStatus.ACTIVE,
       currentPeriodStart: now,
       currentPeriodEnd: addDays(now, periodDays),
-      trialStart: isTrialing ? now : null,
-      trialEnd: isTrialing ? addDays(now, plan.trialDays!) : null,
+      trialStart: trialEligible ? now : null,
+      trialEnd: trialEligible ? addDays(now, plan.trialDays!) : null,
+      trialUsed: (existing?.trialUsed ?? false) || trialEligible,
       cancelAt: null,
       canceledAt: null,
       currency: resolvedPrice.code,
       amount: resolvedPrice.amount,
+      ...downgradeProviderFields,
     };
 
     const subscription = await this.prisma.subscription.upsert({
@@ -376,11 +461,11 @@ export class SubscriptionsService {
       entityId: subscription.id,
       userId,
       workspaceId,
-      metadata: { planSlug: plan.slug, trialing: isTrialing },
+      metadata: { planSlug: plan.slug, trialing: trialEligible },
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
     });
-    if (isTrialing) {
+    if (trialEligible) {
       await this.audit.record({
         action: 'billing.trial_started',
         entity: 'Subscription',
@@ -401,7 +486,7 @@ export class SubscriptionsService {
         id: subscription.id,
         planSlug: plan.slug,
         status: subscription.status,
-        trialing: isTrialing,
+        trialing: trialEligible,
       },
     });
 
@@ -410,16 +495,26 @@ export class SubscriptionsService {
   }
 
   /**
-   * Upgrades/downgrades the current plan. When the existing subscription
-   * is backed by a real, already-confirmed provider subscription
-   * (providerSubscriptionId set), this routes through a fresh checkout
-   * instead of an in-place swap — no Paystack primitive for that exists
-   * (see PaystackBillingProvider.changeSubscription's docs and §13 of
+   * Upgrades/downgrades the current plan — Sprint 17 §5's central
+   * correction. Previously this only required checkout when the
+   * EXISTING subscription already had a confirmed
+   * `providerSubscriptionId`, which meant a workspace's very first
+   * paid conversion (moving off the seeded FREE default, which never
+   * has one) always applied instantly with no payment at all, and
+   * conversely a real downgrade FROM a paid plan re-charged the
+   * customer for the cheaper plan. determinePaymentRequirement() fixes
+   * both: the decision is now "is the new plan's resolved price higher
+   * than what this workspace is actually paying today"
+   * (`existing.amount`, Sprint 16's immutable snapshot — never the
+   * plan's live price), independent of whether a provider subscription
+   * happens to exist yet. An upgrade needs a fresh checkout — no
+   * Paystack primitive exists for an in-place swap (see
+   * PaystackBillingProvider.changeSubscription's docs and §13 of
    * docs/architecture/paystack-integration.md: no proration, applied
-   * immediately once the new checkout confirms via webhook, the old
-   * subscription is left alone until then). DevelopmentBillingProvider
-   * subscriptions never have a providerSubscriptionId, so this branch
-   * never triggers in dev mode — identical to pre-Sprint-10 behavior.
+   * once the new checkout confirms via webhook, the old subscription
+   * is left alone until then). A downgrade/lateral move never charges
+   * — see applyDowngradeIfNeeded for what happens to an existing real
+   * subscription being downgraded away from.
    */
   async changePlan(
     workspaceId: string,
@@ -437,8 +532,13 @@ export class SubscriptionsService {
       throw new BadRequestException('This plan is not currently available');
     }
     const resolvedPrice = await this.resolvePlanPrice(plan, currencyCode);
+    const { trialEligible, requiresPayment } = this.determinePaymentRequirement(
+      existing,
+      plan,
+      resolvedPrice.amount,
+    );
 
-    if (existing.providerSubscriptionId) {
+    if (requiresPayment) {
       this.assertProviderSupportsCurrency(resolvedPrice.code);
       const email = await this.getUserEmail(userId);
       const session = await this.provider.createCheckoutSession({
@@ -465,15 +565,27 @@ export class SubscriptionsService {
       }
     }
 
+    const now = new Date();
+    const downgradeProviderFields = await this.applyDowngradeIfNeeded(
+      existing,
+      resolvedPrice.amount,
+    );
+
     const subscription = await this.prisma.subscription.update({
       where: { workspaceId },
       data: {
         planId: plan.id,
-        status: SubscriptionStatus.ACTIVE,
+        status: trialEligible
+          ? SubscriptionStatus.TRIALING
+          : SubscriptionStatus.ACTIVE,
+        trialStart: trialEligible ? now : null,
+        trialEnd: trialEligible ? addDays(now, plan.trialDays!) : null,
+        trialUsed: existing.trialUsed || trialEligible,
         cancelAt: null,
         canceledAt: null,
         currency: resolvedPrice.code,
         amount: resolvedPrice.amount,
+        ...downgradeProviderFields,
       },
       include: SUBSCRIPTION_WITH_PLAN_INCLUDE,
     });
@@ -484,7 +596,12 @@ export class SubscriptionsService {
       entityId: subscription.id,
       userId,
       workspaceId,
-      metadata: { from: existing.plan.slug, to: plan.slug },
+      metadata: {
+        from: existing.plan.slug,
+        to: plan.slug,
+        trialing: trialEligible,
+        downgraded: Object.keys(downgradeProviderFields).length > 0,
+      },
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
     });

@@ -135,6 +135,12 @@ function EditPlanDialog({
   const [platformRoleId, setPlatformRoleId] = React.useState(
     plan.platformRole?.id ?? '',
   );
+  const [isFeaturedOnHomepage, setIsFeaturedOnHomepage] = React.useState(
+    plan.isFeaturedOnHomepage,
+  );
+  const [homepageOrder, setHomepageOrder] = React.useState(
+    plan.homepageOrder !== null ? String(plan.homepageOrder) : '',
+  );
   const [limits, setLimits] = React.useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
     for (const key of LIMIT_KEYS) {
@@ -157,6 +163,8 @@ function EditPlanDialog({
         isActive,
         providerPlanId: providerPlanId || null,
         platformRoleId: platformRoleId || null,
+        isFeaturedOnHomepage,
+        homepageOrder: homepageOrder === '' ? null : Number(homepageOrder),
         limits: Object.fromEntries(
           LIMIT_KEYS.map((key) => [
             key,
@@ -244,6 +252,28 @@ function EditPlanDialog({
             <Label htmlFor="plan-active">Active (purchasable / visible)</Label>
           </div>
 
+          <div className="flex items-center gap-2 pt-2">
+            <input
+              id="plan-featured"
+              type="checkbox"
+              checked={isFeaturedOnHomepage}
+              onChange={(e) => setIsFeaturedOnHomepage(e.target.checked)}
+              className="h-4 w-4"
+            />
+            <Label htmlFor="plan-featured">Featured on homepage</Label>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="plan-homepage-order">Homepage position</Label>
+            <Input
+              id="plan-homepage-order"
+              type="number"
+              value={homepageOrder}
+              onChange={(e) => setHomepageOrder(e.target.value)}
+              placeholder="Falls back to display order"
+              disabled={!isFeaturedOnHomepage}
+            />
+          </div>
+
           <div className="col-span-2">
             <p className="mb-2 text-sm font-medium">
               Limits (blank = unlimited)
@@ -301,6 +331,7 @@ function CreatePlanDialog({
   const [trialDays, setTrialDays] = React.useState('');
   const [syncToProvider, setSyncToProvider] = React.useState(false);
   const [platformRoleId, setPlatformRoleId] = React.useState('');
+  const [isFeaturedOnHomepage, setIsFeaturedOnHomepage] = React.useState(false);
   const [limits, setLimits] = React.useState<Record<string, string>>({});
   const [saving, setSaving] = React.useState(false);
 
@@ -325,6 +356,7 @@ function CreatePlanDialog({
         ) as CreatePlanPayload['limits'],
         syncToProvider,
         platformRoleId: platformRoleId || null,
+        isFeaturedOnHomepage,
       };
       await createPlan(payload);
       toast.success('Plan created');
@@ -432,6 +464,18 @@ function CreatePlanDialog({
               Also create this plan on Paystack
             </Label>
           </div>
+          <div className="flex items-end gap-2 pb-2">
+            <input
+              id="new-plan-featured"
+              type="checkbox"
+              checked={isFeaturedOnHomepage}
+              onChange={(e) => setIsFeaturedOnHomepage(e.target.checked)}
+              className="h-4 w-4"
+            />
+            <Label htmlFor="new-plan-featured" className="text-sm">
+              Featured on homepage
+            </Label>
+          </div>
 
           <div className="col-span-2">
             <p className="mb-2 text-sm font-medium">
@@ -517,7 +561,9 @@ function SetPlanPriceDialog({
       onSaved();
       onOpenChange(false);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Failed to save price');
+      toast.error(
+        err instanceof ApiError ? err.message : 'Failed to save price',
+      );
     } finally {
       setSaving(false);
     }
@@ -554,8 +600,8 @@ function SetPlanPriceDialog({
               className="h-4 w-4"
             />
             <Label htmlFor="price-use-rate" className="text-sm">
-              Derive from the base price via exchange rate (requires a configured
-              provider)
+              Derive from the base price via exchange rate (requires a
+              configured provider)
             </Label>
           </div>
           {!useExchangeRate && (
@@ -584,7 +630,11 @@ function SetPlanPriceDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={saving}
+          >
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={saving}>
@@ -645,7 +695,9 @@ function PlanPricesTable({
               <TableCell>{format(price.currencyCode, price.amount)}</TableCell>
               <TableCell>Paystack</TableCell>
               <TableCell>
-                <Badge variant={price.providerAvailable ? 'success' : 'secondary'}>
+                <Badge
+                  variant={price.providerAvailable ? 'success' : 'secondary'}
+                >
                   {price.providerAvailable ? 'Available' : 'Unavailable'}
                 </Badge>
               </TableCell>
@@ -706,7 +758,9 @@ export default function AdminPlansPage() {
       invalidate();
       setRemovingPrice(null);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Failed to remove price');
+      toast.error(
+        err instanceof ApiError ? err.message : 'Failed to remove price',
+      );
     } finally {
       setRemoveBusy(false);
     }
@@ -744,13 +798,18 @@ export default function AdminPlansPage() {
       {data && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data.map((plan) => (
-            <Card key={plan.id}>
+            <Card key={plan.id} className="min-w-0">
               <CardHeader>
-                <CardTitle className="flex items-center justify-between text-base">
-                  {plan.name}
-                  <Badge variant={plan.isActive ? 'success' : 'outline'}>
-                    {plan.isActive ? 'Active' : 'Inactive'}
-                  </Badge>
+                <CardTitle className="flex items-center justify-between gap-2 text-base">
+                  <span>{plan.name}</span>
+                  <span className="flex shrink-0 gap-1.5">
+                    {plan.isFeaturedOnHomepage && (
+                      <Badge variant="default">Featured</Badge>
+                    )}
+                    <Badge variant={plan.isActive ? 'success' : 'outline'}>
+                      {plan.isActive ? 'Active' : 'Inactive'}
+                    </Badge>
+                  </span>
                 </CardTitle>
                 <CardDescription>
                   {plan.priceAmount === 0

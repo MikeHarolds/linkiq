@@ -35,6 +35,8 @@ function makePlan(overrides: Partial<Record<string, unknown>> = {}) {
     providerPlanId: null,
     platformRoleId: null,
     platformRole: null,
+    isFeaturedOnHomepage: false,
+    homepageOrder: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     limits: [],
@@ -113,7 +115,9 @@ describe('SubscriptionsService', () => {
     // default 'USD' plan currency) behaviorally unchanged; tests
     // exercising multi-currency behavior explicitly override this.
     currencies = {
-      getByCodeOrThrow: jest.fn((code: string) => Promise.resolve({ code, isActive: true })),
+      getByCodeOrThrow: jest.fn((code: string) =>
+        Promise.resolve({ code, isActive: true }),
+      ),
     };
     service = new SubscriptionsService(
       prisma as unknown as PrismaService,
@@ -268,7 +272,7 @@ describe('SubscriptionsService', () => {
   describe('subscribe', () => {
     it('creates an ACTIVE subscription immediately when the plan has no trial', async () => {
       plans.getBySlug.mockResolvedValue(
-        makePlan({ slug: 'starter', trialDays: null }),
+        makePlan({ slug: 'starter', trialDays: null, priceAmount: 1900 }),
       );
       prisma.subscription.upsert.mockResolvedValue(
         makeSubscription({ status: SubscriptionStatus.ACTIVE }),
@@ -289,7 +293,7 @@ describe('SubscriptionsService', () => {
 
     it('grants a trial and audits it when the plan has trialDays', async () => {
       plans.getBySlug.mockResolvedValue(
-        makePlan({ slug: 'starter', trialDays: 14 }),
+        makePlan({ slug: 'starter', trialDays: 14, priceAmount: 1900 }),
       );
       prisma.subscription.upsert.mockResolvedValue(
         makeSubscription({ status: SubscriptionStatus.TRIALING }),
@@ -316,7 +320,7 @@ describe('SubscriptionsService', () => {
 
     it('never calls the provider for a trialing plan (zero Paystack interaction)', async () => {
       plans.getBySlug.mockResolvedValue(
-        makePlan({ slug: 'starter', trialDays: 14 }),
+        makePlan({ slug: 'starter', trialDays: 14, priceAmount: 1900 }),
       );
       prisma.subscription.upsert.mockResolvedValue(
         makeSubscription({ status: SubscriptionStatus.TRIALING }),
@@ -331,7 +335,7 @@ describe('SubscriptionsService', () => {
     it('returns a checkoutUrl and leaves the subscription untouched for a real-provider checkout', async () => {
       const current = makeSubscription({ status: SubscriptionStatus.ACTIVE });
       plans.getBySlug.mockResolvedValue(
-        makePlan({ slug: 'starter', trialDays: null }),
+        makePlan({ slug: 'starter', trialDays: null, priceAmount: 1900 }),
       );
       prisma.subscription.findUnique.mockResolvedValue(current);
       provider.createCheckoutSession.mockResolvedValue({
@@ -356,7 +360,9 @@ describe('SubscriptionsService', () => {
     });
 
     it('Sprint 16 — stamps the resolved currency/amount onto the created subscription', async () => {
-      plans.getBySlug.mockResolvedValue(makePlan({ slug: 'starter', trialDays: null }));
+      plans.getBySlug.mockResolvedValue(
+        makePlan({ slug: 'starter', trialDays: null }),
+      );
       prisma.subscription.upsert.mockResolvedValue(makeSubscription());
 
       await service.subscribe('ws-1', 'user-1', 'starter', ctx);
@@ -390,7 +396,12 @@ describe('SubscriptionsService', () => {
 
     it('Sprint 16 §11 — rejects a currency the plan has no price configured for', async () => {
       plans.getBySlug.mockResolvedValue(
-        makePlan({ slug: 'professional', trialDays: null, currency: 'USD', prices: [] }),
+        makePlan({
+          slug: 'professional',
+          trialDays: null,
+          currency: 'USD',
+          prices: [],
+        }),
       );
 
       await expect(
@@ -408,7 +419,9 @@ describe('SubscriptionsService', () => {
           prices: [{ currency: { code: 'EUR' }, amount: 4500 }],
         }),
       );
-      provider.getSupportedCurrencies = jest.fn().mockReturnValue(['NGN', 'USD']);
+      provider.getSupportedCurrencies = jest
+        .fn()
+        .mockReturnValue(['NGN', 'USD']);
 
       await expect(
         service.subscribe('ws-1', 'user-1', 'professional', ctx, 'EUR'),
@@ -417,12 +430,17 @@ describe('SubscriptionsService', () => {
     });
 
     it('Sprint 16 §11 — rejects an inactive currency even if it is the plan base currency', async () => {
-      plans.getBySlug.mockResolvedValue(makePlan({ slug: 'starter', trialDays: null }));
-      currencies.getByCodeOrThrow.mockResolvedValue({ code: 'USD', isActive: false });
-
-      await expect(service.subscribe('ws-1', 'user-1', 'starter', ctx)).rejects.toThrow(
-        BadRequestException,
+      plans.getBySlug.mockResolvedValue(
+        makePlan({ slug: 'starter', trialDays: null }),
       );
+      currencies.getByCodeOrThrow.mockResolvedValue({
+        code: 'USD',
+        isActive: false,
+      });
+
+      await expect(
+        service.subscribe('ws-1', 'user-1', 'starter', ctx),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -461,13 +479,15 @@ describe('SubscriptionsService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('routes through a fresh checkout instead of an in-place swap when a real provider subscription exists', async () => {
+    it('routes through a fresh checkout instead of an in-place swap when upgrading a real provider subscription', async () => {
       const existing = makeSubscription({
         providerSubscriptionId: 'SUB_abc:tok_abc',
+        currency: 'USD',
+        amount: 1900,
       });
       prisma.subscription.findUnique.mockResolvedValue(existing);
       plans.getBySlug.mockResolvedValue(
-        makePlan({ id: 'plan-pro', slug: 'professional' }),
+        makePlan({ id: 'plan-pro', slug: 'professional', priceAmount: 4900 }),
       );
       provider.createCheckoutSession.mockResolvedValue({
         devFlow: false,
@@ -495,20 +515,194 @@ describe('SubscriptionsService', () => {
       );
     });
 
-    it('Sprint 16 — a dev-flow plan change stamps the new plan\'s resolved currency/amount, not the previous subscription\'s', async () => {
+    it("Sprint 16 — a dev-flow plan change stamps the new plan's resolved currency/amount, not the previous subscription's", async () => {
       prisma.subscription.findUnique.mockResolvedValue(
         makeSubscription({ currency: 'USD', amount: 1900 }),
       );
       plans.getBySlug.mockResolvedValue(
-        makePlan({ id: 'plan-pro', slug: 'professional', currency: 'USD', priceAmount: 4900 }),
+        makePlan({
+          id: 'plan-pro',
+          slug: 'professional',
+          currency: 'USD',
+          priceAmount: 4900,
+        }),
       );
-      prisma.subscription.update.mockResolvedValue(makeSubscription({ planId: 'plan-pro' }));
+      prisma.subscription.update.mockResolvedValue(
+        makeSubscription({ planId: 'plan-pro' }),
+      );
 
       await service.changePlan('ws-1', 'user-1', 'professional', ctx);
 
       expect(prisma.subscription.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ currency: 'USD', amount: 4900 }),
+        }),
+      );
+    });
+
+    it("Sprint 17 §5 — requires checkout on a workspace's first-ever move from FREE to a paid plan (no providerSubscriptionId yet)", async () => {
+      // The exact bug this sprint fixes: previously changePlan() only
+      // required checkout when providerSubscriptionId was already set,
+      // which a fresh FREE-default subscription never has — so the
+      // very first paid conversion applied with zero payment.
+      const existing = makeSubscription({
+        amount: 0,
+        currency: 'USD',
+        providerSubscriptionId: null,
+      });
+      prisma.subscription.findUnique.mockResolvedValue(existing);
+      plans.getBySlug.mockResolvedValue(
+        makePlan({
+          id: 'plan-pro',
+          slug: 'professional',
+          priceAmount: 4900,
+          trialDays: null,
+        }),
+      );
+      provider.createCheckoutSession.mockResolvedValue({
+        devFlow: false,
+        checkoutUrl: 'https://checkout.paystack.com/xyz',
+      });
+
+      const result = await service.changePlan(
+        'ws-1',
+        'user-1',
+        'professional',
+        ctx,
+      );
+
+      expect(provider.createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({ planSlug: 'professional' }),
+      );
+      expect(result.checkoutUrl).toBe('https://checkout.paystack.com/xyz');
+      expect(prisma.subscription.update).not.toHaveBeenCalled();
+    });
+
+    it('Sprint 17 §5 — grants a first-ever trial on an upgrade instead of requiring immediate payment', async () => {
+      const existing = makeSubscription({
+        amount: 0,
+        currency: 'USD',
+        trialUsed: false,
+      });
+      prisma.subscription.findUnique.mockResolvedValue(existing);
+      plans.getBySlug.mockResolvedValue(
+        makePlan({
+          id: 'plan-pro',
+          slug: 'professional',
+          priceAmount: 4900,
+          trialDays: 14,
+        }),
+      );
+      prisma.subscription.update.mockResolvedValue(
+        makeSubscription({ planId: 'plan-pro' }),
+      );
+
+      await service.changePlan('ws-1', 'user-1', 'professional', ctx);
+
+      expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+      expect(prisma.subscription.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: SubscriptionStatus.TRIALING,
+            trialUsed: true,
+            amount: 4900,
+          }),
+        }),
+      );
+    });
+
+    it('Sprint 17 §5 — never grants a second trial once trialUsed is true, even on a genuine upgrade', async () => {
+      const existing = makeSubscription({
+        amount: 0,
+        currency: 'USD',
+        trialUsed: true,
+      });
+      prisma.subscription.findUnique.mockResolvedValue(existing);
+      plans.getBySlug.mockResolvedValue(
+        makePlan({
+          id: 'plan-pro',
+          slug: 'professional',
+          priceAmount: 4900,
+          trialDays: 14,
+        }),
+      );
+      provider.createCheckoutSession.mockResolvedValue({
+        devFlow: false,
+        checkoutUrl: 'https://checkout.paystack.com/xyz',
+      });
+
+      const result = await service.changePlan(
+        'ws-1',
+        'user-1',
+        'professional',
+        ctx,
+      );
+
+      expect(provider.createCheckoutSession).toHaveBeenCalled();
+      expect(result.checkoutUrl).toBe('https://checkout.paystack.com/xyz');
+    });
+
+    it('Sprint 17 §5 — a downgrade away from a real provider subscription applies immediately, never charges, and cancels the old subscription', async () => {
+      const existing = makeSubscription({
+        amount: 4900,
+        currency: 'USD',
+        providerSubscriptionId: 'SUB_abc:tok_abc',
+      });
+      prisma.subscription.findUnique.mockResolvedValue(existing);
+      plans.getBySlug.mockResolvedValue(
+        makePlan({
+          id: 'plan-starter',
+          slug: 'starter',
+          priceAmount: 1900,
+          trialDays: null,
+        }),
+      );
+      prisma.subscription.update.mockResolvedValue(
+        makeSubscription({ planId: 'plan-starter' }),
+      );
+
+      const result = await service.changePlan('ws-1', 'user-1', 'starter', ctx);
+
+      expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+      expect(provider.cancelSubscription).toHaveBeenCalledWith(
+        'SUB_abc:tok_abc',
+      );
+      expect(prisma.subscription.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            amount: 1900,
+            currency: 'USD',
+            status: SubscriptionStatus.ACTIVE,
+            provider: null,
+            providerSubscriptionId: null,
+            providerPriceId: null,
+          }),
+        }),
+      );
+      expect(result.checkoutUrl).toBeNull();
+    });
+
+    it('Sprint 17 §5 — a lateral (same-price) move applies immediately without charging', async () => {
+      const existing = makeSubscription({ amount: 4900, currency: 'USD' });
+      prisma.subscription.findUnique.mockResolvedValue(existing);
+      plans.getBySlug.mockResolvedValue(
+        makePlan({
+          id: 'plan-alt',
+          slug: 'alt-professional',
+          priceAmount: 4900,
+          trialDays: null,
+        }),
+      );
+      prisma.subscription.update.mockResolvedValue(
+        makeSubscription({ planId: 'plan-alt' }),
+      );
+
+      await service.changePlan('ws-1', 'user-1', 'alt-professional', ctx);
+
+      expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+      expect(prisma.subscription.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ amount: 4900 }),
         }),
       );
     });

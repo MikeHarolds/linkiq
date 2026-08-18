@@ -88,9 +88,27 @@ export class UpdatePlanDto {
   limits?: Partial<Record<PlanLimitKey, number | null>>;
 
   @ApiPropertyOptional({
-    description: "The platform role a workspace's OWNER holds while this plan is effectively active, or null to detach.",
+    description:
+      "The platform role a workspace's OWNER holds while this plan is effectively active, or null to detach.",
   })
   @IsOptional()
   @IsUUID()
   platformRoleId?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Sprint 17 — whether this plan appears on the public marketing pricing section.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isFeaturedOnHomepage?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Sort position among featured plans on the homepage; null = falls back to displayOrder.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  homepageOrder?: number | null;
 }

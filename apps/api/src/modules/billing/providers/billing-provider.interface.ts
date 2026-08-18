@@ -112,7 +112,9 @@ export interface BillingProvider {
    * fails, since LinkIQ's own Plan row is the thing that must exist
    * either way.
    */
-  createProviderPlan?(input: CreateProviderPlanInput): Promise<CreateProviderPlanResult>;
+  createProviderPlan?(
+    input: CreateProviderPlanInput,
+  ): Promise<CreateProviderPlanResult>;
   /**
    * Optional (Sprint 16): which ISO 4217 currency codes this provider
    * can actually process a checkout in, for the CURRENTLY configured
@@ -126,4 +128,16 @@ export interface BillingProvider {
    * implementation is a configured allowlist, not a guess.
    */
   getSupportedCurrencies?(): string[];
+  /**
+   * Optional (Sprint 17): a stable, lowercase machine name for this
+   * gateway (e.g. "paystack") — the ONLY thing that drives which
+   * gateway option(s) the checkout confirmation UI shows (see
+   * BillingController's plan/summary responses and Sprint 17 §6: "the
+   * UI should only display gateways that are configured, active, ...
+   * do not display fake gateways"). Providers that omit this
+   * (DevelopmentBillingProvider) surface as `provider: null` to the
+   * frontend, which then applies changes directly with no
+   * gateway-selection step at all — there is nothing to select.
+   */
+  getProviderName?(): string;
 }

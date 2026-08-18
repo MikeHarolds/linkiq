@@ -33,7 +33,10 @@ import { BillingUsageService } from './billing-usage.service';
 import { PlanSlugDto } from './dto/plan-slug.dto';
 import { InvoicesService } from './invoices.service';
 import { PlansService, type PlanWithLimits } from './plans.service';
-import { BILLING_PROVIDER, type BillingProvider } from './providers/billing-provider.interface';
+import {
+  BILLING_PROVIDER,
+  type BillingProvider,
+} from './providers/billing-provider.interface';
 import {
   SubscriptionsService,
   type SubscriptionMutationResult,
@@ -45,7 +48,10 @@ import { getEffectiveStatus } from './utils/effective-status';
  * LinkIQ currency" (no supported-currency allowlist configured, e.g.
  * DevelopmentBillingProvider) rather than an empty/false-negative list
  * — see BillingProvider.getSupportedCurrencies's own docs. */
-function planResponse(plan: PlanWithLimits, providerCurrencies: string[] | undefined) {
+function planResponse(
+  plan: PlanWithLimits,
+  providerCurrencies: string[] | undefined,
+) {
   return {
     id: plan.id,
     name: plan.name,
@@ -63,9 +69,11 @@ function planResponse(plan: PlanWithLimits, providerCurrencies: string[] | undef
       currencyCode: p.currency.code,
       amount: p.amount,
       isConverted: p.isConverted,
-      providerAvailable: !providerCurrencies || providerCurrencies.includes(p.currency.code),
+      providerAvailable:
+        !providerCurrencies || providerCurrencies.includes(p.currency.code),
     })),
-    providerAvailable: !providerCurrencies || providerCurrencies.includes(plan.currency),
+    providerAvailable:
+      !providerCurrencies || providerCurrencies.includes(plan.currency),
   };
 }
 
@@ -142,6 +150,15 @@ export class BillingController {
     return this.billingProvider.getSupportedCurrencies?.();
   }
 
+  /** Sprint 17 §6 — the currently configured gateway's machine name
+   * (e.g. "paystack"), or null when none is configured
+   * (DevelopmentBillingProvider). The ONLY thing that drives which
+   * gateway option the checkout confirmation UI shows — never a
+   * hardcoded frontend string, never a fake/inactive gateway. */
+  private get activeProvider(): string | null {
+    return this.billingProvider.getProviderName?.() ?? null;
+  }
+
   private get pastDueGraceDays(): number {
     return this.config.get<number>('paystack.pastDueGraceDays') ?? 7;
   }
@@ -165,6 +182,7 @@ export class BillingController {
       plan: planResponse(plan, this.providerCurrencies),
       usage: usageSnapshot,
       invoiceCount: invoiceHistory.length,
+      activeProvider: this.activeProvider,
     };
   }
 

@@ -196,6 +196,55 @@ Two implementations now exist:
   controller's read routes, or the frontend's usage/plans UI needed to
   change for this — exactly the seam §5 was designed for.
 
+## 5a. When does a plan change actually require payment? (Sprint 17)
+
+Before Sprint 17, `subscribe()` required checkout whenever the target
+plan had no trial, and `changePlan()` required checkout only when the
+_existing_ subscription already had a confirmed
+`providerSubscriptionId`. Both were wrong in ways that only showed up
+once real money was involved: a workspace's very first paid conversion
+(moving off the seeded FREE default, which never has a
+`providerSubscriptionId`) always applied instantly with **zero
+payment**, and — in the other direction — a downgrade away from an
+already-paid plan re-triggered a **fresh charge** for the cheaper plan.
+
+`SubscriptionsService.determinePaymentRequirement()` is now the single
+decision point both `subscribe()` and `changePlan()` call, based on
+comparing the target plan's resolved price against
+`Subscription.amount` — the workspace's own currently-paid amount
+(Sprint 16's immutable snapshot, never the plan's live price):
+
+- **Upgrade** (resolved price > current amount): requires a real
+  checkout, UNLESS this is the workspace's first-ever trial on a plan
+  that offers one (see `Subscription.trialUsed` — a permanent flag,
+  deliberately separate from `trialStart`/`trialEnd`, which represent
+  the _current_ trial window and get cleared once it ends; without a
+  separate permanent flag, a workspace could be re-granted a trial —
+  and skip payment — on every subsequent plan switch).
+- **Downgrade or lateral move** (resolved price <= current amount):
+  applies immediately, never charges. If the subscription being
+  downgraded away from is backed by a real, confirmed Paystack
+  subscription, that subscription is canceled
+  (`applyDowngradeIfNeeded`) so the workspace is never billed the old,
+  higher amount again. This is a deliberate, documented simplification
+  — an _immediate_ downgrade rather than one scheduled for the next
+  renewal — chosen because Paystack has no proration primitive to
+  adjust an existing subscription's amount in place (see
+  [paystack-integration.md](./paystack-integration.md) §13), and a
+  renewal-scheduling mechanism didn't otherwise exist in this codebase.
+
+The customer-facing dashboard (`/dashboard/billing`) surfaces this
+decision _before_ the user commits to it: clicking a plan opens
+`PlanChangeConfirmDialog` (a preview of the same rule, not a second
+implementation of it) showing the resolved price, whether the change
+is an upgrade or downgrade, and — for a paid upgrade — which payment
+gateway will process it (`BillingSummaryDto.activeProvider`, sourced
+from `BillingProvider.getProviderName?()`; `null` when no real gateway
+is configured, in which case the change simply applies with no
+gateway-selection step). The backend enforces the same rule
+independently either way — the dialog is a UX courtesy, not the
+authorization boundary.
+
 ## 6. Webhook idempotency
 
 `BillingEventsService.recordEvent({ provider, externalEventId, eventType,
@@ -223,6 +272,28 @@ still no user-facing endpoint that can fabricate a PAID record. No
 invoice is ever seeded as "paid" — a workspace's billing history is an
 honest empty list until a real payment provider actually processes
 something.
+
+## 7a. Featured Plans (Sprint 17)
+
+`Plan.isFeaturedOnHomepage`/`homepageOrder` control the public
+marketing pricing section independently of `isActive`. Three
+consumers, three different questions:
+
+- **`PlansService.listActive()`** — every active, purchasable plan.
+  Read by the authenticated dashboard's plan switcher
+  (`GET /workspaces/:id/billing/plans`) — a customer can subscribe to
+  any active plan, whether or not it's featured on the homepage.
+- **`PlansService.listFeaturedForHomepage()`** — active AND explicitly
+  featured. The _only_ list `PublicController.getPlans()`
+  (`GET /public/plans`, unauthenticated) ever returns. Sorted by
+  `homepageOrder` when set, falling back to `displayOrder` — never a
+  hardcoded slug list.
+- **`PlansService.listAllForAdmin()`** — unfiltered, for the admin
+  catalog view, where an operator toggles both flags via
+  `PATCH /admin/plans/:id { isFeaturedOnHomepage, homepageOrder }`.
+
+Marking a plan featured has no effect on checkout, entitlement, or
+role resolution — it is purely a homepage-visibility switch.
 
 ## 8. RBAC — deliberately different from every other Sprint 6 module
 

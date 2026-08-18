@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 
 import { USAGE_BAR_KEYS } from '@/components/billing/feature-labels';
 import { PlanCard } from '@/components/billing/plan-card';
+import { PlanChangeConfirmDialog } from '@/components/billing/plan-change-confirm-dialog';
 import { SubscriptionStatusBadge } from '@/components/billing/subscription-status-badge';
 import { UsageRow } from '@/components/billing/usage-row';
 import { CurrencySelect } from '@/components/currency/currency-select';
@@ -40,11 +41,18 @@ import {
 import { ApiError, useAuth } from '@/providers/auth-provider';
 import { useCurrency } from '@/providers/currency-provider';
 
-function formatAmount(amount: number, code: string, currencies: CurrencyDto[]): string {
+function formatAmount(
+  amount: number,
+  code: string,
+  currencies: CurrencyDto[],
+): string {
   const meta = currencies.find((c) => c.code === code);
   return meta
     ? formatCurrency(amount, meta)
-    : (amount / 100).toLocaleString('en-US', { style: 'currency', currency: code });
+    : (amount / 100).toLocaleString('en-US', {
+        style: 'currency',
+        currency: code,
+      });
 }
 
 function invoiceStatusVariant(
@@ -89,6 +97,7 @@ export default function BillingDashboardPage() {
   const { currency, currencies, setCurrency } = useCurrency();
   const [busyPlanSlug, setBusyPlanSlug] = React.useState<string | null>(null);
   const [cancelBusy, setCancelBusy] = React.useState(false);
+  const [pendingPlan, setPendingPlan] = React.useState<PlanDto | null>(null);
   const checkoutCurrencyCode = currency?.code ?? 'USD';
 
   const summaryQuery = useQuery({
@@ -143,6 +152,7 @@ export default function BillingDashboardPage() {
           ? `Switched to the ${plan.name} plan`
           : `Subscribed to the ${plan.name} plan`,
       );
+      setPendingPlan(null);
       invalidate();
     } catch (error) {
       toast.error(
@@ -259,8 +269,12 @@ export default function BillingDashboardPage() {
                 from the plan's current price catalog or the visitor's
                 currency preference. */}
             {(() => {
-              const amount = subscription ? subscription.amount : summary.plan.priceAmount;
-              const code = subscription ? subscription.currency : summary.plan.currency;
+              const amount = subscription
+                ? subscription.amount
+                : summary.plan.priceAmount;
+              const code = subscription
+                ? subscription.currency
+                : summary.plan.currency;
               if (amount === 0) return 'Free';
               return `${formatAmount(amount, code, currencies)} / ${summary.plan.billingInterval === 'ANNUAL' ? 'year' : 'month'}`;
             })()}
@@ -360,7 +374,7 @@ export default function BillingDashboardPage() {
         {plansQuery.isLoading ? (
           <p className="text-sm text-muted-foreground">Loading plans…</p>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {(plansQuery.data ?? []).map((plan) => (
               <PlanCard
                 key={plan.id}
@@ -368,7 +382,7 @@ export default function BillingDashboardPage() {
                 isCurrent={plan.slug === currentPlanSlug}
                 canManage={canManage}
                 busy={busyPlanSlug === plan.slug}
-                onSelect={() => handleSelectPlan(plan)}
+                onSelect={() => setPendingPlan(plan)}
                 displayCurrencyCode={checkoutCurrencyCode}
                 currencies={currencies}
               />
@@ -410,7 +424,11 @@ export default function BillingDashboardPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="font-semibold tabular-nums">
-                      {formatAmount(invoice.amount, invoice.currency, currencies)}
+                      {formatAmount(
+                        invoice.amount,
+                        invoice.currency,
+                        currencies,
+                      )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {formatDate(invoice.issueDate)}
@@ -422,6 +440,21 @@ export default function BillingDashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {pendingPlan && (
+        <PlanChangeConfirmDialog
+          targetPlan={pendingPlan}
+          currentAmount={subscription?.amount ?? summary.plan.priceAmount}
+          currentPlanName={summary.plan.name}
+          currencyCode={checkoutCurrencyCode}
+          currencies={currencies}
+          activeProvider={summary.activeProvider}
+          busy={busyPlanSlug === pendingPlan.slug}
+          onCurrencyChange={(code) => void setCurrency(code)}
+          onConfirm={() => void handleSelectPlan(pendingPlan)}
+          onCancel={() => setPendingPlan(null)}
+        />
+      )}
     </div>
   );
 }

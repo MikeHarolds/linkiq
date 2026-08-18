@@ -2,12 +2,18 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { Public } from '../../common/decorators/public.decorator';
-import { Ctx, type RequestContext } from '../../common/decorators/request-context.decorator';
+import {
+  Ctx,
+  type RequestContext,
+} from '../../common/decorators/request-context.decorator';
 import { PlansService, type PlanWithLimits } from '../billing/plans.service';
 import { BrandingService } from '../branding/branding.service';
 import { CurrencyResolutionService } from '../currency/currency-resolution.service';
 import { CurrencyService } from '../currency/currency.service';
-import { LandingPageService, type PublicLandingPageContent } from '../landing-page/landing-page.service';
+import {
+  LandingPageService,
+  type PublicLandingPageContent,
+} from '../landing-page/landing-page.service';
 
 export interface PublicSiteConfig {
   siteName: string;
@@ -34,9 +40,11 @@ export interface PublicPlan {
 
 function toPublicPlan(plan: PlanWithLimits): PublicPlan {
   // Deliberately omits providerPlanId (Paystack plan_code — an
-  // internal billing-wiring detail, not something a visitor needs)
-  // and isActive (this list is already filtered to active-only by
-  // PlansService.listActive) — never the raw Plan/PlanLimit rows.
+  // internal billing-wiring detail, not something a visitor needs),
+  // isActive, and isFeaturedOnHomepage/homepageOrder (this list is
+  // already filtered to active+featured by
+  // PlansService.listFeaturedForHomepage) — never the raw Plan/
+  // PlanLimit rows.
   return {
     id: plan.id,
     name: plan.name,
@@ -49,7 +57,10 @@ function toPublicPlan(plan: PlanWithLimits): PublicPlan {
     trialDays: plan.trialDays,
     displayOrder: plan.displayOrder,
     limits: plan.limits.map((l) => ({ key: l.key, value: l.value })),
-    prices: plan.prices.map((p) => ({ currencyCode: p.currency.code, amount: p.amount })),
+    prices: plan.prices.map((p) => ({
+      currencyCode: p.currency.code,
+      amount: p.amount,
+    })),
   };
 }
 
@@ -79,17 +90,24 @@ export class PublicController {
 
   @Public()
   @Get('landing-page')
-  @ApiOperation({ summary: 'Active landing-page content, for the public marketing site' })
+  @ApiOperation({
+    summary: 'Active landing-page content, for the public marketing site',
+  })
   async getLandingPage(): Promise<PublicLandingPageContent> {
     return this.landingPage.getPublicContent();
   }
 
   @Public()
   @Get('plans')
-  @ApiOperation({ summary: 'Active, publicly purchasable plans, for the marketing pricing section' })
+  @ApiOperation({
+    summary:
+      'Active plans a Super Admin has marked featured, for the marketing pricing section',
+    description:
+      'Sprint 17 — a curated subset of listActive() (see PlansService.listFeaturedForHomepage). Never every purchasable plan: homepage curation is a distinct concern from what the authenticated dashboard billing page offers.',
+  })
   async getPlans(): Promise<PublicPlan[]> {
-    const active = await this.plans.listActive();
-    return active.map(toPublicPlan);
+    const featured = await this.plans.listFeaturedForHomepage();
+    return featured.map(toPublicPlan);
   }
 
   @Public()
@@ -106,7 +124,9 @@ export class PublicController {
 
   @Public()
   @Get('currencies')
-  @ApiOperation({ summary: 'Active currency catalogue, for the currency selector' })
+  @ApiOperation({
+    summary: 'Active currency catalogue, for the currency selector',
+  })
   async getCurrencies() {
     return this.currencies.listActive();
   }
@@ -125,8 +145,14 @@ export class PublicController {
    */
   @Public()
   @Get('currencies/detect')
-  @ApiOperation({ summary: "Resolve the caller's currency from an explicit choice, then IP, then the platform fallback" })
-  async detectCurrency(@Ctx() ctx: RequestContext, @Query('currency') explicit?: string) {
+  @ApiOperation({
+    summary:
+      "Resolve the caller's currency from an explicit choice, then IP, then the platform fallback",
+  })
+  async detectCurrency(
+    @Ctx() ctx: RequestContext,
+    @Query('currency') explicit?: string,
+  ) {
     const resolved = await this.currencyResolution.resolve({
       explicitCurrencyCode: explicit,
       ipAddress: ctx.ipAddress,

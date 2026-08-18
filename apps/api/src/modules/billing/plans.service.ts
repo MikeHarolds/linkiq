@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   BillingInterval,
   PlanTier,
@@ -49,6 +54,9 @@ export interface CreatePlanInput {
   limits?: Partial<Record<PlanLimitKey, number | null>>;
   /** Sprint 15 — see Plan.platformRoleId's own schema docs. */
   platformRoleId?: string | null;
+  /** Sprint 17 — see Plan.isFeaturedOnHomepage's own schema docs. */
+  isFeaturedOnHomepage?: boolean;
+  homepageOrder?: number | null;
 }
 
 /** Every field optional — Super Admin edits are partial updates against
@@ -68,6 +76,8 @@ export interface UpdatePlanInput {
    * ambiguous (does an omitted key mean "leave alone" or "remove"?); the
    * admin UI always submits every PlanLimitKey it displays. */
   limits?: Partial<Record<PlanLimitKey, number | null>>;
+  isFeaturedOnHomepage?: boolean;
+  homepageOrder?: number | null;
   platformRoleId?: string | null;
 }
 
@@ -95,6 +105,33 @@ export class PlansService {
     return all
       .filter((plan) => plan.isActive)
       .sort((a, b) => a.displayOrder - b.displayOrder);
+  }
+
+  /**
+   * Sprint 17 §8 — the ONLY plan list the public marketing site reads
+   * (see PublicController.getPlans). Active AND explicitly marked
+   * featured by a Super Admin — never a hardcoded slug list, and
+   * deliberately a DIFFERENT set from listActive()'s "everything
+   * purchasable," since the authenticated dashboard's plan-switcher
+   * must keep offering every active plan regardless of homepage
+   * curation (see docs/architecture/billing.md §Featured Plans).
+   * `homepageOrder` (nullable) sorts first when set; plans sharing a
+   * null homepageOrder fall back to the admin catalog's own
+   * `displayOrder` so a newly-featured plan without an explicit
+   * position still lands somewhere sensible.
+   */
+  async listFeaturedForHomepage(): Promise<PlanWithLimits[]> {
+    const all = await this.getAllCached();
+    return all
+      .filter((plan) => plan.isActive && plan.isFeaturedOnHomepage)
+      .sort((a, b) => {
+        if (a.homepageOrder !== null && b.homepageOrder !== null) {
+          return a.homepageOrder - b.homepageOrder;
+        }
+        if (a.homepageOrder !== null) return -1;
+        if (b.homepageOrder !== null) return 1;
+        return a.displayOrder - b.displayOrder;
+      });
   }
 
   async getBySlug(slug: string): Promise<PlanWithLimits> {
@@ -158,9 +195,13 @@ export class PlansService {
     adminUserId: string,
     ctx: RequestContext,
   ): Promise<PlanWithLimits> {
-    const existing = await this.prisma.plan.findUnique({ where: { slug: input.slug } });
+    const existing = await this.prisma.plan.findUnique({
+      where: { slug: input.slug },
+    });
     if (existing) {
-      throw new ConflictException(`A plan with slug "${input.slug}" already exists`);
+      throw new ConflictException(
+        `A plan with slug "${input.slug}" already exists`,
+      );
     }
     if (input.platformRoleId) {
       await this.assertValidPlanRole(input.platformRoleId);
@@ -181,6 +222,8 @@ export class PlansService {
           displayOrder: input.displayOrder ?? 0,
           providerPlanId: input.providerPlanId,
           platformRoleId: input.platformRoleId,
+          isFeaturedOnHomepage: input.isFeaturedOnHomepage ?? false,
+          homepageOrder: input.homepageOrder,
         },
       });
 
@@ -244,6 +287,8 @@ export class PlansService {
           displayOrder: input.displayOrder,
           providerPlanId: input.providerPlanId,
           platformRoleId: input.platformRoleId,
+          isFeaturedOnHomepage: input.isFeaturedOnHomepage,
+          homepageOrder: input.homepageOrder,
         },
       });
 
@@ -281,7 +326,9 @@ export class PlansService {
    * never reference SUPER_ADMIN even by accident — see
    * docs/architecture/roles-and-permissions.md. */
   private async assertValidPlanRole(platformRoleId: string): Promise<void> {
-    const role = await this.prisma.platformRole.findUnique({ where: { id: platformRoleId } });
+    const role = await this.prisma.platformRole.findUnique({
+      where: { id: platformRoleId },
+    });
     if (!role) {
       throw new NotFoundException('Selected role not found');
     }
@@ -317,7 +364,9 @@ export class PlansService {
     const plan = await this.getByIdOrThrow(planId);
     const currency = await this.currencies.getByIdOrThrow(input.currencyId);
     if (!currency.isActive) {
-      throw new BadRequestException('Cannot set a plan price in an inactive currency');
+      throw new BadRequestException(
+        'Cannot set a plan price in an inactive currency',
+      );
     }
 
     const existing = plan.prices.find((p) => p.currencyId === input.currencyId);
@@ -345,7 +394,9 @@ export class PlansService {
     this.cache = null;
 
     await this.audit.record({
-      action: existing ? 'admin.plan_price_updated' : 'admin.plan_price_created',
+      action: existing
+        ? 'admin.plan_price_updated'
+        : 'admin.plan_price_created',
       entity: 'PlanPrice',
       entityId: planId,
       userId: adminUserId,
@@ -371,7 +422,9 @@ export class PlansService {
     const plan = await this.getByIdOrThrow(planId);
     const price = plan.prices.find((p) => p.currencyId === currencyId);
     if (!price) {
-      throw new NotFoundException('No price configured for this plan in that currency');
+      throw new NotFoundException(
+        'No price configured for this plan in that currency',
+      );
     }
 
     await this.prisma.planPrice.delete({ where: { id: price.id } });

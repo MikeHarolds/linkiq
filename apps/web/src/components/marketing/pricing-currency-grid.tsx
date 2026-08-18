@@ -49,10 +49,12 @@ export function PricingCurrencyGrid({
         </div>
       )}
 
-      <div className="mx-auto grid max-w-6xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mx-auto grid max-w-5xl grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {plans.map((plan) => {
           const resolved = resolvePrice(plan, selectedCode);
-          const currencyMeta = currencies.find((c) => c.code === resolved.currencyCode);
+          const currencyMeta = currencies.find(
+            (c) => c.code === resolved.currencyCode,
+          );
           const price =
             resolved.amount === 0
               ? currencyMeta
@@ -78,7 +80,7 @@ export function PricingCurrencyGrid({
               features={plan.features}
               ctaLabel="Start for free"
               href={ctaHref}
-              highlighted={plan.slug === 'professional'}
+              highlighted={plan.tier === 'PROFESSIONAL'}
             />
           );
         })}

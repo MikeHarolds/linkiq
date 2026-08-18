@@ -347,6 +347,14 @@ export interface PlanDto {
   /** Sprint 16 — whether the base `currency` above is processable by
    * the configured payment provider. */
   providerAvailable: boolean;
+  /** Sprint 17 — whether this plan is included in the public marketing
+   * pricing section (see PublicController.getPlans). Independent of
+   * `isActive` — a plan can stay purchasable from the dashboard while
+   * excluded from the homepage. */
+  isFeaturedOnHomepage: boolean;
+  /** Sort position among featured plans on the homepage; null = falls
+   * back to `displayOrder`. */
+  homepageOrder: number | null;
 }
 
 export interface UsageSnapshotDto {
@@ -386,6 +394,11 @@ export interface BillingSummaryDto {
   plan: PlanDto;
   usage: UsageSnapshotDto[];
   invoiceCount: number;
+  /** Sprint 17 — the currently configured payment gateway's machine
+   * name (e.g. "paystack"), or null when none is configured (dev
+   * mode). Drives the checkout confirmation UI's gateway display —
+   * never a hardcoded frontend string. */
+  activeProvider: string | null;
 }
 
 /**
@@ -884,6 +897,8 @@ export interface UpdatePlanPayload {
   providerPlanId?: string | null;
   limits?: Partial<Record<PlanLimitKey, number | null>>;
   platformRoleId?: string | null;
+  isFeaturedOnHomepage?: boolean;
+  homepageOrder?: number | null;
 }
 
 export interface SystemHealthDto {
@@ -916,6 +931,8 @@ export interface CreatePlanPayload {
   /** Sprint 15 — the platform role a workspace's OWNER holds while this
    * plan is effectively active on a workspace they own. */
   platformRoleId?: string | null;
+  isFeaturedOnHomepage?: boolean;
+  homepageOrder?: number | null;
 }
 
 // ---------------------------------------------------------------------------

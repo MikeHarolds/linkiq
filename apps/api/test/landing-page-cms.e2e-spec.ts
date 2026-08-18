@@ -57,7 +57,10 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
   }
 
   async function promoteToSuperAdmin(userId: string) {
-    await prisma.user.update({ where: { id: userId }, data: { globalRole: GlobalRole.SUPER_ADMIN } });
+    await prisma.user.update({
+      where: { id: userId },
+      data: { globalRole: GlobalRole.SUPER_ADMIN },
+    });
   }
 
   function auth(actor: { accessToken: string }) {
@@ -72,7 +75,9 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
 
   describe('Public endpoints require no authentication', () => {
     it('serves /public/landing-page without a token', async () => {
-      const res = await request(server).get('/api/v1/public/landing-page').expect(200);
+      const res = await request(server)
+        .get('/api/v1/public/landing-page')
+        .expect(200);
       expect(res.body).toHaveProperty('sections');
       expect(res.body).toHaveProperty('features');
       expect(res.body).toHaveProperty('faqs');
@@ -81,8 +86,14 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
     });
 
     it('serves /public/site-config without a token, exposing only name/logo/favicon', async () => {
-      const res = await request(server).get('/api/v1/public/site-config').expect(200);
-      expect(Object.keys(res.body).sort()).toEqual(['faviconUrl', 'logoUrl', 'siteName']);
+      const res = await request(server)
+        .get('/api/v1/public/site-config')
+        .expect(200);
+      expect(Object.keys(res.body).sort()).toEqual([
+        'faviconUrl',
+        'logoUrl',
+        'siteName',
+      ]);
     });
 
     it('serves /public/plans without a token, only active plans, never provider ids', async () => {
@@ -95,7 +106,9 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
     });
 
     it('does not crash and returns an empty-but-well-formed shape with zero optional content configured', async () => {
-      const res = await request(server).get('/api/v1/public/landing-page').expect(200);
+      const res = await request(server)
+        .get('/api/v1/public/landing-page')
+        .expect(200);
       expect(res.body.features).toEqual([]);
       expect(res.body.faqs).toEqual([]);
       expect(res.body.navItems).toEqual({
@@ -140,7 +153,12 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
       await request(server)
         .post('/api/v1/admin/plans')
         .set(auth(user))
-        .send({ name: 'Hacked', slug: 'hacked', tier: PlanTier.FREE, priceAmount: 0 })
+        .send({
+          name: 'Hacked',
+          slug: 'hacked',
+          tier: PlanTier.FREE,
+          priceAmount: 0,
+        })
         .expect(403);
     });
 
@@ -160,7 +178,11 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
       const created = await request(server)
         .post('/api/v1/admin/landing-page/features')
         .set(auth(admin))
-        .send({ title: 'Fast redirects', description: 'Sub-100ms edge redirects', icon: 'Zap' })
+        .send({
+          title: 'Fast redirects',
+          description: 'Sub-100ms edge redirects',
+          icon: 'Zap',
+        })
         .expect(201);
       expect(created.body.title).toBe('Fast redirects');
       expect(created.body.isActive).toBe(true);
@@ -168,15 +190,20 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
       const second = await request(server)
         .post('/api/v1/admin/landing-page/features')
         .set(auth(admin))
-        .send({ title: 'Custom domains', description: 'Bring your own domain', icon: 'Globe2' })
+        .send({
+          title: 'Custom domains',
+          description: 'Bring your own domain',
+          icon: 'Globe2',
+        })
         .expect(201);
 
       // Public page now shows both, in creation order.
-      const publicBefore = await request(server).get('/api/v1/public/landing-page').expect(200);
-      expect(publicBefore.body.features.map((f: { title: string }) => f.title)).toEqual([
-        'Fast redirects',
-        'Custom domains',
-      ]);
+      const publicBefore = await request(server)
+        .get('/api/v1/public/landing-page')
+        .expect(200);
+      expect(
+        publicBefore.body.features.map((f: { title: string }) => f.title),
+      ).toEqual(['Fast redirects', 'Custom domains']);
 
       // Reorder: second feature first.
       await request(server)
@@ -185,11 +212,12 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
         .send({ orderedIds: [second.body.id, created.body.id] })
         .expect(201);
 
-      const publicAfterReorder = await request(server).get('/api/v1/public/landing-page').expect(200);
-      expect(publicAfterReorder.body.features.map((f: { title: string }) => f.title)).toEqual([
-        'Custom domains',
-        'Fast redirects',
-      ]);
+      const publicAfterReorder = await request(server)
+        .get('/api/v1/public/landing-page')
+        .expect(200);
+      expect(
+        publicAfterReorder.body.features.map((f: { title: string }) => f.title),
+      ).toEqual(['Custom domains', 'Fast redirects']);
 
       // Deactivate: disappears from the public page but still visible to admin.
       await request(server)
@@ -198,10 +226,19 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
         .send({ isActive: false })
         .expect(200);
 
-      const publicAfterDeactivate = await request(server).get('/api/v1/public/landing-page').expect(200);
-      expect(publicAfterDeactivate.body.features.map((f: { title: string }) => f.title)).toEqual(['Custom domains']);
+      const publicAfterDeactivate = await request(server)
+        .get('/api/v1/public/landing-page')
+        .expect(200);
+      expect(
+        publicAfterDeactivate.body.features.map(
+          (f: { title: string }) => f.title,
+        ),
+      ).toEqual(['Custom domains']);
 
-      const adminContent = await request(server).get('/api/v1/admin/landing-page').set(auth(admin)).expect(200);
+      const adminContent = await request(server)
+        .get('/api/v1/admin/landing-page')
+        .set(auth(admin))
+        .expect(200);
       expect(adminContent.body.features).toHaveLength(2);
 
       // Delete removes it entirely, even from the admin view.
@@ -238,11 +275,18 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
       await request(server)
         .patch('/api/v1/admin/landing-page/sections/HERO')
         .set(auth(admin))
-        .send({ headline: 'Ship links that convert', eyebrow: 'The link platform' })
+        .send({
+          headline: 'Ship links that convert',
+          eyebrow: 'The link platform',
+        })
         .expect(200);
 
-      const publicContent = await request(server).get('/api/v1/public/landing-page').expect(200);
-      const hero = publicContent.body.sections.find((s: { key: string }) => s.key === 'HERO');
+      const publicContent = await request(server)
+        .get('/api/v1/public/landing-page')
+        .expect(200);
+      const hero = publicContent.body.sections.find(
+        (s: { key: string }) => s.key === 'HERO',
+      );
       expect(hero.headline).toBe('Ship links that convert');
       expect(hero.eyebrow).toBe('The link platform');
     });
@@ -251,12 +295,16 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
       const admin = await superAdmin('cms-404-admin@example.com');
 
       await request(server)
-        .patch('/api/v1/admin/landing-page/features/00000000-0000-0000-0000-000000000099')
+        .patch(
+          '/api/v1/admin/landing-page/features/00000000-0000-0000-0000-000000000099',
+        )
         .set(auth(admin))
         .send({ title: 'Nope' })
         .expect(404);
       await request(server)
-        .delete('/api/v1/admin/landing-page/features/00000000-0000-0000-0000-000000000099')
+        .delete(
+          '/api/v1/admin/landing-page/features/00000000-0000-0000-0000-000000000099',
+        )
         .set(auth(admin))
         .expect(404);
     });
@@ -272,10 +320,14 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
         .send({ siteName: 'Acme Links' })
         .expect(200);
 
-      const publicConfig = await request(server).get('/api/v1/public/site-config').expect(200);
+      const publicConfig = await request(server)
+        .get('/api/v1/public/site-config')
+        .expect(200);
       expect(publicConfig.body.siteName).toBe('Acme Links');
 
-      const auditEntry = await prisma.auditLog.findFirst({ where: { action: 'admin.branding_updated' } });
+      const auditEntry = await prisma.auditLog.findFirst({
+        where: { action: 'admin.branding_updated' },
+      });
       expect(auditEntry).not.toBeNull();
       expect(JSON.stringify(auditEntry?.metadata)).not.toMatch(/secret|key/i);
     });
@@ -283,37 +335,59 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
     it('uploads a valid PNG logo and rejects a disguised executable', async () => {
       const admin = await superAdmin('branding-upload-admin@example.com');
 
-      const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 0, 0, 0, 0]);
+      const pngBuffer = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 0, 0, 0, 0,
+      ]);
       const uploadRes = await request(server)
         .post('/api/v1/admin/branding/logo')
         .set(auth(admin))
-        .attach('file', pngBuffer, { filename: 'logo.png', contentType: 'image/png' })
+        .attach('file', pngBuffer, {
+          filename: 'logo.png',
+          contentType: 'image/png',
+        })
         .expect(201);
       expect(uploadRes.body.logoUrl).toMatch(/\/uploads\/branding\//);
 
-      const publicConfig = await request(server).get('/api/v1/public/site-config').expect(200);
+      const publicConfig = await request(server)
+        .get('/api/v1/public/site-config')
+        .expect(200);
       expect(publicConfig.body.logoUrl).toBe(uploadRes.body.logoUrl);
 
-      const exeBuffer = Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00]);
+      const exeBuffer = Buffer.from([
+        0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00,
+      ]);
       await request(server)
         .post('/api/v1/admin/branding/logo')
         .set(auth(admin))
-        .attach('file', exeBuffer, { filename: 'logo.png', contentType: 'image/png' })
+        .attach('file', exeBuffer, {
+          filename: 'logo.png',
+          contentType: 'image/png',
+        })
         .expect(400);
     });
 
     it('removes the logo and falls back to null on the public endpoint', async () => {
       const admin = await superAdmin('branding-remove-admin@example.com');
-      const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 0, 0, 0, 0]);
+      const pngBuffer = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 0, 0, 0, 0,
+      ]);
       await request(server)
         .post('/api/v1/admin/branding/logo')
         .set(auth(admin))
-        .attach('file', pngBuffer, { filename: 'logo.png', contentType: 'image/png' })
+        .attach('file', pngBuffer, {
+          filename: 'logo.png',
+          contentType: 'image/png',
+        })
         .expect(201);
 
-      await request(server).delete('/api/v1/admin/branding/logo').set(auth(admin)).expect(200);
+      await request(server)
+        .delete('/api/v1/admin/branding/logo')
+        .set(auth(admin))
+        .expect(200);
 
-      const publicConfig = await request(server).get('/api/v1/public/site-config').expect(200);
+      const publicConfig = await request(server)
+        .get('/api/v1/public/site-config')
+        .expect(200);
       expect(publicConfig.body.logoUrl).toBeNull();
     });
   });
@@ -325,10 +399,12 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
     // so re-running this file against a persistent dev database doesn't
     // conflict on the slug-uniqueness check.
     beforeEach(async () => {
-      await prisma.plan.deleteMany({ where: { slug: { startsWith: 'growth-' } } });
+      await prisma.plan.deleteMany({
+        where: { slug: { startsWith: 'growth-' } },
+      });
     });
 
-    it('creates a plan that immediately appears in the admin catalog and, once active, on the public pricing endpoint', async () => {
+    it('creates a plan that immediately appears in the admin catalog, but NOT on the public pricing endpoint until marked featured (Sprint 17 §8)', async () => {
       const admin = await superAdmin('plan-create-admin@example.com');
 
       const created = await request(server)
@@ -344,20 +420,60 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
         .expect(201);
       expect(created.body.slug).toBe('growth-e2e');
       expect(created.body.isActive).toBe(true);
+      expect(created.body.isFeaturedOnHomepage).toBe(false);
 
-      const publicPlans = await request(server).get('/api/v1/public/plans').expect(200);
-      expect(publicPlans.body.some((p: { slug: string }) => p.slug === 'growth-e2e')).toBe(true);
+      // Active alone is not enough — the public marketing pricing
+      // section is curated separately (see PlansService
+      // .listFeaturedForHomepage / PublicController.getPlans).
+      const beforeFeatured = await request(server)
+        .get('/api/v1/public/plans')
+        .expect(200);
+      expect(
+        beforeFeatured.body.some(
+          (p: { slug: string }) => p.slug === 'growth-e2e',
+        ),
+      ).toBe(false);
 
-      const auditEntry = await prisma.auditLog.findFirst({ where: { action: 'admin.plan_created' } });
+      await request(server)
+        .patch(`/api/v1/admin/plans/${created.body.id}`)
+        .set(auth(admin))
+        .send({ isFeaturedOnHomepage: true })
+        .expect(200);
+
+      const afterFeatured = await request(server)
+        .get('/api/v1/public/plans')
+        .expect(200);
+      expect(
+        afterFeatured.body.some(
+          (p: { slug: string }) => p.slug === 'growth-e2e',
+        ),
+      ).toBe(true);
+
+      const auditEntry = await prisma.auditLog.findFirst({
+        where: { action: 'admin.plan_created' },
+      });
       expect(auditEntry).not.toBeNull();
     });
 
     it('rejects a duplicate slug with 409', async () => {
       const admin = await superAdmin('plan-dupe-admin@example.com');
-      const body = { name: 'Growth', slug: 'growth-dupe', tier: PlanTier.PROFESSIONAL, priceAmount: 7900 };
+      const body = {
+        name: 'Growth',
+        slug: 'growth-dupe',
+        tier: PlanTier.PROFESSIONAL,
+        priceAmount: 7900,
+      };
 
-      await request(server).post('/api/v1/admin/plans').set(auth(admin)).send(body).expect(201);
-      await request(server).post('/api/v1/admin/plans').set(auth(admin)).send(body).expect(409);
+      await request(server)
+        .post('/api/v1/admin/plans')
+        .set(auth(admin))
+        .send(body)
+        .expect(201);
+      await request(server)
+        .post('/api/v1/admin/plans')
+        .set(auth(admin))
+        .send(body)
+        .expect(409);
     });
 
     it('deactivating a plan removes it from the public pricing endpoint without deleting it', async () => {
@@ -365,7 +481,12 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
       const created = await request(server)
         .post('/api/v1/admin/plans')
         .set(auth(admin))
-        .send({ name: 'Growth', slug: 'growth-deactivate', tier: PlanTier.PROFESSIONAL, priceAmount: 7900 })
+        .send({
+          name: 'Growth',
+          slug: 'growth-deactivate',
+          tier: PlanTier.PROFESSIONAL,
+          priceAmount: 7900,
+        })
         .expect(201);
 
       await request(server)
@@ -374,12 +495,25 @@ describe('Landing Page CMS, Branding & Plans (e2e)', () => {
         .send({ isActive: false })
         .expect(200);
 
-      const publicPlans = await request(server).get('/api/v1/public/plans').expect(200);
-      expect(publicPlans.body.some((p: { slug: string }) => p.slug === 'growth-deactivate')).toBe(false);
+      const publicPlans = await request(server)
+        .get('/api/v1/public/plans')
+        .expect(200);
+      expect(
+        publicPlans.body.some(
+          (p: { slug: string }) => p.slug === 'growth-deactivate',
+        ),
+      ).toBe(false);
 
       // Still visible to the admin catalog — not hard-deleted.
-      const adminList = await request(server).get('/api/v1/admin/plans').set(auth(admin)).expect(200);
-      expect(adminList.body.some((p: { slug: string }) => p.slug === 'growth-deactivate')).toBe(true);
+      const adminList = await request(server)
+        .get('/api/v1/admin/plans')
+        .set(auth(admin))
+        .expect(200);
+      expect(
+        adminList.body.some(
+          (p: { slug: string }) => p.slug === 'growth-deactivate',
+        ),
+      ).toBe(true);
     });
   });
 });

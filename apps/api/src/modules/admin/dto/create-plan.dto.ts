@@ -29,10 +29,13 @@ export class CreatePlanDto {
 
   @ApiProperty({
     example: 'growth',
-    description: 'Immutable once created — other code (checkout, seed data) keys off this.',
+    description:
+      'Immutable once created — other code (checkout, seed data) keys off this.',
   })
   @IsString()
-  @Matches(/^[a-z0-9-]+$/, { message: 'slug must be lowercase letters, numbers, and hyphens only' })
+  @Matches(/^[a-z0-9-]+$/, {
+    message: 'slug must be lowercase letters, numbers, and hyphens only',
+  })
   @MinLength(1)
   @MaxLength(50)
   slug!: string;
@@ -59,7 +62,10 @@ export class CreatePlanDto {
   @MaxLength(10)
   currency?: string;
 
-  @ApiPropertyOptional({ enum: BillingInterval, default: BillingInterval.MONTHLY })
+  @ApiPropertyOptional({
+    enum: BillingInterval,
+    default: BillingInterval.MONTHLY,
+  })
   @IsOptional()
   @IsEnum(BillingInterval)
   billingInterval?: BillingInterval;
@@ -83,7 +89,8 @@ export class CreatePlanDto {
   displayOrder?: number;
 
   @ApiPropertyOptional({
-    description: 'The Paystack plan_code for this plan, if already known. Ignored when syncToProvider is true.',
+    description:
+      'The Paystack plan_code for this plan, if already known. Ignored when syncToProvider is true.',
   })
   @IsOptional()
   @IsString()
@@ -91,7 +98,8 @@ export class CreatePlanDto {
   providerPlanId?: string | null;
 
   @ApiPropertyOptional({
-    description: 'e.g. { "MAX_LINKS": 100, "MONTHLY_CLICKS": null }. null = unlimited. Omitted keys = unlimited (fail-open, see PlanLimit\'s own docs).',
+    description:
+      'e.g. { "MAX_LINKS": 100, "MONTHLY_CLICKS": null }. null = unlimited. Omitted keys = unlimited (fail-open, see PlanLimit\'s own docs).',
     type: 'object',
   })
   @IsOptional()
@@ -114,4 +122,22 @@ export class CreatePlanDto {
   @IsOptional()
   @IsUUID()
   platformRoleId?: string | null;
+
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      'Sprint 17 — whether this plan appears on the public marketing pricing section.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isFeaturedOnHomepage?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Sort position among featured plans on the homepage; omitted falls back to displayOrder.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  homepageOrder?: number | null;
 }

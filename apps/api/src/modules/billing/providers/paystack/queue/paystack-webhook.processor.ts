@@ -93,7 +93,9 @@ export class PaystackWebhookProcessor extends WorkerHost {
       where: { workspaceId, role: 'OWNER' },
       select: { userId: true },
     });
-    await Promise.all(owners.map((o) => this.roleResolution.syncStoredRole(o.userId)));
+    await Promise.all(
+      owners.map((o) => this.roleResolution.syncStoredRole(o.userId)),
+    );
   }
 
   async process(job: Job<ProcessPaystackWebhookJobData>): Promise<void> {
@@ -183,6 +185,16 @@ export class PaystackWebhookProcessor extends WorkerHost {
           pastDueSince: null,
           cancelAt: null,
           canceledAt: null,
+          // Sprint 17 — a real, confirmed charge means this workspace is
+          // no longer "currently trialing," regardless of which path
+          // (converting an existing trial, or SubscriptionsService
+          // routing a non-trial-eligible upgrade straight to checkout)
+          // led here. trialUsed is deliberately NOT set here: it's only
+          // ever true because a trial actually started (see
+          // Subscription.trialUsed's own docs), which SubscriptionsService
+          // already recorded before this webhook could fire.
+          trialStart: null,
+          trialEnd: null,
           // Sprint 16 — the REAL currency/amount Paystack actually
           // charged, straight off the webhook payload, not re-derived
           // from LinkIQ's own Plan/PlanPrice rows (which could have

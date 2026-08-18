@@ -48,11 +48,21 @@ import {
   SubscriptionStatus,
   WorkspaceRole,
 } from '@prisma/client';
-import type { Currency, Plan, PlanLimitKey, Workspace, User, Link } from '@prisma/client';
+import type {
+  Currency,
+  Plan,
+  PlanLimitKey,
+  Workspace,
+  User,
+  Link,
+} from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 import { computeVisitorHash } from '../src/modules/analytics/utils/visitor-hash';
-import { getEffectiveStatus, isEffectivelyOnPlan } from '../src/modules/billing/utils/effective-status';
+import {
+  getEffectiveStatus,
+  isEffectivelyOnPlan,
+} from '../src/modules/billing/utils/effective-status';
 
 const prisma = new PrismaClient();
 
@@ -73,6 +83,12 @@ interface PlanSeedConfig {
   billingInterval: BillingInterval;
   trialDays: number | null;
   displayOrder: number;
+  /** Sprint 17 — whether this plan appears on the public marketing
+   * pricing section (see PlansService.listFeaturedForHomepage).
+   * Defaults preserve the pre-Sprint-17 behavior of showing every
+   * purchasable plan — an admin can un-feature any of them afterward. */
+  isFeaturedOnHomepage: boolean;
+  homepageOrder: number | null;
   /** null = unlimited for that key. Placeholder figures — explicitly NOT
    * final commercial pricing, see docs/architecture/billing.md. */
   limits: Partial<Record<PlanLimitKey, number | null>>;
@@ -89,6 +105,8 @@ const PLAN_CONFIGS: PlanSeedConfig[] = [
     billingInterval: BillingInterval.MONTHLY,
     trialDays: null,
     displayOrder: 0,
+    isFeaturedOnHomepage: true,
+    homepageOrder: 0,
     limits: {
       MAX_LINKS: 25,
       MAX_QR_CODES: 10,
@@ -112,6 +130,8 @@ const PLAN_CONFIGS: PlanSeedConfig[] = [
     billingInterval: BillingInterval.MONTHLY,
     trialDays: 14,
     displayOrder: 1,
+    isFeaturedOnHomepage: true,
+    homepageOrder: 1,
     limits: {
       MAX_LINKS: 500,
       MAX_QR_CODES: 100,
@@ -135,6 +155,8 @@ const PLAN_CONFIGS: PlanSeedConfig[] = [
     billingInterval: BillingInterval.MONTHLY,
     trialDays: 14,
     displayOrder: 2,
+    isFeaturedOnHomepage: true,
+    homepageOrder: 2,
     limits: {
       MAX_LINKS: 5000,
       MAX_QR_CODES: 1000,
@@ -158,6 +180,8 @@ const PLAN_CONFIGS: PlanSeedConfig[] = [
     billingInterval: BillingInterval.MONTHLY,
     trialDays: 14,
     displayOrder: 3,
+    isFeaturedOnHomepage: true,
+    homepageOrder: 3,
     limits: {
       MAX_LINKS: 50_000,
       MAX_QR_CODES: 10_000,
@@ -181,6 +205,12 @@ const PLAN_CONFIGS: PlanSeedConfig[] = [
     billingInterval: BillingInterval.ANNUAL,
     trialDays: null,
     displayOrder: 4,
+    // Never featured on the public pricing grid — Enterprise is
+    // contract pricing, shown as its own "Contact sales" bar (see
+    // PricingSection in apps/web's marketing page), not a purchasable
+    // card the public plans API would need to describe.
+    isFeaturedOnHomepage: false,
+    homepageOrder: null,
     limits: {
       MAX_LINKS: null,
       MAX_QR_CODES: null,
@@ -229,6 +259,8 @@ export async function seedPlans(
           trialDays: config.trialDays,
           displayOrder: config.displayOrder,
           isActive: true,
+          isFeaturedOnHomepage: config.isFeaturedOnHomepage,
+          homepageOrder: config.homepageOrder,
         },
         create: {
           name: config.name,
@@ -240,6 +272,8 @@ export async function seedPlans(
           billingInterval: config.billingInterval,
           trialDays: config.trialDays,
           displayOrder: config.displayOrder,
+          isFeaturedOnHomepage: config.isFeaturedOnHomepage,
+          homepageOrder: config.homepageOrder,
         },
       }),
     ),
@@ -290,10 +324,28 @@ interface CurrencySeedConfig {
  * (CurrencyService.create lets an admin add more later with no code
  * change) — this is the initial catalogue only. */
 const CURRENCY_CONFIGS: CurrencySeedConfig[] = [
-  { code: 'USD', name: 'US Dollar', symbol: '$', numericCode: '840', region: 'North America' },
+  {
+    code: 'USD',
+    name: 'US Dollar',
+    symbol: '$',
+    numericCode: '840',
+    region: 'North America',
+  },
   // West Africa
-  { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', numericCode: '566', region: 'West Africa' },
-  { code: 'GHS', name: 'Ghanaian Cedi', symbol: 'GH₵', numericCode: '936', region: 'West Africa' },
+  {
+    code: 'NGN',
+    name: 'Nigerian Naira',
+    symbol: '₦',
+    numericCode: '566',
+    region: 'West Africa',
+  },
+  {
+    code: 'GHS',
+    name: 'Ghanaian Cedi',
+    symbol: 'GH₵',
+    numericCode: '936',
+    region: 'West Africa',
+  },
   {
     code: 'XOF',
     name: 'West African CFA Franc',
@@ -303,16 +355,76 @@ const CURRENCY_CONFIGS: CurrencySeedConfig[] = [
     region: 'West Africa',
   },
   // Europe
-  { code: 'EUR', name: 'Euro', symbol: '€', numericCode: '978', region: 'Europe' },
-  { code: 'GBP', name: 'British Pound', symbol: '£', numericCode: '826', region: 'Europe' },
-  { code: 'CHF', name: 'Swiss Franc', symbol: 'CHF', numericCode: '756', region: 'Europe' },
-  { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', numericCode: '752', region: 'Europe' },
-  { code: 'NOK', name: 'Norwegian Krone', symbol: 'kr', numericCode: '578', region: 'Europe' },
-  { code: 'DKK', name: 'Danish Krone', symbol: 'kr', numericCode: '208', region: 'Europe' },
-  { code: 'PLN', name: 'Polish Złoty', symbol: 'zł', numericCode: '985', region: 'Europe' },
-  { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', numericCode: '203', region: 'Europe' },
-  { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', numericCode: '348', region: 'Europe' },
-  { code: 'RON', name: 'Romanian Leu', symbol: 'lei', numericCode: '946', region: 'Europe' },
+  {
+    code: 'EUR',
+    name: 'Euro',
+    symbol: '€',
+    numericCode: '978',
+    region: 'Europe',
+  },
+  {
+    code: 'GBP',
+    name: 'British Pound',
+    symbol: '£',
+    numericCode: '826',
+    region: 'Europe',
+  },
+  {
+    code: 'CHF',
+    name: 'Swiss Franc',
+    symbol: 'CHF',
+    numericCode: '756',
+    region: 'Europe',
+  },
+  {
+    code: 'SEK',
+    name: 'Swedish Krona',
+    symbol: 'kr',
+    numericCode: '752',
+    region: 'Europe',
+  },
+  {
+    code: 'NOK',
+    name: 'Norwegian Krone',
+    symbol: 'kr',
+    numericCode: '578',
+    region: 'Europe',
+  },
+  {
+    code: 'DKK',
+    name: 'Danish Krone',
+    symbol: 'kr',
+    numericCode: '208',
+    region: 'Europe',
+  },
+  {
+    code: 'PLN',
+    name: 'Polish Złoty',
+    symbol: 'zł',
+    numericCode: '985',
+    region: 'Europe',
+  },
+  {
+    code: 'CZK',
+    name: 'Czech Koruna',
+    symbol: 'Kč',
+    numericCode: '203',
+    region: 'Europe',
+  },
+  {
+    code: 'HUF',
+    name: 'Hungarian Forint',
+    symbol: 'Ft',
+    numericCode: '348',
+    region: 'Europe',
+  },
+  {
+    code: 'RON',
+    name: 'Romanian Leu',
+    symbol: 'lei',
+    numericCode: '946',
+    region: 'Europe',
+  },
 ];
 
 /** Upserts the currency catalogue, idempotent across re-runs — same
@@ -355,7 +467,11 @@ export async function seedCurrencies(
   return byCode;
 }
 
-const COUNTRY_MAPPING_CONFIGS: Array<{ countryCode: string; countryName: string; currencyCode: string }> = [
+const COUNTRY_MAPPING_CONFIGS: Array<{
+  countryCode: string;
+  countryName: string;
+  currencyCode: string;
+}> = [
   { countryCode: 'NG', countryName: 'Nigeria', currencyCode: 'NGN' },
   { countryCode: 'GH', countryName: 'Ghana', currencyCode: 'GHS' },
   { countryCode: 'CI', countryName: "Côte d'Ivoire", currencyCode: 'XOF' },
@@ -401,7 +517,9 @@ export async function seedCountryMappings(
     }),
   );
 
-  console.log(`Seeded ${COUNTRY_MAPPING_CONFIGS.length} country -> currency mappings`);
+  console.log(
+    `Seeded ${COUNTRY_MAPPING_CONFIGS.length} country -> currency mappings`,
+  );
 }
 
 /** Fixed id — same enforced-singleton pattern SiteBranding uses (see
@@ -428,7 +546,9 @@ export async function seedCurrencySettings(
     },
   });
 
-  console.log('Seeded currency settings (default/fallback: USD, auto-detect: on)');
+  console.log(
+    'Seeded currency settings (default/fallback: USD, auto-detect: on)',
+  );
 }
 
 /** Demonstration per-currency pricing (Sprint 16 §9's worked example) —
@@ -440,7 +560,10 @@ export async function seedCurrencySettings(
  * here — a real per-currency Paystack plan_code is a SUPER_ADMIN action
  * via the admin UI's "sync to provider" flow, never fabricated by seed
  * data. */
-const PLAN_PRICE_CONFIGS: Record<string, Partial<Record<'NGN' | 'EUR', number>>> = {
+const PLAN_PRICE_CONFIGS: Record<
+  string,
+  Partial<Record<'NGN' | 'EUR', number>>
+> = {
   starter: { NGN: 2_900_000, EUR: 1800 },
   professional: { NGN: 7_500_000, EUR: 4500 },
   business: { NGN: 22_900_000, EUR: 13_900 },
@@ -459,7 +582,9 @@ export async function seedPlanPrices(
       const currency = currenciesByCode[currencyCode];
       if (!currency || amount === undefined) continue;
       await client.planPrice.upsert({
-        where: { planId_currencyId: { planId: plan.id, currencyId: currency.id } },
+        where: {
+          planId_currencyId: { planId: plan.id, currencyId: currency.id },
+        },
         update: { amount },
         create: { planId: plan.id, currencyId: currency.id, amount },
       });
@@ -513,7 +638,10 @@ const PROFESSIONAL_PERMISSIONS: PermissionKey[] = [
   PermissionKey.WEBHOOKS_DELETE,
   PermissionKey.ANALYTICS_ADVANCED,
 ];
-const BUSINESS_PERMISSIONS: PermissionKey[] = [...PROFESSIONAL_PERMISSIONS, PermissionKey.BILLING_MANAGE];
+const BUSINESS_PERMISSIONS: PermissionKey[] = [
+  ...PROFESSIONAL_PERMISSIONS,
+  PermissionKey.BILLING_MANAGE,
+];
 
 /** Sprint 15 — the four system roles, each a strict permission superset
  * of the tier below it (see the *_PERMISSIONS constants above). Every
@@ -572,7 +700,11 @@ export async function seedPlatformRoles(
   for (const config of ROLE_CONFIGS) {
     const role = await client.platformRole.upsert({
       where: { slug: config.slug },
-      update: { name: config.name, description: config.description, isSystem: true },
+      update: {
+        name: config.name,
+        description: config.description,
+        isSystem: true,
+      },
       create: {
         name: config.name,
         slug: config.slug,
@@ -582,14 +714,22 @@ export async function seedPlatformRoles(
     });
     bySlug[config.slug] = role;
 
-    await client.rolePermission.deleteMany({ where: { platformRoleId: role.id } });
+    await client.rolePermission.deleteMany({
+      where: { platformRoleId: role.id },
+    });
     await client.rolePermission.createMany({
-      data: config.permissions.map((permission) => ({ platformRoleId: role.id, permission })),
+      data: config.permissions.map((permission) => ({
+        platformRoleId: role.id,
+        permission,
+      })),
     });
 
     const plan = config.planSlug ? plansBySlug[config.planSlug] : undefined;
     if (plan) {
-      await client.plan.update({ where: { id: plan.id }, data: { platformRoleId: role.id } });
+      await client.plan.update({
+        where: { id: plan.id },
+        data: { platformRoleId: role.id },
+      });
     }
   }
 
@@ -1582,7 +1722,8 @@ async function seedLandingPageContent() {
       key: LandingPageSectionKey.FEATURES,
       eyebrow: 'The core loop',
       headline: 'Everything a link needs to do its job',
-      description: 'From the moment you shorten it to the moment someone acts on it.',
+      description:
+        'From the moment you shorten it to the moment someone acts on it.',
     },
     {
       key: LandingPageSectionKey.PRODUCT_SHOWCASE,
@@ -1638,11 +1779,41 @@ async function seedLandingPageContent() {
   if (existingFeatures === 0) {
     await prisma.landingPageFeature.createMany({
       data: [
-        { title: 'Shorten', description: 'Turn any URL into a clean, brandable link in milliseconds.', icon: 'Link2', sortOrder: 0 },
-        { title: 'Track', description: 'See clicks, visitors, and sources the moment they happen.', icon: 'BarChart3', sortOrder: 1 },
-        { title: 'Brand', description: 'Route every link through a domain your audience recognizes.', icon: 'Globe2', sortOrder: 2 },
-        { title: 'Automate', description: 'Create links and react to activity from your own systems.', icon: 'Webhook', sortOrder: 3 },
-        { title: 'Scale', description: 'Workspaces, roles, and permissions built for real teams.', icon: 'Users', sortOrder: 4 },
+        {
+          title: 'Shorten',
+          description:
+            'Turn any URL into a clean, brandable link in milliseconds.',
+          icon: 'Link2',
+          sortOrder: 0,
+        },
+        {
+          title: 'Track',
+          description:
+            'See clicks, visitors, and sources the moment they happen.',
+          icon: 'BarChart3',
+          sortOrder: 1,
+        },
+        {
+          title: 'Brand',
+          description:
+            'Route every link through a domain your audience recognizes.',
+          icon: 'Globe2',
+          sortOrder: 2,
+        },
+        {
+          title: 'Automate',
+          description:
+            'Create links and react to activity from your own systems.',
+          icon: 'Webhook',
+          sortOrder: 3,
+        },
+        {
+          title: 'Scale',
+          description:
+            'Workspaces, roles, and permissions built for real teams.',
+          icon: 'Users',
+          sortOrder: 4,
+        },
       ],
     });
   }
@@ -1651,11 +1822,36 @@ async function seedLandingPageContent() {
   if (existingStats === 0) {
     await prisma.landingPageStat.createMany({
       data: [
-        { label: 'Fast redirects', sublabel: 'Cached, low-latency', icon: 'Zap', sortOrder: 0 },
-        { label: 'Secure by design', sublabel: 'Scoped API keys & RBAC', icon: 'ShieldCheck', sortOrder: 1 },
-        { label: 'Custom domains', sublabel: 'Every link, on-brand', icon: 'Globe2', sortOrder: 2 },
-        { label: 'Team workspaces', sublabel: 'Role-based collaboration', icon: 'Users', sortOrder: 3 },
-        { label: 'Developer API', sublabel: 'REST + webhooks', icon: 'Terminal', sortOrder: 4 },
+        {
+          label: 'Fast redirects',
+          sublabel: 'Cached, low-latency',
+          icon: 'Zap',
+          sortOrder: 0,
+        },
+        {
+          label: 'Secure by design',
+          sublabel: 'Scoped API keys & RBAC',
+          icon: 'ShieldCheck',
+          sortOrder: 1,
+        },
+        {
+          label: 'Custom domains',
+          sublabel: 'Every link, on-brand',
+          icon: 'Globe2',
+          sortOrder: 2,
+        },
+        {
+          label: 'Team workspaces',
+          sublabel: 'Role-based collaboration',
+          icon: 'Users',
+          sortOrder: 3,
+        },
+        {
+          label: 'Developer API',
+          sublabel: 'REST + webhooks',
+          icon: 'Terminal',
+          sortOrder: 4,
+        },
       ],
     });
   }
@@ -1708,17 +1904,72 @@ async function seedLandingPageContent() {
   if (existingNavItems === 0) {
     await prisma.landingPageNavItem.createMany({
       data: [
-        { placement: LandingPageNavPlacement.HEADER, label: 'Product', url: '/#features', sortOrder: 0 },
-        { placement: LandingPageNavPlacement.HEADER, label: 'Pricing', url: '/#pricing', sortOrder: 1 },
-        { placement: LandingPageNavPlacement.HEADER, label: 'Developers', url: '/#developers', sortOrder: 2 },
-        { placement: LandingPageNavPlacement.FOOTER_PRODUCT, label: 'Link Management', url: '/#features', sortOrder: 0 },
-        { placement: LandingPageNavPlacement.FOOTER_PRODUCT, label: 'Analytics', url: '/#features', sortOrder: 1 },
-        { placement: LandingPageNavPlacement.FOOTER_PRODUCT, label: 'Custom Domains', url: '/#features', sortOrder: 2 },
-        { placement: LandingPageNavPlacement.FOOTER_PRODUCT, label: 'QR Codes', url: '/#features', sortOrder: 3 },
-        { placement: LandingPageNavPlacement.FOOTER_PRODUCT, label: 'Campaigns', url: '/#features', sortOrder: 4 },
-        { placement: LandingPageNavPlacement.FOOTER_DEVELOPERS, label: 'API', url: '/#developers', sortOrder: 0 },
-        { placement: LandingPageNavPlacement.FOOTER_DEVELOPERS, label: 'Webhooks', url: '/#developers', sortOrder: 1 },
-        { placement: LandingPageNavPlacement.FOOTER_COMPANY, label: 'Contact', url: 'mailto:support@linkiq.com', sortOrder: 0 },
+        {
+          placement: LandingPageNavPlacement.HEADER,
+          label: 'Product',
+          url: '/#features',
+          sortOrder: 0,
+        },
+        {
+          placement: LandingPageNavPlacement.HEADER,
+          label: 'Pricing',
+          url: '/#pricing',
+          sortOrder: 1,
+        },
+        {
+          placement: LandingPageNavPlacement.HEADER,
+          label: 'Developers',
+          url: '/#developers',
+          sortOrder: 2,
+        },
+        {
+          placement: LandingPageNavPlacement.FOOTER_PRODUCT,
+          label: 'Link Management',
+          url: '/#features',
+          sortOrder: 0,
+        },
+        {
+          placement: LandingPageNavPlacement.FOOTER_PRODUCT,
+          label: 'Analytics',
+          url: '/#features',
+          sortOrder: 1,
+        },
+        {
+          placement: LandingPageNavPlacement.FOOTER_PRODUCT,
+          label: 'Custom Domains',
+          url: '/#features',
+          sortOrder: 2,
+        },
+        {
+          placement: LandingPageNavPlacement.FOOTER_PRODUCT,
+          label: 'QR Codes',
+          url: '/#features',
+          sortOrder: 3,
+        },
+        {
+          placement: LandingPageNavPlacement.FOOTER_PRODUCT,
+          label: 'Campaigns',
+          url: '/#features',
+          sortOrder: 4,
+        },
+        {
+          placement: LandingPageNavPlacement.FOOTER_DEVELOPERS,
+          label: 'API',
+          url: '/#developers',
+          sortOrder: 0,
+        },
+        {
+          placement: LandingPageNavPlacement.FOOTER_DEVELOPERS,
+          label: 'Webhooks',
+          url: '/#developers',
+          sortOrder: 1,
+        },
+        {
+          placement: LandingPageNavPlacement.FOOTER_COMPANY,
+          label: 'Contact',
+          url: 'mailto:support@linkiq.com',
+          sortOrder: 0,
+        },
       ],
     });
   }
@@ -1731,7 +1982,9 @@ async function seedLandingPageContent() {
     create: { id: '00000000-0000-0000-0000-000000000001', siteName: 'LinkIQ' },
   });
 
-  console.log('Seeded landing page content (sections, features, FAQs, stats, nav items) and site branding');
+  console.log(
+    'Seeded landing page content (sections, features, FAQs, stats, nav items) and site branding',
+  );
 }
 
 /**

@@ -811,6 +811,20 @@ model Plan {
   isActive        Boolean         @default(true)
   displayOrder    Int             @default(0)
 
+  /// Sprint 17 — admin-controlled inclusion in the public marketing
+  /// site's pricing section (see PublicController.getPlans /
+  /// docs/architecture/currency.md's "Featured Plans" note). Independent
+  /// of `isActive`/`displayOrder`: a plan stays fully purchasable from
+  /// the authenticated dashboard's plan list even when this is false —
+  /// this flag only ever gates the PUBLIC, unauthenticated plans read,
+  /// never checkout/entitlement. `homepageOrder` is a separate,
+  /// nullable field (not a reuse of `displayOrder`) so reordering the
+  /// homepage's featured set never perturbs the admin catalog's own
+  /// ordering — null sorts after every explicitly ordered plan (falls
+  /// back to `displayOrder`, see PlansService.listFeaturedForHomepage).
+  isFeaturedOnHomepage Boolean @default(false)
+  homepageOrder        Int?
+
   /// Sprint 10 — the corresponding Paystack (or future provider) plan
   /// code, e.g. "PLN_xxxx". Null for plans that aren't purchasable
   /// through automated checkout (FREE, ENTERPRISE — see
@@ -884,6 +898,18 @@ model Subscription {
 
   trialStart DateTime?
   trialEnd   DateTime?
+
+  /// Sprint 17 — permanent record of whether this workspace has EVER
+  /// been granted a trial, on any plan, ever. Deliberately separate
+  /// from `trialStart`/`trialEnd`, which represent the CURRENT trial
+  /// window and are cleared (set back to null) the moment a non-trial
+  /// subscribe/changePlan applies — see SubscriptionsService's own
+  /// docs. Without this, "is this workspace still eligible for a free
+  /// trial on their first real upgrade" would be unanswerable once
+  /// trialStart is cleared, which is exactly the gap Sprint 17 §5
+  /// found: a workspace could otherwise be re-granted a trial (i.e.
+  /// skip payment) on every plan switch. Never reset once true.
+  trialUsed Boolean @default(false)
 
   /// When a pending cancellation takes effect — access continues normally
   /// until this passes (spec: cancel at end of billing period, not
