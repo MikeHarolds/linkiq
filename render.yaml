@@ -1,0 +1,131 @@
+# LinkIQ — Render Blueprint (Sprint 19)
+#
+# Deploys the SAME application source code as local Windows/Codespaces —
+# only infrastructure wiring differs, exactly per Sprint 19's
+# architectural rule. Nothing here is deployed automatically; this file
+# only prepares the repository so `render blueprint launch` (or the
+# Render dashboard's "New Blueprint Instance") can create these
+# services when you're ready. See docs/deployment/render.md for the
+# full walkthrough, including which env vars need real values filled in
+# manually after the Blueprint is created.
+#
+# Architecture: two Render Web Services (API, Web) + one managed
+# PostgreSQL + one managed Key Value (Redis-compatible) instance —
+# matching the "Render Web Service / Render API Service / Render
+# PostgreSQL / Redis-compatible service" shape from the Sprint 19 spec.
+# Commands run from the repo root (this is an npm-workspaces monorepo —
+# `npm ci` must see the root lockfile), using the exact same root-level
+# scripts documented in the README (build:api/start:api, build:web
+# via `--workspace=apps/web`/start:web) — no Render-specific commands.
+
+databases:
+  - name: linkiq-postgres
+    plan: starter
+    databaseName: linkiq
+    user: linkiq
+
+services:
+  - type: keyvalue
+    name: linkiq-redis
+    plan: starter
+    ipAllowList: [] # private network only — no public internet access
+    maxmemoryPolicy: noeviction
+
+  - type: web
+    name: linkiq-api
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run db:generate && npm run build:api
+    # `prisma migrate deploy` (non-destructive, applies pending
+    # migrations only) runs as a pre-deploy step, never at container
+    # boot inside the app process itself, and NEVER `migrate reset` —
+    # see Sprint 19 §7 / docs/architecture/paystack-integration.md for
+    # why this project never auto-resets a database.
+    preDeployCommand: npm run db:deploy
+    startCommand: npm run start:api
+    healthCheckPath: /api/v1/health
+    buildFilter:
+      paths:
+        - apps/api/**
+        - package.json
+        - package-lock.json
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: API_PREFIX
+        value: api/v1
+      - key: DATABASE_URL
+        fromDatabase:
+          name: linkiq-postgres
+          property: connectionString
+      # The keyvalue service's exact connection properties depend on
+      # your Render account/region at blueprint-creation time — fill
+      # these in from the Render dashboard once linkiq-redis exists
+      # (see docs/deployment/render.md's Redis section). Never guess a
+      # value here; an unreachable Redis must fail loudly (Sprint 19
+      # §8), not silently disable queues.
+      - key: REDIS_HOST
+        sync: false
+      - key: REDIS_PORT
+        sync: false
+      - key: REDIS_PASSWORD
+        sync: false
+      # Set to this API service's own Render URL after first deploy
+      # (Render assigns it, so it isn't knowable before creation) —
+      # used to build absolute uploaded-file URLs (see branding.config.ts).
+      - key: API_PUBLIC_URL
+        sync: false
+      # Set to the linkiq-web service's Render URL — used to build
+      # short-link/QR-code URLs and the Paystack checkout callback.
+      - key: APP_URL
+        sync: false
+      # Same value as APP_URL above — the allowed browser origin.
+      - key: CORS_ORIGIN
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: WEBHOOK_SECRET_ENCRYPTION_KEY
+        generateValue: true
+      - key: VISITOR_HASH_SALT
+        generateValue: true
+      # Paystack LIVE credentials for a real production deployment, or
+      # TEST credentials for a Render staging/demo environment — never
+      # committed, always filled in manually. Live/test mode is
+      # inferred automatically from this key's own sk_test_/sk_live_
+      # prefix (see paystack.config.ts) — no separate mode flag exists
+      # to get out of sync with it.
+      - key: BILLING_PROVIDER
+        value: paystack
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+
+  - type: web
+    name: linkiq-web
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build --workspace=apps/web
+    startCommand: npm run start:web
+    buildFilter:
+      paths:
+        - apps/web/**
+        - packages/**
+        - package.json
+        - package-lock.json
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # This API service's own Render URL + /api/v1 — fill in after
+      # linkiq-api's URL is known (same value used for API_PUBLIC_URL
+      # above, plus the path prefix).
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+      - key: NEXT_PUBLIC_APP_URL
+        sync: false
+      - key: NEXT_PUBLIC_REFRESH_COOKIE_NAME
+        value: linkiq_refresh_token
+      - key: API_ORIGIN
+        sync: false

@@ -1,9 +1,10 @@
 # Production Deployment Guide
 
-> **Status:** Stub — full deployment guide (Ubuntu VPS, AWS EC2,
-> DigitalOcean, Hetzner, Railway, Render, Coolify, Nginx, PM2, SSL,
-> backups, CI/CD) will be written once the application has deployable
-> features. Tracked for the CI/CD and deployment milestone.
+> **Status:** Stub for self-hosted deployment (Ubuntu VPS, AWS EC2,
+> DigitalOcean, Hetzner, Coolify, Nginx, PM2, SSL, backups) — not yet
+> written. **For Render**, see the complete, ready-to-use
+> [Render deployment guide](./render.md) and `render.yaml` at the repo
+> root instead (Sprint 19).
 
 ## Planned contents
 

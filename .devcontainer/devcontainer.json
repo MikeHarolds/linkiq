@@ -1,0 +1,55 @@
+{
+  "name": "LinkIQ",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
+
+  // 3000 (Next.js) and 4000 (NestJS) are the two ports a browser or the
+  // frontend itself ever needs to reach — see Sprint 19 §5/§9. Postgres
+  // (5432) and Redis (6379) are deliberately NOT forwarded: the app
+  // container reaches them over the internal Compose network by service
+  // name (see docker-compose.yml), and nothing outside the Codespace
+  // needs to reach a database/cache directly.
+  "forwardPorts": [3000, 4000],
+  "portsAttributes": {
+    "3000": {
+      "label": "Web (Next.js)",
+      "onAutoForward": "notify"
+    },
+    "4000": {
+      "label": "API (NestJS)",
+      "onAutoForward": "silent"
+    }
+  },
+
+  // One-time, on container CREATE only — install deps, run migrations,
+  // seed ONLY if this is a genuinely fresh database. Never re-runs on a
+  // Codespace stop/resume (see postStartCommand below and setup.sh's
+  // own idempotency check) — see Sprint 19 §6.
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+
+  // Every time the container starts (including resuming a previously
+  // stopped Codespace) — (re)start the app processes in the background.
+  // This is the exact same `npm run dev` a local Windows developer
+  // runs; Codespaces does not require or introduce any separate
+  // application entrypoint.
+  "postStartCommand": "bash .devcontainer/start.sh",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "prisma.prisma",
+        "bradlc.vscode-tailwindcss"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+      }
+    }
+  },
+
+  "remoteUser": "node"
+}

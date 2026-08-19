@@ -1,0 +1,87 @@
+name: linkiq-codespaces
+
+# Sprint 19 — infrastructure ONLY for GitHub Codespaces. Deliberately
+# separate from ../docker/docker-compose.dev.yml (which serves a
+# different purpose: an optional fully-containerized local Windows/Mac
+# workflow via `npm run docker:up`) rather than repurposing it, so
+# neither file has to compromise its own shape for the other's needs.
+# Both ultimately run the exact same application source code — only
+# infrastructure wiring differs, per Sprint 19's architectural rule.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: linkiq-postgres-codespaces
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: linkiq
+      POSTGRES_PASSWORD: linkiq_dev_password
+      POSTGRES_DB: linkiq
+    volumes:
+      - linkiq_codespaces_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U linkiq']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # No published host port — Codespaces port-forwarding is opt-in per
+    # devcontainer.json's forwardPorts, and Postgres isn't listed there
+    # (see section 16/17 of the Sprint 19 spec: don't expose DB/Redis
+    # publicly unless needed). The app container reaches it over the
+    # Compose network at the service name "postgres", never "localhost".
+
+  redis:
+    image: redis:7-alpine
+    container_name: linkiq-redis-codespaces
+    restart: unless-stopped
+    volumes:
+      - linkiq_codespaces_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Same reasoning as postgres above — internal-network only.
+
+  app:
+    image: node:20-bullseye
+    container_name: linkiq-app-codespaces
+    working_dir: /workspace
+    # Keeps the container alive for VS Code to attach a shell to and for
+    # postCreateCommand/postStartCommand to run in — the actual app
+    # processes (npm run dev) are started by postStartCommand, exactly
+    # the same command a local Windows developer runs, not baked into
+    # this image or this compose file. Codespaces itself never becomes
+    # something the application depends on to run; it only provisions
+    # the same Postgres/Redis/Node that local Windows dev also needs.
+    command: sleep infinity
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Sprint 19 §2/§5 — inside the Codespaces Compose network, the API
+      # reaches Postgres/Redis by service name, never "localhost". These
+      # values take precedence over whatever DATABASE_URL/REDIS_HOST a
+      # copied .env file contains (dotenv never overrides an
+      # already-set process.env value) — the SAME apps/api/.env.example
+      # template is used in every environment; only these two values are
+      # environment-specific, and they're supplied here, not by hand-
+      # editing the file.
+      DATABASE_URL: postgresql://linkiq:linkiq_dev_password@postgres:5432/linkiq?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+    volumes:
+      - ..:/workspace:cached
+    networks:
+      default:
+        aliases:
+          - app
+
+networks:
+  default:
+    name: linkiq-codespaces-network
+
+volumes:
+  linkiq_codespaces_postgres_data:
+  linkiq_codespaces_redis_data:

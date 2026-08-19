@@ -29,9 +29,12 @@ async function bootstrap(): Promise<void> {
   // setGlobalPrefix so these URLs stay unprefixed (SiteBranding.logoUrl
   // is stored — and rendered by the frontend — as a plain "/uploads/..."
   // path, not "/api/v1/uploads/...").
-  app.useStaticAssets(app.get(ConfigService).get<string>('branding.uploadDir')!, {
-    prefix: '/uploads',
-  });
+  app.useStaticAssets(
+    app.get(ConfigService).get<string>('branding.uploadDir')!,
+    {
+      prefix: '/uploads',
+    },
+  );
 
   app.useLogger(app.get(Logger));
 
@@ -58,8 +61,18 @@ async function bootstrap(): Promise<void> {
 
   app.use(helmet());
   app.use(cookieParser());
+  // Sprint 19 — CORS_ORIGIN is the single source of truth across every
+  // environment (local Windows, Codespaces, Render): comma-separated
+  // when more than one frontend origin must be allowed (e.g. a
+  // Codespaces forwarded-port URL alongside a Render staging URL). No
+  // wildcard fallback — "*" combined with credentials:true is both
+  // rejected by browsers and a bad default to ever silently fall back
+  // to; an unset CORS_ORIGIN falls back to the local dev origin only,
+  // never to "allow everything."
   app.enableCors({
-    origin: process.env.CORS_ORIGIN?.split(',') ?? '*',
+    origin: process.env.CORS_ORIGIN?.split(',').map((o) => o.trim()) ?? [
+      'http://localhost:3000',
+    ],
     credentials: true,
   });
 

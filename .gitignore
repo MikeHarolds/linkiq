@@ -9,11 +9,13 @@ dist/
 build/
 out/
 
-# Env
+# Env — every real .env variant, in every workspace, at any depth
+# (.env, .env.local, .env.development, .env.production, .env.test, ...).
+# Only the checked-in *.example templates are ever meant to be tracked.
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
+!.env.*.example
 
 # Logs
 logs/
@@ -36,6 +38,9 @@ Thumbs.db
 
 # Testing
 coverage/
+test-results/
+playwright-report/
+playwright/.cache/
 
 # Docker
 *.pid
@@ -45,3 +50,4 @@ coverage/
 *.tsbuildinfo
 prisma-shim.local.js
 *.rdb
+*.tmp
