@@ -45,7 +45,14 @@ services:
     name: linkiq-api
     runtime: node
     plan: free
-    buildCommand: npm ci && npm run db:generate && npm run build:api
+    # --include=dev is required here: NODE_ENV=production (set below,
+    # needed by the running app) also reaches the build step on Render,
+    # which makes plain `npm ci` skip devDependencies - silently
+    # breaking this build since `nest build` itself (@nestjs/cli) is a
+    # devDependency. Live-discovered via a real Render build failure
+    # ("sh: 1: nest: not found") after the same NODE_ENV had already
+    # broken the husky prepare script the same way.
+    buildCommand: npm ci --include=dev && npm run db:generate && npm run build:api
     # `prisma migrate deploy` (non-destructive, applies only PENDING
     # migrations, NEVER `migrate reset`) runs immediately before the
     # app boots. `preDeployCommand` (a dedicated pre-deploy phase) is
@@ -124,7 +131,9 @@ services:
     name: linkiq-web
     runtime: node
     plan: free
-    buildCommand: npm ci && npm run build --workspace=apps/web
+    # See linkiq-api's buildCommand comment above - same NODE_ENV vs.
+    # devDependencies issue applies here (Next.js's own build tooling).
+    buildCommand: npm ci --include=dev && npm run build --workspace=apps/web
     startCommand: npm run start:web
     buildFilter:
       paths:
