@@ -3,6 +3,28 @@ import type { ApiErrorResponse } from '@linkiq/types';
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1';
 
+/**
+ * Same-origin path prefix for the cookie-setting auth endpoints
+ * (login/register/refresh/logout), proxied to the API by next.config.js's
+ * rewrite. These calls cannot use API_URL directly: on Render (and any
+ * split-hostname deployment, e.g. Codespaces' forwarded ports), the web
+ * and API apps are on different hosts, so a cookie the API sets via
+ * Set-Cookie is scoped to the API's own host only (RFC 6265 - no Domain
+ * attribute means host-only) and browsers never send it back on
+ * requests to the web app's origin. That breaks two things at once:
+ * middleware.ts's cookie-presence check (always sees no cookie, so
+ * /dashboard and /admin redirect to /login immediately after a
+ * successful login) and this module's own silent-refresh-on-mount
+ * (the browser won't attach a cookie scoped to a different host to a
+ * cross-origin fetch either). Routing these specific calls through the
+ * web app's own origin makes the browser see them as same-origin, so
+ * the cookie is stored against linkiq-web's own host and both of the
+ * above start seeing it correctly. Every other API call is unaffected
+ * — they authenticate via the in-memory Bearer accessToken, not this
+ * cookie, and keep going straight to API_URL as before.
+ */
+const SAME_ORIGIN_API_PREFIX = '/api/v1';
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -36,6 +58,8 @@ interface RequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown;
   /** Skip the automatic 401 -> refresh -> retry-once flow (used BY the refresh call itself, to avoid recursion). */
   skipAuthRetry?: boolean;
+  /** Route through the web app's own origin (see SAME_ORIGIN_API_PREFIX) instead of API_URL — only for calls that set/rely on the httpOnly refresh cookie. */
+  sameOrigin?: boolean;
 }
 
 let refreshPromise: Promise<boolean> | null = null;
@@ -47,7 +71,7 @@ let refreshPromise: Promise<boolean> | null = null;
  */
 async function refreshAccessToken(): Promise<boolean> {
   if (!refreshPromise) {
-    refreshPromise = fetch(`${API_URL}/auth/refresh`, {
+    refreshPromise = fetch(`${SAME_ORIGIN_API_PREFIX}/auth/refresh`, {
       method: 'POST',
       credentials: 'include',
     })
@@ -87,16 +111,19 @@ export async function apiFetch<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const { body, skipAuthRetry, headers, ...rest } = options;
+  const { body, skipAuthRetry, sameOrigin, headers, ...rest } = options;
 
   // FormData (file uploads) must never be JSON-stringified, and must
   // never get an explicit Content-Type — the browser sets its own,
   // including the multipart boundary, only when Content-Type is left
   // unset. Every other request keeps the existing JSON behavior.
-  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+  const isFormData =
+    typeof FormData !== 'undefined' && body instanceof FormData;
+
+  const base = sameOrigin ? SAME_ORIGIN_API_PREFIX : API_URL;
 
   const doFetch = () =>
-    fetch(`${API_URL}${path}`, {
+    fetch(`${base}${path}`, {
       ...rest,
       credentials: 'include',
       headers: {
@@ -104,7 +131,11 @@ export async function apiFetch<T>(
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...headers,
       },
-      body: isFormData ? (body as FormData) : body !== undefined ? JSON.stringify(body) : undefined,
+      body: isFormData
+        ? (body as FormData)
+        : body !== undefined
+          ? JSON.stringify(body)
+          : undefined,
     });
 
   let res = await doFetch();

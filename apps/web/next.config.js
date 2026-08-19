@@ -45,6 +45,21 @@ const nextConfig = {
   // multi-segment path like /api/v1/... regardless.
   async rewrites() {
     return [
+      // Proxies the cookie-setting auth endpoints (login/register/refresh/
+      // logout) to the API so the browser sees Set-Cookie as coming from
+      // this app's own origin. On a split-hostname deployment (Render's
+      // two separate services, or Codespaces' forwarded ports), a cookie
+      // the API sets on its own host is never visible back to this app's
+      // origin — no Domain attribute means a host-only cookie (RFC 6265),
+      // so both middleware.ts's cookie check and this app's own
+      // silent-refresh-on-mount always saw "no cookie", even right after
+      // a successful login. See apps/web/src/lib/api-client.ts's
+      // SAME_ORIGIN_API_PREFIX comment for the full explanation — this is
+      // the other half of that fix.
+      {
+        source: '/api/v1/auth/:path*',
+        destination: `${API_ORIGIN}/api/v1/auth/:path*`,
+      },
       {
         source: '/:shortCode([A-Za-z0-9_-]{3,50})',
         destination: `${API_ORIGIN}/:shortCode`,

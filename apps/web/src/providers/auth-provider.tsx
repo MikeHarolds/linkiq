@@ -80,7 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const res = await api.post<AuthResponseDto>(
           '/auth/refresh',
           undefined,
-          { skipAuthRetry: true },
+          { skipAuthRetry: true, sameOrigin: true },
         );
         if (cancelled) return;
         setAccessToken(res.accessToken);
@@ -104,6 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (values: LoginFormValues) => {
       const res = await api.post<AuthResponseDto>('/auth/login', values, {
         skipAuthRetry: true,
+        sameOrigin: true,
       });
       setAccessToken(res.accessToken);
       setUser(res.user);
@@ -117,6 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (values: RegisterFormValues) => {
       const res = await api.post<AuthResponseDto>('/auth/register', values, {
         skipAuthRetry: true,
+        sameOrigin: true,
       });
       setAccessToken(res.accessToken);
       setUser(res.user);
@@ -127,7 +129,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = React.useCallback(async () => {
     try {
-      await api.post('/auth/logout', undefined, { skipAuthRetry: true });
+      await api.post('/auth/logout', undefined, {
+        skipAuthRetry: true,
+        sameOrigin: true,
+      });
     } catch {
       // Logout is best-effort client-side regardless of network errors —
       // we still clear local state below.
