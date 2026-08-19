@@ -45,8 +45,14 @@
   // stopped Codespace) — (re)start the app processes in the background.
   // This is the exact same `npm run dev` a local Windows developer
   // runs; Codespaces does not require or introduce any separate
-  // application entrypoint.
-  "postStartCommand": "bash .devcontainer/start.sh",
+  // application entrypoint. `setsid -f` wrapping the WHOLE script
+  // invocation (not just the npm process inside it) was required —
+  // discovered via a real Codespaces smoke test: plain `nohup ... &
+  // disown` *inside* start.sh survived when run manually over SSH, but
+  // did not survive when the devcontainer CLI itself invoked
+  // start.sh as postStartCommand — only detaching at this outer level
+  // does.
+  "postStartCommand": "setsid -f bash .devcontainer/start.sh < /dev/null > /dev/null 2>&1",
 
   "customizations": {
     "vscode": {

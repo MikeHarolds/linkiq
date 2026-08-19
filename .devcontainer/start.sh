@@ -8,20 +8,16 @@
 # run dev` command a local Windows developer runs (Sprint 19's own
 # architectural rule: Codespaces provisions infrastructure, it never
 # becomes something the application itself depends on).
+#
+# devcontainer.json's postStartCommand already wraps this ENTIRE script
+# in `setsid -f` — required, discovered via a real Codespaces smoke
+# test: detaching only the npm process from *inside* this script was
+# not enough (the devcontainer CLI still tore it down once the script
+# itself returned); only detaching at the outer invocation survives.
+# Because of that outer wrapping, this script can just run `npm run
+# dev` directly — no nohup/backgrounding needed here.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 mkdir -p .devcontainer/logs
-# Discovered via a real Codespaces smoke test (Sprint 19): plain
-# `nohup ... & disown` is NOT sufficient here — Codespaces tears down
-# postStartCommand's whole process group once the hook itself exits,
-# killing the backgrounded `npm run dev` along with it before it ever
-# writes a byte to dev.log. `setsid` gives the process its own session,
-# fully detached from postStartCommand's process group, so it survives
-# the hook exiting — the standard fix for this exact class of
-# devcontainer lifecycle-hook problem.
-setsid nohup npm run dev > .devcontainer/logs/dev.log 2>&1 < /dev/null &
-disown
-
-echo "LinkIQ dev servers starting in the background (see .devcontainer/logs/dev.log)."
-echo "Web will be available on forwarded port 3000, API on forwarded port 4000."
+exec npm run dev > .devcontainer/logs/dev.log 2>&1 < /dev/null
