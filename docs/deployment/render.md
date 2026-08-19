@@ -58,14 +58,29 @@ loudly (not silently) if these are wrong — see
 URLs** (visible on each service's dashboard page immediately after
 first deploy), go back and set:
 
-| Variable              | Service    | Value                                                                                          |
-| --------------------- | ---------- | ---------------------------------------------------------------------------------------------- |
-| `API_PUBLIC_URL`      | linkiq-api | `linkiq-api`'s own URL (used to build uploaded-file URLs — see [§File storage](#file-storage)) |
-| `APP_URL`             | linkiq-api | `linkiq-web`'s URL (used to build short-link/QR-code URLs and the Paystack checkout callback)  |
-| `CORS_ORIGIN`         | linkiq-api | `linkiq-web`'s URL (must exactly match — see [§CORS](#cors))                                   |
-| `NEXT_PUBLIC_API_URL` | linkiq-web | `linkiq-api`'s URL + `/api/v1`                                                                 |
-| `NEXT_PUBLIC_APP_URL` | linkiq-web | `linkiq-web`'s own URL                                                                         |
-| `API_ORIGIN`          | linkiq-web | `linkiq-api`'s own URL (server-side only, used by the short-link rewrite proxy)                |
+| Variable                 | Service    | Value                                                                                          |
+| ------------------------ | ---------- | ---------------------------------------------------------------------------------------------- |
+| `API_PUBLIC_URL`         | linkiq-api | `linkiq-api`'s own URL (used to build uploaded-file URLs — see [§File storage](#file-storage)) |
+| `APP_URL`                | linkiq-api | `linkiq-web`'s URL (used to build short-link/QR-code URLs and the Paystack checkout callback)  |
+| `CORS_ORIGIN`            | linkiq-api | `linkiq-web`'s URL (must exactly match — see [§CORS](#cors))                                   |
+| `NEXT_PUBLIC_API_URL`    | linkiq-web | `linkiq-api`'s URL + `/api/v1`                                                                 |
+| `NEXT_PUBLIC_APP_URL`    | linkiq-web | `linkiq-web`'s own URL                                                                         |
+| `API_ORIGIN`             | linkiq-web | `linkiq-api`'s own URL (server-side only, used by the short-link rewrite proxy)                |
+| `REDIRECT_DEFAULT_HOSTS` | linkiq-api | `linkiq-api`'s own bare hostname (e.g. `linkiq-api.onrender.com`)                              |
+
+The last one is easy to miss and breaks every short link with a 404 if
+skipped: `linkiq-web`'s rewrite proxy (`API_ORIGIN`, above) makes a
+genuine new outbound request to `linkiq-api`, so the API sees its own
+hostname on the `Host` header, not `linkiq-web`'s. `RedirectService`
+only resolves a request as "the platform's default host" when the
+`Host` header matches `APP_URL`'s hostname or an entry in
+`REDIRECT_DEFAULT_HOSTS` (see `domain-resolver.service.ts`) — without
+this, every redirect request from the rewrite proxy resolves as an
+unrecognized host and 404s, even though the link genuinely exists.
+Live-discovered running the actual investor-demo flow against this
+deployment. Also note: an env var change alone does not take effect on
+a `render restart` — it requires a genuine new deploy (`render deploys
+create`) to reach a fresh process.
 
 Then set `PAYSTACK_SECRET_KEY`/`PAYSTACK_PUBLIC_KEY` (TEST or LIVE,
 per §1 above), and trigger a redeploy of both services so they pick up

@@ -106,6 +106,16 @@ services:
       # Same value as APP_URL above — the allowed browser origin.
       - key: CORS_ORIGIN
         sync: false
+      # linkiq-api's own bare hostname (e.g. linkiq-api.onrender.com).
+      # Required because linkiq-web's rewrite proxy (API_ORIGIN) makes a
+      # genuine new request to linkiq-api, so the API sees its own
+      # hostname on the Host header, not linkiq-web's — without this,
+      # RedirectService.resolveHost treats every proxied redirect
+      # request as an unrecognized host and 404s, even for a link that
+      # genuinely exists. Live-discovered running the real investor-demo
+      # flow — see docs/deployment/render.md's env var table.
+      - key: REDIRECT_DEFAULT_HOSTS
+        sync: false
       - key: JWT_ACCESS_SECRET
         generateValue: true
       - key: WEBHOOK_SECRET_ENCRYPTION_KEY
