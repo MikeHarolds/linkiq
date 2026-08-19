@@ -53,20 +53,18 @@ services:
     # ("sh: 1: nest: not found") after the same NODE_ENV had already
     # broken the husky prepare script the same way.
     buildCommand: npm ci --include=dev && npm run db:generate && npm run build:api
-    # `prisma migrate deploy` (non-destructive, applies only PENDING
-    # migrations, NEVER `migrate reset`) runs immediately before the
-    # app boots. `preDeployCommand` (a dedicated pre-deploy phase) is
-    # the preferred mechanism but is not available on the free plan —
-    # discovered via `render blueprints validate` against this actual
-    # account ("pre-deploy command is not supported for free tier
-    # services"). Folding it into startCommand is the standard fallback
-    # for tiers without that hook: still idempotent, still applied
-    # before `node dist/main` starts serving traffic, still never
-    # destructive — see docs/architecture/paystack-integration.md for
-    # why this project never auto-resets a database. Upgrading the
-    # `linkiq-api` service off the free plan later can restore the
-    # separate preDeployCommand step if wanted.
-    startCommand: npm run db:deploy && npm run start:api
+    # scripts/render-start.sh applies pending migrations
+    # (`prisma migrate deploy` — non-destructive, never `migrate
+    # reset`), then seeds demo data ONLY if the database is genuinely
+    # empty, then starts the app — see that script's own comments for
+    # why the seed step lives here instead of a one-off Render Job
+    # (this account has no billing on file, and `render ssh` refuses
+    # non-interactive use). `preDeployCommand` (a dedicated pre-deploy
+    # phase) would be the preferred place for the migration step alone,
+    # but is not available on the free plan — discovered via `render
+    # blueprints validate` against this actual account ("pre-deploy
+    # command is not supported for free tier services").
+    startCommand: bash scripts/render-start.sh
     healthCheckPath: /api/v1/health
     buildFilter:
       paths:
