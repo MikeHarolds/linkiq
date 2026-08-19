@@ -5,6 +5,18 @@
   "workspaceFolder": "/workspace",
   "shutdownAction": "stopCompose",
 
+  // Required for `gh codespace ssh`/`logs`/`cp` to reach this container —
+  // discovered via a real Codespaces smoke test (Sprint 19), not
+  // theoretical: without this, GitHub's own tooling cannot open a
+  // remote session at all ("failed to start SSH server"). VS Code's own
+  // connection uses a different mechanism and didn't need this, but the
+  // CLI-based diagnostics used to verify this repo's Codespaces setup do.
+  "features": {
+    "ghcr.io/devcontainers/features/sshd:1": {
+      "version": "latest"
+    }
+  },
+
   // 3000 (Next.js) and 4000 (NestJS) are the two ports a browser or the
   // frontend itself ever needs to reach — see Sprint 19 §5/§9. Postgres
   // (5432) and Redis (6379) are deliberately NOT forwarded: the app
