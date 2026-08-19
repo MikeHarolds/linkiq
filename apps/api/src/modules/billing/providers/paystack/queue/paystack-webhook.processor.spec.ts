@@ -16,6 +16,7 @@ import type { WebhookEventsService } from '../../../../webhooks/webhook-events.s
 import type { BillingEventsService } from '../../../billing-events.service';
 import type { InvoicesService } from '../../../invoices.service';
 import type { PlansService } from '../../../plans.service';
+import type { SubscriptionsService } from '../../../subscriptions.service';
 import { packSubscriptionId } from '../paystack-billing.provider';
 
 import { PaystackWebhookProcessor } from './paystack-webhook.processor';
@@ -71,6 +72,7 @@ describe('PaystackWebhookProcessor', () => {
   let audit: jest.Mocked<Pick<AuditService, 'record'>>;
   let webhookEvents: jest.Mocked<Pick<WebhookEventsService, 'emit'>>;
   let roleResolution: { syncStoredRole: jest.Mock };
+  let subscriptions: jest.Mocked<Pick<SubscriptionsService, 'confirmAndActivate'>>;
   let processor: PaystackWebhookProcessor;
 
   beforeEach(() => {
@@ -89,6 +91,16 @@ describe('PaystackWebhookProcessor', () => {
     // handler now calls syncOwnerRoles(), which queries workspaceMember.
     prisma.workspaceMember.findMany.mockResolvedValue([]);
     roleResolution = { syncStoredRole: jest.fn().mockResolvedValue(undefined) };
+    // Sprint 18A — handleChargeSuccess tries the invoice-first path
+    // first; these existing tests exercise the pre-Sprint-18A direct
+    // -apply fallback, so confirmAndActivate reports "nothing
+    // correlated" by default (invoice: null), same as any real
+    // transaction that never went through the invoice-first flow.
+    subscriptions = {
+      confirmAndActivate: jest
+        .fn()
+        .mockResolvedValue({ invoice: null, subscription: null, applied: false }),
+    };
     processor = new PaystackWebhookProcessor(
       prisma as unknown as PrismaService,
       billingEvents as unknown as BillingEventsService,
@@ -97,6 +109,7 @@ describe('PaystackWebhookProcessor', () => {
       audit as unknown as AuditService,
       webhookEvents as unknown as WebhookEventsService,
       roleResolution as unknown as RoleResolutionService,
+      subscriptions as unknown as SubscriptionsService,
     );
   });
 

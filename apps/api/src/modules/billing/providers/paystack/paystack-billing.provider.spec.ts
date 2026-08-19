@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 
 import type { PaystackApiClient } from './paystack-api.client';
+import { PaystackApiException } from './paystack-api.exception';
 import {
   PaystackBillingProvider,
   packSubscriptionId,
@@ -52,27 +53,18 @@ describe('PaystackBillingProvider', () => {
   });
 
   describe('createCheckoutSession', () => {
-    it('throws BadRequestException when the plan has no providerPlanId', async () => {
+    // Sprint 18B §17 — createCheckoutSession no longer reads
+    // providerPlanId/PlanPrice at all: the caller (SubscriptionsService)
+    // always supplies the exact amount/currency to charge (straight
+    // from the originating Invoice), and this method sends exactly
+    // that to Paystack — never a `plan` code, which would let Paystack
+    // silently substitute its own stored price instead.
+
+    it('initializes a transaction for exactly the caller-supplied amount/currency, never a plan code', async () => {
       plans.getBySlug.mockResolvedValue({
         slug: 'starter',
+        currency: 'NGN',
         providerPlanId: null,
-      });
-
-      await expect(
-        provider.createCheckoutSession({
-          workspaceId: 'ws-1',
-          planSlug: 'starter',
-          email: 'a@b.com',
-        }),
-      ).rejects.toThrow(BadRequestException);
-      expect(api.initializeTransaction).not.toHaveBeenCalled();
-    });
-
-    it('initializes a transaction and returns the checkout URL', async () => {
-      plans.getBySlug.mockResolvedValue({
-        slug: 'starter',
-        providerPlanId: 'PLN_starter',
-        priceAmount: 190000,
       });
       api.initializeTransaction.mockResolvedValue({
         authorizationUrl: 'https://checkout.paystack.com/xyz',
@@ -84,28 +76,33 @@ describe('PaystackBillingProvider', () => {
         workspaceId: 'ws-1',
         planSlug: 'starter',
         email: 'a@b.com',
+        amountMinorUnits: 2_900_000,
       });
 
+      // The returned reference is the one PaystackBillingProvider itself
+      // generated and sent to initializeTransaction (see
+      // generatePaystackReference) — not api.initializeTransaction's own
+      // mocked response, which is only used for authorizationUrl here.
       expect(result).toEqual({
         devFlow: false,
         checkoutUrl: 'https://checkout.paystack.com/xyz',
+        reference: expect.any(String),
       });
       expect(api.initializeTransaction).toHaveBeenCalledWith(
         expect.objectContaining({
           email: 'a@b.com',
-          amountKobo: 190000,
-          planCode: 'PLN_starter',
-          metadata: { workspaceId: 'ws-1', planSlug: 'starter' },
+          amountKobo: 2_900_000,
+          currency: 'NGN',
+          metadata: { workspaceId: 'ws-1', planSlug: 'starter', currency: 'NGN' },
         }),
+      );
+      expect(api.initializeTransaction).toHaveBeenCalledWith(
+        expect.not.objectContaining({ planCode: expect.anything() }),
       );
     });
 
     it('uses successUrl as the callback URL when provided', async () => {
-      plans.getBySlug.mockResolvedValue({
-        slug: 'starter',
-        providerPlanId: 'PLN_starter',
-        priceAmount: 190000,
-      });
+      plans.getBySlug.mockResolvedValue({ slug: 'starter', currency: 'NGN' });
       api.initializeTransaction.mockResolvedValue({
         authorizationUrl: 'https://checkout.paystack.com/xyz',
         accessCode: 'access_xyz',
@@ -116,6 +113,7 @@ describe('PaystackBillingProvider', () => {
         workspaceId: 'ws-1',
         planSlug: 'starter',
         email: 'a@b.com',
+        amountMinorUnits: 2_900_000,
         successUrl: 'https://app.linkiq.com/dashboard/billing/callback',
       });
 
@@ -126,21 +124,10 @@ describe('PaystackBillingProvider', () => {
       );
     });
 
-    it('resolves a currency-specific PlanPrice and its own providerPlanId when currencyCode differs from the base', async () => {
+    it('sends the caller-supplied currencyCode, overriding the plan base currency', async () => {
       plans.getBySlug.mockResolvedValue({
         slug: 'professional',
-        currency: 'USD',
-        priceAmount: 4900,
-        providerPlanId: 'PLN_pro_usd',
-        billingInterval: 'MONTHLY',
-        prices: [
-          {
-            currencyId: 'cur-ngn',
-            currency: { code: 'NGN' },
-            amount: 7_500_000,
-            providerPlanId: 'PLN_pro_ngn',
-          },
-        ],
+        currency: 'NGN',
       });
       api.initializeTransaction.mockResolvedValue({
         authorizationUrl: 'https://checkout.paystack.com/xyz',
@@ -152,32 +139,85 @@ describe('PaystackBillingProvider', () => {
         workspaceId: 'ws-1',
         planSlug: 'professional',
         email: 'a@b.com',
-        currencyCode: 'NGN',
+        currencyCode: 'USD',
+        amountMinorUnits: 4900,
       });
 
       expect(api.initializeTransaction).toHaveBeenCalledWith(
-        expect.objectContaining({ amountKobo: 7_500_000, planCode: 'PLN_pro_ngn' }),
+        expect.objectContaining({ amountKobo: 4900, currency: 'USD' }),
       );
     });
 
-    it('throws when no PlanPrice exists for the requested currency', async () => {
-      plans.getBySlug.mockResolvedValue({
-        slug: 'professional',
-        currency: 'USD',
-        priceAmount: 4900,
-        providerPlanId: 'PLN_pro_usd',
-        prices: [],
+    it('embeds invoiceId in metadata when supplied', async () => {
+      plans.getBySlug.mockResolvedValue({ slug: 'starter', currency: 'NGN' });
+      api.initializeTransaction.mockResolvedValue({
+        authorizationUrl: 'https://checkout.paystack.com/xyz',
+        accessCode: 'access_xyz',
+        reference: 'txn-abc',
       });
+
+      await provider.createCheckoutSession({
+        workspaceId: 'ws-1',
+        planSlug: 'starter',
+        email: 'a@b.com',
+        amountMinorUnits: 2_900_000,
+        invoiceId: 'inv-1',
+      });
+
+      expect(api.initializeTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({ invoiceId: 'inv-1' }),
+        }),
+      );
+    });
+
+    // Sprint 18B §16 — discovered via a live TEST-mode Paystack call:
+    // getSupportedCurrencies()'s static allowlist can say a currency is
+    // fine while the LIVE merchant account still rejects it (real
+    // Paystack response: HTTP 403 "Currency not supported by merchant").
+    // Without translation this propagated as an unhandled 500.
+    it('translates a Paystack 403 (currency not enabled on the merchant account) into a friendly BadRequestException', async () => {
+      plans.getBySlug.mockResolvedValue({ slug: 'starter', currency: 'USD' });
+      api.initializeTransaction.mockRejectedValue(
+        new PaystackApiException('Currency not supported by merchant', 403),
+      );
 
       await expect(
         provider.createCheckoutSession({
           workspaceId: 'ws-1',
-          planSlug: 'professional',
+          planSlug: 'starter',
           email: 'a@b.com',
-          currencyCode: 'EUR',
+          currencyCode: 'USD',
+          amountMinorUnits: 1900,
         }),
       ).rejects.toThrow(BadRequestException);
-      expect(api.initializeTransaction).not.toHaveBeenCalled();
+      await expect(
+        provider.createCheckoutSession({
+          workspaceId: 'ws-1',
+          planSlug: 'starter',
+          email: 'a@b.com',
+          currencyCode: 'USD',
+          amountMinorUnits: 1900,
+        }),
+      ).rejects.toThrow(
+        'Payment in USD is not currently available. Please select another currency.',
+      );
+    });
+
+    it('re-throws a non-403 PaystackApiException unchanged (not misrepresented as a currency problem)', async () => {
+      plans.getBySlug.mockResolvedValue({ slug: 'starter', currency: 'NGN' });
+      api.initializeTransaction.mockRejectedValue(
+        new PaystackApiException('Paystack request failed with HTTP 500', 500),
+      );
+
+      await expect(
+        provider.createCheckoutSession({
+          workspaceId: 'ws-1',
+          planSlug: 'starter',
+          email: 'a@b.com',
+          amountMinorUnits: 2_900_000,
+        }),
+      ).rejects.toThrow(PaystackApiException);
     });
   });
 
@@ -257,6 +297,7 @@ describe('PaystackBillingProvider', () => {
         status: 'success',
         reference: 'txn-abc',
         amountKobo: 190000,
+        currency: 'USD',
         customerCode: 'CUS_abc',
         authorizationCode: 'AUTH_abc',
         planCode: 'PLN_starter',
@@ -266,7 +307,14 @@ describe('PaystackBillingProvider', () => {
 
       const result = await provider.verifyTransaction('txn-abc');
 
-      expect(result).toEqual({ success: true, reference: 'txn-abc' });
+      expect(result).toEqual({
+        success: true,
+        reference: 'txn-abc',
+        amountKobo: 190000,
+        currency: 'USD',
+        customerCode: 'CUS_abc',
+        metadata: null,
+      });
     });
 
     it('reports failure for a non-success transaction status', async () => {
@@ -274,6 +322,7 @@ describe('PaystackBillingProvider', () => {
         status: 'abandoned',
         reference: 'txn-abc',
         amountKobo: 190000,
+        currency: 'USD',
         customerCode: null,
         authorizationCode: null,
         planCode: null,
@@ -283,7 +332,14 @@ describe('PaystackBillingProvider', () => {
 
       const result = await provider.verifyTransaction('txn-abc');
 
-      expect(result).toEqual({ success: false, reference: 'txn-abc' });
+      expect(result).toEqual({
+        success: false,
+        reference: 'txn-abc',
+        amountKobo: 190000,
+        currency: 'USD',
+        customerCode: null,
+        metadata: null,
+      });
     });
   });
 });

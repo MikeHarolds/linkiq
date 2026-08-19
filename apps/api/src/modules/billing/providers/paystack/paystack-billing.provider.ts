@@ -14,6 +14,7 @@ import type {
 } from '../billing-provider.interface';
 
 import { PaystackApiClient } from './paystack-api.client';
+import { PaystackApiException } from './paystack-api.exception';
 import { generatePaystackReference } from './paystack-reference';
 
 const DEFAULT_APP_URL = process.env.APP_URL ?? 'http://localhost:3000';
@@ -66,65 +67,89 @@ export class PaystackBillingProvider implements BillingProvider {
     private readonly config: ConfigService,
   ) {}
 
+  /**
+   * Sprint 18B §17 — amount/currency-authoritative, never plan-code-
+   * driven. Before this sprint, a real checkout passed Paystack's own
+   * `plan` (plan_code) field alongside `amount`; Paystack's documented
+   * behavior is that a `plan` present on `/transaction/initialize`
+   * makes the PLAN's own stored price win, silently ignoring `amount`.
+   * That is precisely the bug a live verification exposed: a plan_code
+   * created once, early on, drifts out of sync with LinkIQ's own
+   * Plan/Invoice price the moment either side is edited afterward, with
+   * nothing to catch it until a real transaction reports a mismatched
+   * amount/currency. This method now NEVER sends `plan` — every
+   * checkout is a plain, one-time transaction for exactly
+   * `input.amountMinorUnits`/`input.currencyCode`, which
+   * `SubscriptionsService.proceedToPayment` always populates straight
+   * from the originating Invoice's own stored amount/currency (the
+   * single source of truth — see docs/architecture/paystack-
+   * integration.md §17). `Plan.providerPlanId`/`PlanPrice
+   * .providerPlanId` are no longer read here at all — kept as DB
+   * columns only for backward-compat/informational display (Sprint 10
+   * era plans that were never migrated), never a checkout requirement.
+   */
   async createCheckoutSession(
     input: CreateCheckoutSessionInput,
   ): Promise<CheckoutSessionResult> {
     const plan = await this.plans.getBySlug(input.planSlug);
-
-    // Sprint 16 — a currency other than the plan's base currency
-    // resolves to its own PlanPrice row (and that row's OWN Paystack
-    // plan_code, since a Paystack Plan object is single-currency — see
-    // docs/architecture/currency.md). No currencyCode, or a currencyCode
-    // matching the base currency, keeps pre-Sprint-16 behavior exactly.
-    let amountKobo = plan.priceAmount;
-    let providerPlanId = plan.providerPlanId;
-    let currencyCode = plan.currency;
-
-    if (input.currencyCode && input.currencyCode !== plan.currency) {
-      const price = plan.prices.find(
-        (p) => p.currency.code === input.currencyCode,
-      );
-      if (!price) {
-        throw new BadRequestException(
-          `Plan "${plan.slug}" has no price configured for ${input.currencyCode}.`,
-        );
-      }
-      amountKobo = price.amount;
-      providerPlanId = price.providerPlanId;
-      currencyCode = input.currencyCode;
-    }
-
-    if (!providerPlanId) {
-      // Deliberately not silently falling back to a one-off, non-recurring
-      // charge — see §4/§12 of the plan: only plans with a real Paystack
-      // plan_code configured are purchasable through automated checkout.
-      throw new BadRequestException(
-        `Plan "${plan.slug}" is not configured for automated checkout in ${currencyCode} yet (no Paystack plan code set).`,
-      );
-    }
+    const currencyCode = input.currencyCode ?? plan.currency;
 
     const reference = generatePaystackReference();
     const callbackUrl =
       input.successUrl ?? `${DEFAULT_APP_URL}/dashboard/billing/callback`;
 
-    const result = await this.api.initializeTransaction({
-      email: input.email,
-      amountKobo,
-      reference,
-      planCode: providerPlanId,
-      callbackUrl,
-      metadata: {
-        workspaceId: input.workspaceId,
-        planSlug: plan.slug,
+    let result;
+    try {
+      result = await this.api.initializeTransaction({
+        email: input.email,
+        amountKobo: input.amountMinorUnits,
         currency: currencyCode,
-      },
-    });
+        reference,
+        callbackUrl,
+        metadata: {
+          workspaceId: input.workspaceId,
+          planSlug: plan.slug,
+          currency: currencyCode,
+          // Sprint 18A — present whenever the caller has already created
+          // a LinkIQ Invoice for this checkout (the invoice-first flow).
+          // Absent for any older/other caller — the webhook processor
+          // falls back to workspaceId+planSlug correlation in that case.
+          ...(input.invoiceId ? { invoiceId: input.invoiceId } : {}),
+        },
+      });
+    } catch (error) {
+      // Sprint 18B §16 — getSupportedCurrencies() (above) is a static,
+      // operator-configured allowlist; it cannot know which currencies
+      // the LIVE Paystack merchant account actually has enabled (found
+      // during Sprint 18B's own live verification: a real TEST-mode
+      // account rejected a USD transaction with HTTP 403 "Currency not
+      // supported by merchant" even though USD was in the allowlist).
+      // Without this catch, that 403 propagated as an uncaught
+      // PaystackApiException — an unhandled 500 the customer never gets
+      // a real explanation for. Translate any Paystack-reported 403 here
+      // into the same friendly, actionable message
+      // assertProviderSupportsCurrency already uses for the static-
+      // allowlist case, so both paths read identically from the UI.
+      if (error instanceof PaystackApiException && error.status === 403) {
+        this.logger.warn(
+          `Paystack rejected checkout currency ${currencyCode} for workspace ${input.workspaceId}: ${error.message}`,
+        );
+        throw new BadRequestException(
+          `Payment in ${currencyCode} is not currently available. Please select another currency.`,
+        );
+      }
+      throw error;
+    }
 
     this.logger.debug(
-      `Checkout initialized for workspace ${input.workspaceId}, plan ${plan.slug}, currency ${currencyCode}, reference ${reference}`,
+      `Checkout initialized for workspace ${input.workspaceId}, plan ${plan.slug}, amount ${input.amountMinorUnits} ${currencyCode}, reference ${reference}`,
     );
 
-    return { devFlow: false, checkoutUrl: result.authorizationUrl };
+    return {
+      devFlow: false,
+      checkoutUrl: result.authorizationUrl,
+      reference,
+    };
   }
 
   /** Sprint 16 §11 — an explicit, operator-configured allowlist (see
@@ -202,6 +227,10 @@ export class PaystackBillingProvider implements BillingProvider {
     return {
       success: result.status === 'success',
       reference: result.reference,
+      amountKobo: result.amountKobo,
+      currency: result.currency,
+      customerCode: result.customerCode,
+      metadata: result.metadata,
     };
   }
 

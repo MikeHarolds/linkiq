@@ -13,6 +13,7 @@ import type { PrismaService } from '../prisma/prisma.service';
 import type { RoleResolutionService } from '../roles/role-resolution.service';
 import type { WebhookEventsService } from '../webhooks/webhook-events.service';
 
+import type { InvoicesService } from './invoices.service';
 import type { PlansService } from './plans.service';
 import type { BillingProvider } from './providers/billing-provider.interface';
 import { SubscriptionsService } from './subscriptions.service';
@@ -70,13 +71,27 @@ function makeSubscription(overrides: Partial<Record<string, unknown>> = {}) {
 
 describe('SubscriptionsService', () => {
   let prisma: MockPrismaService;
-  let plans: jest.Mocked<Pick<PlansService, 'getBySlug' | 'getFreePlan'>>;
+  let plans: jest.Mocked<
+    Pick<PlansService, 'getBySlug' | 'getFreePlan' | 'getByIdOrThrow'>
+  >;
   let audit: AuditService;
   let config: { get: jest.Mock };
   let provider: jest.Mocked<BillingProvider>;
   let webhookEvents: { emit: jest.Mock };
   let roleResolution: { syncStoredRole: jest.Mock };
   let currencies: { getByCodeOrThrow: jest.Mock };
+  let invoices: jest.Mocked<
+    Pick<
+      InvoicesService,
+      | 'createOrReusePendingInvoice'
+      | 'findPendingByIdForWorkspace'
+      | 'findByIdForWorkspace'
+      | 'findByProviderReference'
+      | 'attachProviderReference'
+      | 'markPaid'
+      | 'markFailed'
+    >
+  >;
   let service: SubscriptionsService;
 
   beforeEach(() => {
@@ -94,6 +109,7 @@ describe('SubscriptionsService', () => {
     plans = {
       getBySlug: jest.fn(),
       getFreePlan: jest.fn(),
+      getByIdOrThrow: jest.fn(),
     };
     audit = {
       record: jest.fn().mockResolvedValue(undefined),
@@ -119,6 +135,15 @@ describe('SubscriptionsService', () => {
         Promise.resolve({ code, isActive: true }),
       ),
     };
+    invoices = {
+      createOrReusePendingInvoice: jest.fn(),
+      findPendingByIdForWorkspace: jest.fn(),
+      findByIdForWorkspace: jest.fn(),
+      findByProviderReference: jest.fn(),
+      attachProviderReference: jest.fn(),
+      markPaid: jest.fn(),
+      markFailed: jest.fn(),
+    };
     service = new SubscriptionsService(
       prisma as unknown as PrismaService,
       plans as unknown as PlansService,
@@ -128,6 +153,7 @@ describe('SubscriptionsService', () => {
       webhookEvents as unknown as WebhookEventsService,
       roleResolution as unknown as RoleResolutionService,
       currencies as unknown as CurrencyService,
+      invoices as unknown as InvoicesService,
     );
   });
 
@@ -246,6 +272,10 @@ describe('SubscriptionsService', () => {
       provider.verifyTransaction.mockResolvedValue({
         success: true,
         reference: 'txn-abc',
+        amountKobo: 1900,
+        currency: 'USD',
+        customerCode: 'CUS_abc',
+        metadata: null,
       });
 
       const result = await service.verifyCheckout('ws-1', 'txn-abc');
@@ -261,6 +291,10 @@ describe('SubscriptionsService', () => {
       provider.verifyTransaction.mockResolvedValue({
         success: false,
         reference: 'txn-abc',
+        amountKobo: 1900,
+        currency: 'USD',
+        customerCode: null,
+        metadata: null,
       });
 
       const result = await service.verifyCheckout('ws-1', 'txn-abc');
@@ -270,7 +304,7 @@ describe('SubscriptionsService', () => {
   });
 
   describe('subscribe', () => {
-    it('creates an ACTIVE subscription immediately when the plan has no trial', async () => {
+    it('creates an ACTIVE subscription immediately when the plan has no trial (dev-flow, no real provider)', async () => {
       plans.getBySlug.mockResolvedValue(
         makePlan({ slug: 'starter', trialDays: null, priceAmount: 1900 }),
       );
@@ -280,7 +314,13 @@ describe('SubscriptionsService', () => {
 
       await service.subscribe('ws-1', 'user-1', 'starter', ctx);
 
-      expect(provider.createCheckoutSession).toHaveBeenCalled();
+      // Sprint 18A — with no real provider configured
+      // (provider.getProviderName undefined, same as
+      // DevelopmentBillingProvider), a payment-required move never
+      // calls the provider at all anymore — it just applies directly,
+      // exactly as dev-flow always has.
+      expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+      expect(invoices.createOrReusePendingInvoice).not.toHaveBeenCalled();
       const upsertCall = prisma.subscription.upsert.mock.calls[0][0];
       expect(upsertCall.create.status).toBe(SubscriptionStatus.ACTIVE);
       expect(audit.record).toHaveBeenCalledWith(
@@ -332,29 +372,50 @@ describe('SubscriptionsService', () => {
       expect(prisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
     });
 
-    it('returns a checkoutUrl and leaves the subscription untouched for a real-provider checkout', async () => {
+    it('Sprint 18A — creates a PENDING invoice and leaves the subscription untouched for a real-provider plan requiring payment', async () => {
       const current = makeSubscription({ status: SubscriptionStatus.ACTIVE });
-      plans.getBySlug.mockResolvedValue(
-        makePlan({ slug: 'starter', trialDays: null, priceAmount: 1900 }),
-      );
-      prisma.subscription.findUnique.mockResolvedValue(current);
-      provider.createCheckoutSession.mockResolvedValue({
-        devFlow: false,
-        checkoutUrl: 'https://checkout.paystack.com/xyz',
+      const plan = makePlan({
+        id: 'plan-starter',
+        slug: 'starter',
+        trialDays: null,
+        priceAmount: 1900,
+        providerPlanId: 'PLN_starter',
       });
+      const pendingInvoice = {
+        id: 'inv-1',
+        status: 'PENDING',
+        amount: 1900,
+        currency: 'USD',
+        targetPlanId: 'plan-starter',
+      };
+      plans.getBySlug.mockResolvedValue(plan);
+      prisma.subscription.findUnique.mockResolvedValue(current);
+      provider.getProviderName = jest.fn().mockReturnValue('paystack');
+      invoices.createOrReusePendingInvoice.mockResolvedValue(
+        pendingInvoice as never,
+      );
 
       const result = await service.subscribe('ws-1', 'user-1', 'starter', ctx);
 
       expect(result).toEqual({
         subscription: current,
-        checkoutUrl: 'https://checkout.paystack.com/xyz',
+        checkoutUrl: null,
+        invoice: pendingInvoice,
       });
       expect(prisma.subscription.upsert).not.toHaveBeenCalled();
-      expect(provider.createCheckoutSession).toHaveBeenCalledWith(
-        expect.objectContaining({ email: 'user@example.com' }),
+      expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+      expect(invoices.createOrReusePendingInvoice).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceId: 'ws-1',
+          subscriptionId: current.id,
+          targetPlanId: 'plan-starter',
+          amount: 1900,
+          currency: 'USD',
+          provider: 'paystack',
+        }),
       );
       expect(audit.record).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'billing.checkout_initiated' }),
+        expect.objectContaining({ action: 'billing.invoice_created' }),
       );
       expect(webhookEvents.emit).not.toHaveBeenCalled();
     });
@@ -386,9 +447,10 @@ describe('SubscriptionsService', () => {
 
       await service.subscribe('ws-1', 'user-1', 'professional', ctx, 'NGN');
 
-      expect(provider.createCheckoutSession).toHaveBeenCalledWith(
-        expect.objectContaining({ currencyCode: 'NGN' }),
-      );
+      // Dev-flow (no real provider configured) never calls the
+      // provider at all (Sprint 18A) — the resolved NGN price is
+      // stamped straight onto the subscription instead.
+      expect(provider.createCheckoutSession).not.toHaveBeenCalled();
       const upsertCall = prisma.subscription.upsert.mock.calls[0][0];
       expect(upsertCall.create.currency).toBe('NGN');
       expect(upsertCall.create.amount).toBe(7_500_000);
@@ -479,20 +541,32 @@ describe('SubscriptionsService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('routes through a fresh checkout instead of an in-place swap when upgrading a real provider subscription', async () => {
+    it('Sprint 18A — creates a PENDING invoice instead of an in-place swap when upgrading a real provider subscription', async () => {
       const existing = makeSubscription({
         providerSubscriptionId: 'SUB_abc:tok_abc',
         currency: 'USD',
         amount: 1900,
       });
+      const pendingInvoice = {
+        id: 'inv-1',
+        status: 'PENDING',
+        amount: 4900,
+        currency: 'USD',
+        targetPlanId: 'plan-pro',
+      };
       prisma.subscription.findUnique.mockResolvedValue(existing);
       plans.getBySlug.mockResolvedValue(
-        makePlan({ id: 'plan-pro', slug: 'professional', priceAmount: 4900 }),
+        makePlan({
+          id: 'plan-pro',
+          slug: 'professional',
+          priceAmount: 4900,
+          providerPlanId: 'PLN_pro',
+        }),
       );
-      provider.createCheckoutSession.mockResolvedValue({
-        devFlow: false,
-        checkoutUrl: 'https://checkout.paystack.com/xyz',
-      });
+      provider.getProviderName = jest.fn().mockReturnValue('paystack');
+      invoices.createOrReusePendingInvoice.mockResolvedValue(
+        pendingInvoice as never,
+      );
 
       const result = await service.changePlan(
         'ws-1',
@@ -503,14 +577,18 @@ describe('SubscriptionsService', () => {
 
       expect(result).toEqual({
         subscription: existing,
-        checkoutUrl: 'https://checkout.paystack.com/xyz',
+        checkoutUrl: null,
+        invoice: pendingInvoice,
       });
       expect(provider.changeSubscription).not.toHaveBeenCalled();
       expect(prisma.subscription.update).not.toHaveBeenCalled();
-      expect(provider.createCheckoutSession).toHaveBeenCalledWith(
+      expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+      expect(invoices.createOrReusePendingInvoice).toHaveBeenCalledWith(
         expect.objectContaining({
-          planSlug: 'professional',
-          email: 'user@example.com',
+          targetPlanId: 'plan-pro',
+          amount: 4900,
+          currency: 'USD',
+          provider: 'paystack',
         }),
       );
     });
@@ -557,12 +635,17 @@ describe('SubscriptionsService', () => {
           slug: 'professional',
           priceAmount: 4900,
           trialDays: null,
+          providerPlanId: 'PLN_pro',
         }),
       );
-      provider.createCheckoutSession.mockResolvedValue({
-        devFlow: false,
-        checkoutUrl: 'https://checkout.paystack.com/xyz',
-      });
+      provider.getProviderName = jest.fn().mockReturnValue('paystack');
+      invoices.createOrReusePendingInvoice.mockResolvedValue({
+        id: 'inv-1',
+        status: 'PENDING',
+        amount: 4900,
+        currency: 'USD',
+        targetPlanId: 'plan-pro',
+      } as never);
 
       const result = await service.changePlan(
         'ws-1',
@@ -571,10 +654,12 @@ describe('SubscriptionsService', () => {
         ctx,
       );
 
-      expect(provider.createCheckoutSession).toHaveBeenCalledWith(
-        expect.objectContaining({ planSlug: 'professional' }),
+      expect(invoices.createOrReusePendingInvoice).toHaveBeenCalledWith(
+        expect.objectContaining({ targetPlanId: 'plan-pro' }),
       );
-      expect(result.checkoutUrl).toBe('https://checkout.paystack.com/xyz');
+      expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+      expect(result.checkoutUrl).toBeNull();
+      expect(result.invoice).not.toBeNull();
       expect(prisma.subscription.update).not.toHaveBeenCalled();
     });
 
@@ -624,12 +709,17 @@ describe('SubscriptionsService', () => {
           slug: 'professional',
           priceAmount: 4900,
           trialDays: 14,
+          providerPlanId: 'PLN_pro',
         }),
       );
-      provider.createCheckoutSession.mockResolvedValue({
-        devFlow: false,
-        checkoutUrl: 'https://checkout.paystack.com/xyz',
-      });
+      provider.getProviderName = jest.fn().mockReturnValue('paystack');
+      invoices.createOrReusePendingInvoice.mockResolvedValue({
+        id: 'inv-1',
+        status: 'PENDING',
+        amount: 4900,
+        currency: 'USD',
+        targetPlanId: 'plan-pro',
+      } as never);
 
       const result = await service.changePlan(
         'ws-1',
@@ -638,8 +728,10 @@ describe('SubscriptionsService', () => {
         ctx,
       );
 
-      expect(provider.createCheckoutSession).toHaveBeenCalled();
-      expect(result.checkoutUrl).toBe('https://checkout.paystack.com/xyz');
+      expect(invoices.createOrReusePendingInvoice).toHaveBeenCalled();
+      expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+      expect(result.checkoutUrl).toBeNull();
+      expect(result.invoice).not.toBeNull();
     });
 
     it('Sprint 17 §5 — a downgrade away from a real provider subscription applies immediately, never charges, and cancels the old subscription', async () => {
@@ -803,6 +895,7 @@ describe('SubscriptionsService', () => {
       expect(result).toEqual({
         subscription: existing,
         checkoutUrl: 'https://checkout.paystack.com/xyz',
+        invoice: null,
       });
       expect(prisma.subscription.update).not.toHaveBeenCalled();
       expect(provider.createCheckoutSession).toHaveBeenCalledWith(
@@ -831,6 +924,281 @@ describe('SubscriptionsService', () => {
       expect(provider.createCheckoutSession).toHaveBeenCalledWith(
         expect.objectContaining({ currencyCode: 'NGN' }),
       );
+    });
+  });
+
+  describe('proceedToPayment (Sprint 18A)', () => {
+    function makePendingInvoice(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: 'inv-1',
+        workspaceId: 'ws-1',
+        status: 'PENDING',
+        amount: 4900,
+        currency: 'NGN',
+        targetPlanId: 'plan-pro',
+        ...overrides,
+      };
+    }
+
+    it('initializes checkout using the invoice\'s OWN currency/amount and attaches the resulting reference', async () => {
+      invoices.findPendingByIdForWorkspace.mockResolvedValue(
+        makePendingInvoice() as never,
+      );
+      plans.getByIdOrThrow.mockResolvedValue(
+        makePlan({ id: 'plan-pro', slug: 'professional' }),
+      );
+      provider.createCheckoutSession.mockResolvedValue({
+        devFlow: false,
+        checkoutUrl: 'https://checkout.paystack.com/xyz',
+        reference: 'txn-xyz',
+      });
+
+      const result = await service.proceedToPayment(
+        'ws-1',
+        'user-1',
+        'inv-1',
+        ctx,
+      );
+
+      expect(result).toEqual({ checkoutUrl: 'https://checkout.paystack.com/xyz' });
+      expect(provider.createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          planSlug: 'professional',
+          currencyCode: 'NGN',
+          invoiceId: 'inv-1',
+        }),
+      );
+      expect(invoices.attachProviderReference).toHaveBeenCalledWith(
+        'inv-1',
+        'txn-xyz',
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'billing.checkout_initiated' }),
+      );
+    });
+
+    it('never accepts a caller-supplied currency — only the invoice’s own stored currency reaches the provider', async () => {
+      invoices.findPendingByIdForWorkspace.mockResolvedValue(
+        makePendingInvoice({ currency: 'GHS' }) as never,
+      );
+      plans.getByIdOrThrow.mockResolvedValue(
+        makePlan({ id: 'plan-pro', slug: 'professional' }),
+      );
+      provider.createCheckoutSession.mockResolvedValue({
+        devFlow: false,
+        checkoutUrl: 'https://checkout.paystack.com/xyz',
+        reference: 'txn-xyz',
+      });
+
+      await service.proceedToPayment('ws-1', 'user-1', 'inv-1', ctx);
+
+      expect(provider.createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({ currencyCode: 'GHS' }),
+      );
+    });
+
+    it('rejects when no PENDING invoice exists for this workspace/id', async () => {
+      invoices.findPendingByIdForWorkspace.mockResolvedValue(null);
+
+      await expect(
+        service.proceedToPayment('ws-1', 'user-1', 'missing', ctx),
+      ).rejects.toThrow(NotFoundException);
+      expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('confirmAndActivate (Sprint 18A)', () => {
+    function makePendingInvoice(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: 'inv-1',
+        workspaceId: 'ws-1',
+        status: 'PENDING',
+        amount: 4900,
+        currency: 'USD',
+        targetPlanId: 'plan-pro',
+        ...overrides,
+      };
+    }
+
+    it('activates the subscription and marks the invoice PAID on a fully-verified success', async () => {
+      const invoice = makePendingInvoice();
+      const existing = makeSubscription({ amount: 1900, currency: 'USD' });
+      invoices.findByProviderReference.mockResolvedValue(invoice as never);
+      prisma.subscription.findUnique.mockResolvedValue(existing);
+      plans.getByIdOrThrow.mockResolvedValue(
+        makePlan({ id: 'plan-pro', slug: 'professional' }),
+      );
+      prisma.subscription.update.mockResolvedValue(
+        makeSubscription({ planId: 'plan-pro', amount: 4900 }),
+      );
+      invoices.markPaid.mockResolvedValue({
+        ...invoice,
+        status: 'PAID',
+      } as never);
+
+      const result = await service.confirmAndActivate({
+        reference: 'txn-xyz',
+        status: 'success',
+        amountKobo: 4900,
+        currency: 'USD',
+        customerCode: 'CUS_abc',
+        metadata: { workspaceId: 'ws-1' },
+      });
+
+      expect(result.applied).toBe(true);
+      expect(prisma.subscription.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { workspaceId: 'ws-1' },
+          data: expect.objectContaining({
+            planId: 'plan-pro',
+            status: SubscriptionStatus.ACTIVE,
+            amount: 4900,
+            currency: 'USD',
+            providerCustomerId: 'CUS_abc',
+          }),
+        }),
+      );
+      expect(invoices.markPaid).toHaveBeenCalledWith(
+        'inv-1',
+        expect.any(Date),
+        { start: expect.any(Date), end: expect.any(Date) },
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'billing.payment_succeeded' }),
+      );
+    });
+
+    it('marks the invoice FAILED and leaves the subscription unchanged on an amount mismatch', async () => {
+      const invoice = makePendingInvoice({ amount: 4900 });
+      invoices.findByProviderReference.mockResolvedValue(invoice as never);
+      invoices.markFailed.mockResolvedValue({
+        ...invoice,
+        status: 'FAILED',
+      } as never);
+      prisma.subscription.findUnique.mockResolvedValue(
+        makeSubscription({ amount: 1900 }),
+      );
+
+      const result = await service.confirmAndActivate({
+        reference: 'txn-xyz',
+        status: 'success',
+        amountKobo: 999, // tampered/mismatched
+        currency: 'USD',
+        customerCode: 'CUS_abc',
+        metadata: null,
+      });
+
+      expect(invoices.markFailed).toHaveBeenCalledWith(
+        'inv-1',
+        expect.any(String),
+      );
+      expect(prisma.subscription.update).not.toHaveBeenCalled();
+      expect(result.invoice?.status).toBe('FAILED');
+    });
+
+    it('marks the invoice FAILED and leaves the subscription unchanged on a currency mismatch', async () => {
+      const invoice = makePendingInvoice({ currency: 'USD' });
+      invoices.findByProviderReference.mockResolvedValue(invoice as never);
+      invoices.markFailed.mockResolvedValue({
+        ...invoice,
+        status: 'FAILED',
+      } as never);
+      prisma.subscription.findUnique.mockResolvedValue(makeSubscription());
+
+      await service.confirmAndActivate({
+        reference: 'txn-xyz',
+        status: 'success',
+        amountKobo: 4900,
+        currency: 'NGN', // mismatched
+        customerCode: 'CUS_abc',
+        metadata: null,
+      });
+
+      expect(invoices.markFailed).toHaveBeenCalled();
+      expect(prisma.subscription.update).not.toHaveBeenCalled();
+    });
+
+    it('marks the invoice FAILED (never activates) when the provider itself reports a non-success status', async () => {
+      const invoice = makePendingInvoice();
+      invoices.findByProviderReference.mockResolvedValue(invoice as never);
+      invoices.markFailed.mockResolvedValue({
+        ...invoice,
+        status: 'FAILED',
+      } as never);
+      prisma.subscription.findUnique.mockResolvedValue(makeSubscription());
+
+      await service.confirmAndActivate({
+        reference: 'txn-xyz',
+        status: 'abandoned',
+        amountKobo: 4900,
+        currency: 'USD',
+        customerCode: null,
+        metadata: null,
+      });
+
+      expect(invoices.markFailed).toHaveBeenCalled();
+      expect(prisma.subscription.update).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent — a repeat call against an already-PAID invoice never re-activates or re-audits', async () => {
+      const paidInvoice = makePendingInvoice({ status: 'PAID' });
+      invoices.findByProviderReference.mockResolvedValue(paidInvoice as never);
+      prisma.subscription.findUnique.mockResolvedValue(makeSubscription());
+
+      const result = await service.confirmAndActivate({
+        reference: 'txn-xyz',
+        status: 'success',
+        amountKobo: 4900,
+        currency: 'USD',
+        customerCode: 'CUS_abc',
+        metadata: null,
+      });
+
+      expect(result.applied).toBe(false);
+      expect(prisma.subscription.update).not.toHaveBeenCalled();
+      expect(invoices.markPaid).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent — a repeat call against an already-FAILED invoice is never resurrected to PAID', async () => {
+      const failedInvoice = makePendingInvoice({ status: 'FAILED' });
+      invoices.findByProviderReference.mockResolvedValue(
+        failedInvoice as never,
+      );
+      prisma.subscription.findUnique.mockResolvedValue(makeSubscription());
+
+      const result = await service.confirmAndActivate({
+        reference: 'txn-xyz',
+        status: 'success',
+        amountKobo: 4900,
+        currency: 'USD',
+        customerCode: 'CUS_abc',
+        metadata: null,
+      });
+
+      expect(result.applied).toBe(false);
+      expect(invoices.markPaid).not.toHaveBeenCalled();
+      expect(prisma.subscription.update).not.toHaveBeenCalled();
+    });
+
+    it('returns invoice: null (no correlation) for a reference with no matching Invoice at all', async () => {
+      invoices.findByProviderReference.mockResolvedValue(null);
+
+      const result = await service.confirmAndActivate({
+        reference: 'unrelated-txn',
+        status: 'success',
+        amountKobo: 4900,
+        currency: 'USD',
+        customerCode: 'CUS_abc',
+        metadata: null,
+      });
+
+      expect(result).toEqual({
+        invoice: null,
+        subscription: null,
+        applied: false,
+      });
+      expect(prisma.subscription.update).not.toHaveBeenCalled();
     });
   });
 });

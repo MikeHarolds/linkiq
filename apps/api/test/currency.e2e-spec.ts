@@ -478,18 +478,38 @@ describe('Currency, Localization & Multi-Currency Payments (e2e)', () => {
   });
 
   describe('Checkout currency validation', () => {
-    it('a successful checkout in a priced, provider-supported currency uses that currency plan_code', async () => {
+    it('a priced, provider-supported currency creates a PENDING invoice in that currency, then proceed-to-payment charges exactly that amount/currency (Sprint 18B §17 — never a plan_code)', async () => {
       const owner = await registerUser('checkout-ngn@example.com');
 
-      const res = await request(server)
+      const selectRes = await request(server)
         .post(`/api/v1/workspaces/${owner.workspaceId}/billing/subscribe`)
         .set(headers(owner))
         .send({ planSlug: 'e2e-currency-plan', currency: 'NGN' });
 
-      expect(res.status).toBe(200);
-      expect(res.body.checkoutUrl).toBeTruthy();
+      expect(selectRes.status).toBe(200);
+      expect(selectRes.body.checkoutUrl).toBeNull();
+      expect(selectRes.body.invoice).toEqual(
+        expect.objectContaining({ status: 'PENDING', currency: 'NGN', amount: 29_000_000 }),
+      );
+      expect(fakeApiClient.initializeTransaction).not.toHaveBeenCalled();
+
+      const payRes = await request(server)
+        .post(
+          `/api/v1/workspaces/${owner.workspaceId}/billing/invoices/${selectRes.body.invoice.id}/pay`,
+        )
+        .set(headers(owner));
+
+      expect(payRes.status).toBe(200);
+      expect(payRes.body.checkoutUrl).toBeTruthy();
       expect(fakeApiClient.initializeTransaction).toHaveBeenCalledWith(
-        expect.objectContaining({ planCode: 'PLN_e2e_ngn', amountKobo: 29_000_000 }),
+        expect.objectContaining({
+          currency: 'NGN',
+          amountKobo: 29_000_000,
+          metadata: expect.objectContaining({ currency: 'NGN' }),
+        }),
+      );
+      expect(fakeApiClient.initializeTransaction).toHaveBeenCalledWith(
+        expect.not.objectContaining({ planCode: expect.anything() }),
       );
     });
 
@@ -537,21 +557,25 @@ describe('Currency, Localization & Multi-Currency Payments (e2e)', () => {
     it("changing the user's currency preference never changes an existing subscription's recorded currency", async () => {
       const owner = await registerUser('preserve-currency@example.com');
 
-      // Free-plan default subscription is USD/0 from workspace creation.
+      // Free-plan default subscription is NGN/0 from workspace creation
+      // (NGN is the platform default — see docs/architecture/currency.md).
       const before = await request(server)
         .get(`/api/v1/workspaces/${owner.workspaceId}/billing`)
         .set(headers(owner));
-      expect(before.body.subscription.currency).toBe('USD');
+      expect(before.body.subscription.currency).toBe('NGN');
 
+      // Switch the preference to a DIFFERENT currency than the
+      // subscription's own — proves immutability, rather than
+      // coincidentally re-asserting the same default value.
       await request(server)
         .patch('/api/v1/users/me/currency-preference')
         .set(headers(owner))
-        .send({ currency: 'NGN' });
+        .send({ currency: 'USD' });
 
       const after = await request(server)
         .get(`/api/v1/workspaces/${owner.workspaceId}/billing`)
         .set(headers(owner));
-      expect(after.body.subscription.currency).toBe('USD');
+      expect(after.body.subscription.currency).toBe('NGN');
     });
   });
 

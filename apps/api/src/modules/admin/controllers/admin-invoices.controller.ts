@@ -56,7 +56,10 @@ export class AdminInvoicesController {
   async getOne(@Param('invoiceId') invoiceId: string) {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
-      include: { workspace: { select: { id: true, name: true, slug: true } } },
+      include: {
+        workspace: { select: { id: true, name: true, slug: true } },
+        targetPlan: { select: { id: true, name: true, slug: true } },
+      },
     });
     if (!invoice) {
       throw new NotFoundException('Invoice not found');

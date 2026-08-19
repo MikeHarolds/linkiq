@@ -31,7 +31,11 @@ import {
   TableHeader,
   TableRow,
 } from '@linkiq/ui';
-import { formatCurrency } from '@linkiq/utils';
+import {
+  formatCurrency,
+  majorUnitsToMinor,
+  minorUnitsToMajorString,
+} from '@linkiq/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import * as React from 'react';
@@ -111,19 +115,90 @@ function RoleSelect({
   );
 }
 
+/** Sprint 18B — the ONE editable money field, everywhere a plan price
+ * is entered. Holds a DECIMAL major-unit string (what an admin
+ * actually types, e.g. "19.99"), never the raw minor-unit integer —
+ * conversion to/from minor units happens at the read/save boundary via
+ * majorUnitsToMinor/minorUnitsToMajorString (exact string arithmetic,
+ * never floating-point multiplication). `step`/decimal handling are
+ * driven by the currency's own `decimalPlaces` (from the database-
+ * backed Currency catalogue, Sprint 16) — never hardcoded to 2, so a
+ * zero-decimal currency (e.g. XOF) or a future 3-decimal one both work
+ * correctly with no code change. */
+function DecimalMoneyInput({
+  id,
+  decimalPlaces,
+  value,
+  onChange,
+}: {
+  id: string;
+  decimalPlaces: number;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const step = decimalPlaces > 0 ? (1 / 10 ** decimalPlaces).toString() : '1';
+  return (
+    <Input
+      id={id}
+      type="number"
+      inputMode="decimal"
+      step={step}
+      min="0"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={decimalPlaces > 0 ? `0.${'0'.repeat(decimalPlaces)}` : '0'}
+    />
+  );
+}
+
+/** Currency <select> shared by every dialog that lets an admin choose
+ * (or change) which currency a price is denominated in — always shows
+ * the code AND name, never leaves the admin guessing (Sprint 18B §3). */
+function CurrencySelect({
+  id,
+  currencies,
+  value,
+  onChange,
+}: {
+  id: string;
+  currencies: AdminCurrencyDto[];
+  value: string;
+  onChange: (code: string) => void;
+}) {
+  return (
+    <select
+      id={id}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+    >
+      {currencies.map((c) => (
+        <option key={c.code} value={c.code}>
+          {c.code} — {c.name} ({c.symbol})
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function EditPlanDialog({
   plan,
+  currencies,
   onOpenChange,
   onSaved,
 }: {
   plan: PlanDto;
+  currencies: AdminCurrencyDto[];
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
 }) {
   const [name, setName] = React.useState(plan.name);
   const [description, setDescription] = React.useState(plan.description ?? '');
+  const [currencyCode, setCurrencyCode] = React.useState(plan.currency);
+  const currencyMeta = currencies.find((c) => c.code === currencyCode);
+  const decimalPlaces = currencyMeta?.decimalPlaces ?? 2;
   const [priceAmount, setPriceAmount] = React.useState(
-    String(plan.priceAmount),
+    minorUnitsToMajorString(plan.priceAmount, decimalPlaces),
   );
   const [trialDays, setTrialDays] = React.useState(
     plan.trialDays !== null ? String(plan.trialDays) : '',
@@ -153,12 +228,20 @@ function EditPlanDialog({
   const [saving, setSaving] = React.useState(false);
 
   async function handleSave() {
+    let priceMinorUnits: number;
+    try {
+      priceMinorUnits = majorUnitsToMinor(priceAmount, decimalPlaces);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Invalid price');
+      return;
+    }
     setSaving(true);
     try {
       const payload: UpdatePlanPayload = {
         name,
         description: description || null,
-        priceAmount: Number(priceAmount),
+        priceAmount: priceMinorUnits,
+        currency: currencyCode,
         trialDays: trialDays === '' ? null : Number(trialDays),
         isActive,
         providerPlanId: providerPlanId || null,
@@ -210,12 +293,24 @@ function EditPlanDialog({
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="plan-price">Price ({plan.currency} cents)</Label>
-            <Input
+            <Label htmlFor="plan-currency">Currency</Label>
+            <CurrencySelect
+              id="plan-currency"
+              currencies={currencies}
+              value={currencyCode}
+              onChange={setCurrencyCode}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="plan-price">
+              Price ({currencyCode}
+              {currencyMeta ? ` ${currencyMeta.symbol}` : ''})
+            </Label>
+            <DecimalMoneyInput
               id="plan-price"
-              type="number"
+              decimalPlaces={decimalPlaces}
               value={priceAmount}
-              onChange={(e) => setPriceAmount(e.target.value)}
+              onChange={setPriceAmount}
             />
           </div>
           <div className="space-y-1.5">
@@ -233,12 +328,18 @@ function EditPlanDialog({
             <RoleSelect value={platformRoleId} onChange={setPlatformRoleId} />
           </div>
           <div className="col-span-2 space-y-1.5">
-            <Label htmlFor="plan-provider-id">Paystack plan_code</Label>
+            <Label htmlFor="plan-provider-id">
+              Paystack plan_code{' '}
+              <span className="text-xs font-normal text-muted-foreground">
+                (optional — checkout uses this plan&apos;s price directly, not a
+                Paystack-side plan)
+              </span>
+            </Label>
             <Input
               id="plan-provider-id"
               value={providerPlanId}
               onChange={(e) => setProviderPlanId(e.target.value)}
-              placeholder="Not configured for automated checkout"
+              placeholder="Not set — not required for checkout"
             />
           </div>
           <div className="col-span-2 flex items-center gap-2">
@@ -317,9 +418,11 @@ function EditPlanDialog({
 }
 
 function CreatePlanDialog({
+  currencies,
   onOpenChange,
   onCreated,
 }: {
+  currencies: AdminCurrencyDto[];
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
 }) {
@@ -327,6 +430,16 @@ function CreatePlanDialog({
   const [slug, setSlug] = React.useState('');
   const [tier, setTier] = React.useState<PlanTier>('STARTER');
   const [description, setDescription] = React.useState('');
+  // Sprint 18B — NGN is the platform default currency; a new plan
+  // starts pointed at it, never at a hardcoded USD (see
+  // docs/architecture/currency.md).
+  const [currencyCode, setCurrencyCode] = React.useState(
+    currencies.find((c) => c.code === 'NGN')?.code ??
+      currencies[0]?.code ??
+      'NGN',
+  );
+  const currencyMeta = currencies.find((c) => c.code === currencyCode);
+  const decimalPlaces = currencyMeta?.decimalPlaces ?? 2;
   const [priceAmount, setPriceAmount] = React.useState('0');
   const [trialDays, setTrialDays] = React.useState('');
   const [syncToProvider, setSyncToProvider] = React.useState(false);
@@ -340,6 +453,13 @@ function CreatePlanDialog({
       toast.error('Name and slug are required');
       return;
     }
+    let priceMinorUnits: number;
+    try {
+      priceMinorUnits = majorUnitsToMinor(priceAmount || '0', decimalPlaces);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Invalid price');
+      return;
+    }
     setSaving(true);
     try {
       const payload: CreatePlanPayload = {
@@ -347,7 +467,8 @@ function CreatePlanDialog({
         slug,
         tier,
         description: description || undefined,
-        priceAmount: Number(priceAmount) || 0,
+        priceAmount: priceMinorUnits,
+        currency: currencyCode,
         trialDays: trialDays === '' ? null : Number(trialDays),
         limits: Object.fromEntries(
           LIMIT_KEYS.filter(
@@ -422,12 +543,24 @@ function CreatePlanDialog({
             </select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="new-plan-price">Price (cents)</Label>
-            <Input
+            <Label htmlFor="new-plan-currency">Currency</Label>
+            <CurrencySelect
+              id="new-plan-currency"
+              currencies={currencies}
+              value={currencyCode}
+              onChange={setCurrencyCode}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-plan-price">
+              Price ({currencyCode}
+              {currencyMeta ? ` ${currencyMeta.symbol}` : ''})
+            </Label>
+            <DecimalMoneyInput
               id="new-plan-price"
-              type="number"
+              decimalPlaces={decimalPlaces}
               value={priceAmount}
-              onChange={(e) => setPriceAmount(e.target.value)}
+              onChange={setPriceAmount}
             />
           </div>
           <div className="col-span-2 space-y-1.5">
@@ -534,6 +667,8 @@ function SetPlanPriceDialog({
     (c) => c.isActive && c.code !== plan.currency,
   );
   const [currencyId, setCurrencyId] = React.useState(eligible[0]?.id ?? '');
+  const selectedCurrency = eligible.find((c) => c.id === currencyId);
+  const decimalPlaces = selectedCurrency?.decimalPlaces ?? 2;
   const [amount, setAmount] = React.useState('');
   const [useExchangeRate, setUseExchangeRate] = React.useState(false);
   const [syncToProvider, setSyncToProvider] = React.useState(false);
@@ -548,11 +683,20 @@ function SetPlanPriceDialog({
       toast.error('Enter an amount, or use exchange-rate conversion');
       return;
     }
+    let amountMinorUnits: number | undefined;
+    if (!useExchangeRate) {
+      try {
+        amountMinorUnits = majorUnitsToMinor(amount, decimalPlaces);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Invalid amount');
+        return;
+      }
+    }
     setSaving(true);
     try {
       const payload: SetPlanPricePayload = {
         currencyId,
-        amount: useExchangeRate ? undefined : Number(amount),
+        amount: amountMinorUnits,
         useExchangeRate,
         syncToProvider,
       };
@@ -606,13 +750,15 @@ function SetPlanPriceDialog({
           </div>
           {!useExchangeRate && (
             <div className="space-y-1.5">
-              <Label htmlFor="price-amount">Amount (smallest unit)</Label>
-              <Input
+              <Label htmlFor="price-amount">
+                Amount ({selectedCurrency?.code ?? '—'}
+                {selectedCurrency ? ` ${selectedCurrency.symbol}` : ''})
+              </Label>
+              <DecimalMoneyInput
                 id="price-amount"
-                type="number"
+                decimalPlaces={decimalPlaces}
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="7500000"
+                onChange={setAmount}
               />
             </div>
           )}
@@ -812,14 +958,24 @@ export default function AdminPlansPage() {
                   </span>
                 </CardTitle>
                 <CardDescription>
-                  {plan.priceAmount === 0
-                    ? 'Free'
-                    : (() => {
+                  {/* Sprint 18B §3 — always show the currency CODE
+                      alongside the formatted amount, never a bare
+                      symbol a viewer has to guess the currency of. */}
+                  {plan.priceAmount === 0 ? (
+                    'Free'
+                  ) : (
+                    <>
+                      <span className="mr-1 font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
+                        {plan.currency}
+                      </span>
+                      {(() => {
                         const meta = currenciesByCode.get(plan.currency);
                         return meta
                           ? formatCurrency(plan.priceAmount, meta)
                           : formatMoney(plan.priceAmount, plan.currency);
                       })()}
+                    </>
+                  )}
                   {plan.priceAmount > 0 &&
                     ` / ${plan.billingInterval === 'ANNUAL' ? 'year' : 'month'}`}
                   {plan.trialDays ? ` · ${plan.trialDays}-day trial` : ''}
@@ -880,6 +1036,7 @@ export default function AdminPlansPage() {
       {editingPlan && (
         <EditPlanDialog
           plan={editingPlan}
+          currencies={(currencies ?? []).filter((c) => c.isActive)}
           onOpenChange={(open) => !open && setEditingPlan(null)}
           onSaved={invalidate}
         />
@@ -887,6 +1044,7 @@ export default function AdminPlansPage() {
 
       {creating && (
         <CreatePlanDialog
+          currencies={(currencies ?? []).filter((c) => c.isActive)}
           onOpenChange={(open) => setCreating(open)}
           onCreated={invalidate}
         />

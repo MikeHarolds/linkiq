@@ -302,7 +302,17 @@ export type SubscriptionStatus =
   'TRIALING' | 'ACTIVE' | 'PAST_DUE' | 'PAUSED' | 'CANCELED' | 'EXPIRED';
 
 export type InvoiceStatus =
-  'DRAFT' | 'OPEN' | 'PAID' | 'VOID' | 'UNCOLLECTIBLE' | 'REFUNDED';
+  | 'DRAFT'
+  | 'OPEN'
+  | 'PAID'
+  | 'VOID'
+  | 'UNCOLLECTIBLE'
+  | 'REFUNDED'
+  /** Sprint 18A — a checkout invoice awaiting payment. */
+  | 'PENDING'
+  /** Sprint 18A — a checkout invoice whose payment was confirmed
+   * unsuccessful (or failed independent verification). Terminal. */
+  | 'FAILED';
 
 export interface PlanLimitDto {
   key: PlanLimitKey;
@@ -409,19 +419,38 @@ export interface BillingSummaryDto {
  * it. `cancel` still returns a bare SubscriptionDto (never produces a
  * checkout).
  */
+/** Sprint 18A — non-null exactly when a paid plan change required
+ * payment and a real payment provider is configured: a PENDING invoice
+ * was created for review and `checkoutUrl` is null (nothing about the
+ * subscription has changed). The frontend shows an invoice-review
+ * screen and calls POST .../invoices/:id/pay next. */
 export interface SubscriptionMutationResultDto extends SubscriptionDto {
   checkoutUrl: string | null;
+  invoice: InvoiceDto | null;
 }
 
 export interface CheckoutCallbackResultDto {
   success: boolean;
+  invoice: InvoiceDto | null;
   subscription: SubscriptionDto | null;
+}
+
+export interface ProceedToPaymentResultDto {
+  checkoutUrl: string;
 }
 
 export interface InvoiceDto {
   id: string;
   workspaceId: string;
   subscriptionId: string | null;
+  /** Sprint 18A — the plan a PENDING/in-flight invoice's checkout is
+   * FOR; null for invoices predating this field. */
+  targetPlanId: string | null;
+  /** Sprint 18B — the same plan, resolved to a display name/slug so
+   * the customer invoice center and admin invoice list never have to
+   * make a second lookup just to show "which plan was this for." Null
+   * exactly when targetPlanId is null. */
+  targetPlan: { id: string; name: string; slug: string } | null;
   number: string;
   amount: number;
   currency: string;
@@ -432,6 +461,11 @@ export interface InvoiceDto {
   provider: string | null;
   providerInvoiceId: string | null;
   hostedInvoiceUrl: string | null;
+  /** Sprint 18B — the subscription billing period this invoice paid
+   * for, snapshotted at the moment it was marked PAID. Null for a
+   * PENDING/FAILED invoice, or one that predates this field. */
+  periodStart: string | null;
+  periodEnd: string | null;
   /** Sprint 16 — set only when `amount`/`currency` were produced via
    * exchange-rate conversion rather than a fixed price. Historical —
    * never recomputed after the fact. */

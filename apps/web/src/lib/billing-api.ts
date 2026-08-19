@@ -5,6 +5,7 @@ import type {
   InvoiceDto,
   MyEntitlementDto,
   PlanDto,
+  ProceedToPaymentResultDto,
   SubscriptionDto,
   SubscriptionMutationResultDto,
   UsageSnapshotDto,
@@ -21,11 +22,15 @@ export function getMyEntitlement(): Promise<MyEntitlementDto> {
 
 /** Sprint 16 — the authenticated user's persisted currency preference,
  * also not workspace-scoped (a user preference, not a workspace one). */
-export function getMyCurrencyPreference(): Promise<{ currencyCode: string | null }> {
+export function getMyCurrencyPreference(): Promise<{
+  currencyCode: string | null;
+}> {
   return api.get('/users/me/currency-preference');
 }
 
-export function setMyCurrencyPreference(currency: string): Promise<CurrencyDto> {
+export function setMyCurrencyPreference(
+  currency: string,
+): Promise<CurrencyDto> {
   return api.patch('/users/me/currency-preference', { currency });
 }
 
@@ -57,12 +62,15 @@ export function getInvoices(workspaceId: string): Promise<InvoiceDto[]> {
   return api.get<InvoiceDto[]>(`${basePath(workspaceId)}/invoices`);
 }
 
-/** `checkoutUrl` is non-null when a real payment provider requires the
- * browser to complete payment before anything is applied — the caller
- * must redirect there instead of treating `subscription` as the new
- * state. Always null with no payment provider configured (dev mode).
- * `currency` (Sprint 16) is optional — omitted uses the plan's own
- * base currency, exactly as before this sprint. */
+/** Sprint 18A — `invoice` is non-null when a paid plan change requires
+ * payment and a real payment provider is configured: a PENDING invoice
+ * was created for review and nothing about the subscription has
+ * changed. The caller shows an invoice-review screen and calls
+ * proceedToPayment with `invoice.id` next. `checkoutUrl` (kept for
+ * `cancel`/`reactivate`, which are unaffected by this sprint) is
+ * non-null only for those older direct-checkout paths. Always both
+ * null with no payment provider configured (dev mode) or when the
+ * change never required payment (downgrade/lateral/trial). */
 export function subscribe(
   workspaceId: string,
   planSlug: string,
@@ -105,9 +113,24 @@ export function reactivateSubscription(
   );
 }
 
-/** Fast-path UX check for the page the browser lands on after a
- * redirect-based checkout. Read-only — the inbound webhook remains the
- * source of truth for actually activating the subscription. */
+/** Sprint 18A, step 3 — the explicit "Proceed to Payment" action from
+ * the invoice-review screen. Initializes a real Paystack transaction
+ * against the given PENDING invoice's own stored currency/amount and
+ * returns the authorization URL to redirect to. */
+export function proceedToPayment(
+  workspaceId: string,
+  invoiceId: string,
+): Promise<ProceedToPaymentResultDto> {
+  return api.post<ProceedToPaymentResultDto>(
+    `${basePath(workspaceId)}/invoices/${invoiceId}/pay`,
+  );
+}
+
+/** The page the browser lands on after a redirect-based checkout.
+ * Sprint 18A — independently re-verifies the transaction server-side
+ * and, only on a verified success, activates the subscription; safe to
+ * call repeatedly (idempotent). Never trust a redirect-back alone as
+ * proof of payment — always call this. */
 export function verifyCheckout(
   workspaceId: string,
   reference: string,

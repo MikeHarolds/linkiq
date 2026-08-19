@@ -214,6 +214,19 @@ enum InvoiceStatus {
   /// means "was collected, then given back" — a different, real state
   /// the existing enum had no accurate value for.
   REFUNDED
+  /// Sprint 18A — a checkout invoice awaiting payment: created the
+  /// moment a paid plan change is selected, before any Paystack
+  /// transaction exists. Distinct from OPEN/DRAFT (both pre-existing,
+  /// unused by any real write path before this sprint) so the new
+  /// invoice-first flow has an unambiguous, purpose-built vocabulary
+  /// rather than overloading a value with new meaning — see
+  /// docs/architecture/paystack-integration.md's invoice-first section.
+  PENDING
+  /// The Paystack transaction for this invoice was confirmed
+  /// unsuccessful (or independently verified as such) — terminal, never
+  /// transitions to PAID. A retry creates a NEW invoice; this one stays
+  /// exactly as it was for an honest financial history (Sprint 16 §13).
+  FAILED
 }
 
 /// Sprint 14 — one value per editable section of the public marketing
@@ -799,11 +812,15 @@ model Plan {
   slug            String          @unique
   tier            PlanTier
   description     String?
-  /// Smallest currency unit (cents) — 0 for FREE. Never a float, to avoid
+  /// Smallest currency unit (kobo) — 0 for FREE. Never a float, to avoid
   /// rounding drift in a value that will eventually flow to a real
   /// payment provider.
   priceAmount     Int
-  currency        String          @default("USD")
+  /// Sprint 18B — NGN is the platform's default/primary currency (see
+  /// CurrencySettings, the real source of truth for resolution; this
+  /// column-level default only matters for a row created without an
+  /// explicit currency, e.g. a raw insert bypassing PlansService).
+  currency        String          @default("NGN")
   billingInterval BillingInterval @default(MONTHLY)
   /// Days of trial access granted on a fresh subscribe to this plan; null
   /// = no trial offered (e.g. FREE, ENTERPRISE).
@@ -850,13 +867,18 @@ model Plan {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  limits        PlanLimit[]
-  subscriptions Subscription[]
+  limits           PlanLimit[]
+  subscriptions    Subscription[]
   /// Sprint 16 — additional fixed or converted per-currency prices. The
   /// base `currency`/`priceAmount` above are never removed or
   /// duplicated into this list; a currency with no PlanPrice row simply
   /// isn't purchasable in that currency (see CurrencyService).
-  prices        PlanPrice[]
+  prices           PlanPrice[]
+  /// Sprint 18A — invoices created FOR a checkout targeting this plan
+  /// (see Invoice.targetPlanId's own docs). Never the plan a paid
+  /// invoice's subscription ends up on after an unrelated later change —
+  /// purely "what was this specific checkout for."
+  targetOfInvoices Invoice[]
 
   @@index([isActive])
   @@map("plans")
@@ -949,8 +971,10 @@ model Subscription {
   /// what Sprint 16 §12/§13 forbids. Backfilled for every pre-existing
   /// row from its plan's currency/priceAmount in this sprint's
   /// migration; see PlansService/SubscriptionsService for every write
-  /// site going forward.
-  currency String @default("USD")
+  /// site going forward. Sprint 18B — column-level default is NGN,
+  /// matching the platform default (see Plan.currency's own note); every
+  /// real write site sets this explicitly regardless.
+  currency String @default("NGN")
   amount   Int    @default(0)
 
   createdAt DateTime @default(now())
@@ -1002,11 +1026,37 @@ model Invoice {
   subscriptionId String?       @db.Uuid
   subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
 
+  /// Sprint 18A — the plan this invoice's checkout is FOR, set at
+  /// creation (PENDING) and never changed afterward. Distinct from
+  /// `subscription` above, which always points at the workspace's one
+  /// existing Subscription row (per Sprint 7's create-default-on-
+  /// signup invariant) being modified — `targetPlan` is "what the user
+  /// is trying to buy," `subscription` is "what gets updated once they
+  /// have." Null for legacy/webhook-recorded invoices that predate this
+  /// field (see InvoicesService.recordProviderInvoice).
+  targetPlanId String? @db.Uuid
+  targetPlan   Plan?   @relation(fields: [targetPlanId], references: [id], onDelete: SetNull)
+
   /// Human-readable reference, unique per workspace (e.g. "DEV-0001").
+  /// Also serves as the receipt number once PAID — see billing.md §7:
+  /// this codebase deliberately reuses Invoice as the receipt rather
+  /// than introducing a second, duplicate entity.
   number   String
   amount   Int
-  currency String        @default("USD")
+  /// Sprint 18B — column-level default is NGN, matching the platform
+  /// default; every real write site sets this explicitly regardless.
+  currency String        @default("NGN")
   status   InvoiceStatus @default(DRAFT)
+
+  /// Sprint 18B — the subscription billing period this invoice paid
+  /// for, snapshotted at the moment it was marked PAID (same
+  /// now/currentPeriodEnd values SubscriptionsService.confirmAndActivate
+  /// writes onto the Subscription itself). Null for a PENDING/FAILED
+  /// invoice, or any invoice that predates this field. Powers the
+  /// customer-facing invoice/receipt "billing period" display without
+  /// re-deriving it from the (possibly since-changed) Subscription row.
+  periodStart DateTime?
+  periodEnd   DateTime?
 
   issueDate DateTime  @default(now())
   dueDate   DateTime?

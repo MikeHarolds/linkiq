@@ -16,6 +16,7 @@ import { WebhookEventsService } from '../../../../webhooks/webhook-events.servic
 import { BillingEventsService } from '../../../billing-events.service';
 import { InvoicesService } from '../../../invoices.service';
 import { PlansService } from '../../../plans.service';
+import { SubscriptionsService } from '../../../subscriptions.service';
 import { packSubscriptionId } from '../paystack-billing.provider';
 
 import {
@@ -36,6 +37,9 @@ const SUBSCRIPTION_WITH_PLAN_INCLUDE = {
 interface PaystackMetadata {
   workspaceId?: string;
   planSlug?: string;
+  /** Sprint 18A — present when this checkout was initialized via the
+   * invoice-first flow (see CreateCheckoutSessionInput.invoiceId). */
+  invoiceId?: string;
 }
 
 function extractMetadata(data: Record<string, unknown>): PaystackMetadata {
@@ -78,6 +82,7 @@ export class PaystackWebhookProcessor extends WorkerHost {
     private readonly audit: AuditService,
     private readonly webhookEvents: WebhookEventsService,
     private readonly roleResolution: RoleResolutionService,
+    private readonly subscriptions: SubscriptionsService,
   ) {
     super();
   }
@@ -148,19 +153,49 @@ export class PaystackWebhookProcessor extends WorkerHost {
     }
   }
 
-  /** Confirms a payment — the most trustworthy transition, since LinkIQ
-   * set metadata.workspaceId/planSlug itself at initializeTransaction
-   * time (see PaystackBillingProvider.createCheckoutSession). */
+  /**
+   * Confirms a payment. Sprint 18A — first tries the invoice-first
+   * path: SubscriptionsService.confirmAndActivate, the SAME shared,
+   * idempotent function the checkout-callback route calls, correlated
+   * via metadata.invoiceId (or the reference itself, if
+   * proceedToPayment already attached it). When that returns no
+   * correlated invoice at all (a transaction that never went through
+   * the invoice-first flow — e.g. this webhook races ahead of
+   * proceedToPayment's own attachProviderReference call, or a legacy/
+   * test payload with only workspaceId+planSlug metadata), falls back
+   * to the original direct-apply logic below, preserving this
+   * processor's pre-Sprint-18A behavior exactly for that case.
+   */
   private async handleChargeSuccess(
     data: Record<string, unknown>,
   ): Promise<void> {
-    const { workspaceId, planSlug } = extractMetadata(data);
-    const customer = data.customer as { customer_code?: string } | undefined;
-    const customerCode = customer?.customer_code;
     const reference =
       typeof data.reference === 'string' ? data.reference : undefined;
     const amount = typeof data.amount === 'number' ? data.amount : undefined;
-    const currency = typeof data.currency === 'string' ? data.currency : 'USD';
+    const currency = typeof data.currency === 'string' ? data.currency : 'NGN';
+    const customer = data.customer as { customer_code?: string } | undefined;
+    const customerCode = customer?.customer_code;
+
+    if (reference && amount !== undefined) {
+      const rawMetadata =
+        (data.metadata as Record<string, unknown> | undefined) ?? null;
+      const result = await this.subscriptions.confirmAndActivate({
+        reference,
+        status: 'success',
+        amountKobo: amount,
+        currency,
+        customerCode: customerCode ?? null,
+        metadata: rawMetadata,
+      });
+      if (result.invoice) {
+        // Handled entirely by the shared function — including audit,
+        // outbound webhook emit, and role sync (applied:false on a
+        // repeat delivery is the intended idempotent no-op).
+        return;
+      }
+    }
+
+    const { workspaceId, planSlug } = extractMetadata(data);
 
     if (!workspaceId || !planSlug || !customerCode) {
       this.logger.warn(
@@ -406,7 +441,7 @@ export class PaystackWebhookProcessor extends WorkerHost {
     }
 
     const amount = typeof data.amount === 'number' ? data.amount : 0;
-    const currency = typeof data.currency === 'string' ? data.currency : 'USD';
+    const currency = typeof data.currency === 'string' ? data.currency : 'NGN';
     const failureReason =
       typeof data.gateway_response === 'string'
         ? data.gateway_response

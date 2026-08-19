@@ -29,23 +29,36 @@ const PAGE_SIZE = 20;
 
 const STATUS_FILTERS: { label: string; value: InvoiceStatus | undefined }[] = [
   { label: 'All', value: undefined },
+  { label: 'Pending', value: 'PENDING' },
   { label: 'Paid', value: 'PAID' },
+  { label: 'Failed', value: 'FAILED' },
   { label: 'Uncollectible', value: 'UNCOLLECTIBLE' },
   { label: 'Refunded', value: 'REFUNDED' },
 ];
 
 function formatDate(value: string | null): string {
   if (!value) return '—';
-  return new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric' }).format(
-    new Date(value),
-  );
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(new Date(value));
 }
 
 function formatMoney(amount: number, currency: string): string {
-  return (amount / 100).toLocaleString('en-US', { style: 'currency', currency });
+  return (amount / 100).toLocaleString('en-US', {
+    style: 'currency',
+    currency,
+  });
 }
 
-function InvoiceDetailDialog({ invoice, onClose }: { invoice: AdminInvoiceDto; onClose: () => void }) {
+function InvoiceDetailDialog({
+  invoice,
+  onClose,
+}: {
+  invoice: AdminInvoiceDto;
+  onClose: () => void;
+}) {
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
@@ -58,8 +71,16 @@ function InvoiceDetailDialog({ invoice, onClose }: { invoice: AdminInvoiceDto; o
             <span>{invoice.workspace.name}</span>
           </div>
           <div className="flex justify-between">
+            <span className="text-muted-foreground">Plan</span>
+            <span>{invoice.targetPlan?.name ?? '—'}</span>
+          </div>
+          <div className="flex justify-between">
             <span className="text-muted-foreground">Amount</span>
             <span>{formatMoney(invoice.amount, invoice.currency)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Currency</span>
+            <span>{invoice.currency}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Status</span>
@@ -71,7 +92,9 @@ function InvoiceDetailDialog({ invoice, onClose }: { invoice: AdminInvoiceDto; o
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Provider reference</span>
-            <span className="font-mono text-xs">{invoice.providerInvoiceId ?? '—'}</span>
+            <span className="font-mono text-xs">
+              {invoice.providerInvoiceId ?? '—'}
+            </span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Issued</span>
@@ -96,7 +119,9 @@ function InvoiceDetailDialog({ invoice, onClose }: { invoice: AdminInvoiceDto; o
 export default function AdminInvoicesPage() {
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
-  const [status, setStatus] = React.useState<InvoiceStatus | undefined>(undefined);
+  const [status, setStatus] = React.useState<InvoiceStatus | undefined>(
+    undefined,
+  );
   const [page, setPage] = React.useState(1);
   const [selected, setSelected] = React.useState<AdminInvoiceDto | null>(null);
 
@@ -110,12 +135,21 @@ export default function AdminInvoicesPage() {
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['admin', 'invoices', page, debouncedSearch, status],
-    queryFn: () => listInvoices({ page, pageSize: PAGE_SIZE, search: debouncedSearch || undefined, status }),
+    queryFn: () =>
+      listInvoices({
+        page,
+        pageSize: PAGE_SIZE,
+        search: debouncedSearch || undefined,
+        status,
+      }),
   });
 
   return (
     <div>
-      <AdminPageHeader title="Invoices" description="Platform-wide invoice register." />
+      <AdminPageHeader
+        title="Invoices"
+        description="Platform-wide invoice register."
+      />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Input
@@ -141,14 +175,20 @@ export default function AdminInvoicesPage() {
       </div>
 
       {isLoading && (
-        <div role="status" aria-live="polite" className="py-12 text-center text-muted-foreground">
+        <div
+          role="status"
+          aria-live="polite"
+          className="py-12 text-center text-muted-foreground"
+        >
           Loading invoices…
         </div>
       )}
 
       {isError && (
         <div role="alert" className="py-12 text-center text-destructive">
-          {error instanceof ApiError ? error.message : 'Failed to load invoices.'}
+          {error instanceof ApiError
+            ? error.message
+            : 'Failed to load invoices.'}
         </div>
       )}
 
@@ -166,6 +206,7 @@ export default function AdminInvoicesPage() {
                 <TableRow>
                   <TableHead>Invoice</TableHead>
                   <TableHead>Workspace</TableHead>
+                  <TableHead>Plan</TableHead>
                   <TableHead>Amount</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Issued</TableHead>
@@ -176,20 +217,38 @@ export default function AdminInvoicesPage() {
               <TableBody>
                 {data.items.map((invoice) => (
                   <TableRow key={invoice.id}>
-                    <TableCell className="font-mono text-xs">{invoice.number}</TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {invoice.number}
+                    </TableCell>
                     <TableCell>
-                      <Link href={`/admin/workspaces/${invoice.workspaceId}`} className="hover:underline">
+                      <Link
+                        href={`/admin/workspaces/${invoice.workspaceId}`}
+                        className="hover:underline"
+                      >
                         {invoice.workspace.name}
                       </Link>
                     </TableCell>
-                    <TableCell>{formatMoney(invoice.amount, invoice.currency)}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {invoice.targetPlan?.name ?? '—'}
+                    </TableCell>
+                    <TableCell>
+                      {formatMoney(invoice.amount, invoice.currency)}
+                    </TableCell>
                     <TableCell>
                       <StatusBadge status={invoice.status} />
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{formatDate(invoice.issueDate)}</TableCell>
-                    <TableCell className="text-muted-foreground">{formatDate(invoice.paidAt)}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {formatDate(invoice.issueDate)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {formatDate(invoice.paidAt)}
+                    </TableCell>
                     <TableCell>
-                      <Button variant="ghost" size="sm" onClick={() => setSelected(invoice)}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelected(invoice)}
+                      >
                         View
                       </Button>
                     </TableCell>
@@ -198,11 +257,19 @@ export default function AdminInvoicesPage() {
               </TableBody>
             </Table>
           </div>
-          <PaginationFooter pagination={data.pagination} onPageChange={setPage} />
+          <PaginationFooter
+            pagination={data.pagination}
+            onPageChange={setPage}
+          />
         </>
       )}
 
-      {selected && <InvoiceDetailDialog invoice={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <InvoiceDetailDialog
+          invoice={selected}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </div>
   );
 }

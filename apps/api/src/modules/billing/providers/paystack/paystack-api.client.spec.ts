@@ -82,6 +82,7 @@ describe('PaystackApiClient', () => {
     const result = await client.initializeTransaction({
       email: 'a@b.com',
       amountKobo: 190000,
+      currency: 'NGN',
       reference: 'txn-abc',
       planCode: 'PLN_starter',
     });
@@ -91,6 +92,7 @@ describe('PaystackApiClient', () => {
     expect(sentBody).toMatchObject({
       email: 'a@b.com',
       amount: 190000,
+      currency: 'NGN',
       reference: 'txn-abc',
       plan: 'PLN_starter',
     });
@@ -110,6 +112,7 @@ describe('PaystackApiClient', () => {
           status: 'success',
           reference: 'txn-abc',
           amount: 190000,
+          currency: 'USD',
           customer: { customer_code: 'CUS_abc' },
           authorization: { authorization_code: 'AUTH_abc' },
           plan: 'PLN_starter',
@@ -128,6 +131,7 @@ describe('PaystackApiClient', () => {
       status: 'success',
       reference: 'txn-abc',
       amountKobo: 190000,
+      currency: 'USD',
       customerCode: 'CUS_abc',
       authorizationCode: 'AUTH_abc',
       planCode: 'PLN_starter',
@@ -155,6 +159,7 @@ describe('PaystackApiClient', () => {
       status: 'abandoned',
       reference: 'txn-abc',
       amountKobo: 190000,
+      currency: null,
       customerCode: null,
       authorizationCode: null,
       planCode: null,
@@ -342,6 +347,7 @@ describe('PaystackApiClient', () => {
       client.initializeTransaction({
         email: 'a@b.com',
         amountKobo: 190000,
+        currency: 'NGN',
         reference: 'dup-ref',
       }),
     ).rejects.toThrow('Transaction reference used before');

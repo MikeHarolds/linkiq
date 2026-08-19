@@ -437,4 +437,142 @@ describe('Super Admin Platform Administration (e2e)', () => {
       expect(forcedLogout).not.toBeNull();
     });
   });
+
+  /**
+   * Sprint 18B §1/§2/§19 — the admin plan catalog's money handling.
+   * `priceAmount` is always minor units at the DTO boundary (the web
+   * admin UI converts a typed decimal to this via exact string
+   * arithmetic — see packages/utils/src/format.ts — but the DTO/API
+   * contract itself only ever accepts an integer); these tests exercise
+   * that boundary directly over HTTP, independent of the frontend
+   * conversion, and confirm no silent truncation/rounding happens
+   * anywhere between the request body and the persisted+returned row.
+   */
+  describe('Plan pricing — NGN default and decimal-safe amounts (Sprint 18B)', () => {
+    const scratchPlanSlugs = [
+      'e2e-ngn-default-plan',
+      'e2e-precise-amount-plan',
+      'e2e-oversized-amount-plan',
+      'e2e-decimal-amount-plan',
+      'e2e-update-amount-plan',
+    ];
+
+    // resetDatabase() deliberately never touches Plan rows (shared
+    // seed-managed reference data — see currency.e2e-spec.ts's own
+    // rationale), so this file's own ad-hoc plans must be cleaned up
+    // explicitly, both before (defensive, for a rerun after a killed
+    // process) and after — same pattern as roles-and-permissions
+    // .e2e-spec.ts's custom-plan cleanup.
+    beforeAll(async () => {
+      await prisma.plan.deleteMany({ where: { slug: { in: scratchPlanSlugs } } });
+    });
+
+    afterAll(async () => {
+      await prisma.plan.deleteMany({ where: { slug: { in: scratchPlanSlugs } } });
+    });
+
+    async function superAdmin(email: string) {
+      const admin = await registerUser(email);
+      await promoteToSuperAdmin(admin.userId);
+      return admin;
+    }
+
+    it('defaults a new plan to NGN when currency is omitted', async () => {
+      const admin = await superAdmin('super-plan-1@example.com');
+
+      const res = await request(server)
+        .post('/api/v1/admin/plans')
+        .set(auth(admin))
+        .send({
+          name: 'E2E NGN Default Plan',
+          slug: 'e2e-ngn-default-plan',
+          tier: 'STARTER',
+          priceAmount: 1999,
+        })
+        .expect(201);
+
+      expect(res.body.currency).toBe('NGN');
+    });
+
+    it('round-trips a large, non-trivial minor-unit amount exactly — no truncation or rounding', async () => {
+      const admin = await superAdmin('super-plan-2@example.com');
+      // 999,999.99 in a 2-decimal-place currency, expressed in minor
+      // units — deliberately not a round number, to catch any silent
+      // float-driven drift in the create -> Prisma -> response path.
+      const preciseAmount = 99_999_999;
+
+      const created = await request(server)
+        .post('/api/v1/admin/plans')
+        .set(auth(admin))
+        .send({
+          name: 'E2E Precise Amount Plan',
+          slug: 'e2e-precise-amount-plan',
+          tier: 'BUSINESS',
+          priceAmount: preciseAmount,
+          currency: 'NGN',
+        })
+        .expect(201);
+      expect(created.body.priceAmount).toBe(preciseAmount);
+
+      const fetched = await request(server)
+        .get(`/api/v1/admin/plans/${created.body.id}`)
+        .set(auth(admin))
+        .expect(200);
+      expect(fetched.body.priceAmount).toBe(preciseAmount);
+    });
+
+    it('rejects a priceAmount above MAX_MONEY_MINOR_UNITS instead of silently clamping it', async () => {
+      const admin = await superAdmin('super-plan-3@example.com');
+
+      await request(server)
+        .post('/api/v1/admin/plans')
+        .set(auth(admin))
+        .send({
+          name: 'E2E Oversized Amount Plan',
+          slug: 'e2e-oversized-amount-plan',
+          tier: 'BUSINESS',
+          priceAmount: 1_000_000_000, // one above MAX_MONEY_MINOR_UNITS
+        })
+        .expect(400);
+    });
+
+    it('rejects a non-integer priceAmount rather than silently truncating a decimal', async () => {
+      const admin = await superAdmin('super-plan-4@example.com');
+
+      await request(server)
+        .post('/api/v1/admin/plans')
+        .set(auth(admin))
+        .send({
+          name: 'E2E Decimal Amount Plan',
+          slug: 'e2e-decimal-amount-plan',
+          tier: 'STARTER',
+          priceAmount: 19.99, // must be sent as minor units (1999), never a float
+        })
+        .expect(400);
+    });
+
+    it('updating priceAmount persists the new value exactly, unrelated fields untouched', async () => {
+      const admin = await superAdmin('super-plan-5@example.com');
+      const created = await request(server)
+        .post('/api/v1/admin/plans')
+        .set(auth(admin))
+        .send({
+          name: 'E2E Update Amount Plan',
+          slug: 'e2e-update-amount-plan',
+          tier: 'PROFESSIONAL',
+          priceAmount: 500,
+          currency: 'NGN',
+        })
+        .expect(201);
+
+      const updated = await request(server)
+        .patch(`/api/v1/admin/plans/${created.body.id}`)
+        .set(auth(admin))
+        .send({ priceAmount: 1_999_999 })
+        .expect(200);
+
+      expect(updated.body.priceAmount).toBe(1_999_999);
+      expect(updated.body.name).toBe('E2E Update Amount Plan');
+    });
+  });
 });

@@ -1,6 +1,6 @@
 'use client';
 
-import type { CurrencyDto, PlanDto } from '@linkiq/types';
+import type { CurrencyDto, InvoiceDto, PlanDto } from '@linkiq/types';
 import {
   Badge,
   Button,
@@ -22,8 +22,11 @@ import * as React from 'react';
 import { toast } from 'sonner';
 
 import { USAGE_BAR_KEYS } from '@/components/billing/feature-labels';
+import { InvoiceDetailDialog } from '@/components/billing/invoice-detail-dialog';
+import { InvoiceReviewDialog } from '@/components/billing/invoice-review-dialog';
 import { PlanCard } from '@/components/billing/plan-card';
 import { PlanChangeConfirmDialog } from '@/components/billing/plan-change-confirm-dialog';
+import { ReceiptDialog } from '@/components/billing/receipt-dialog';
 import { SubscriptionStatusBadge } from '@/components/billing/subscription-status-badge';
 import { UsageRow } from '@/components/billing/usage-row';
 import { CurrencySelect } from '@/components/currency/currency-select';
@@ -35,6 +38,7 @@ import {
   getInvoices,
   getMyEntitlement,
   getPlans,
+  proceedToPayment,
   reactivateSubscription,
   subscribe,
 } from '@/lib/billing-api';
@@ -59,7 +63,9 @@ function invoiceStatusVariant(
   status: string,
 ): 'success' | 'secondary' | 'destructive' | 'outline' {
   if (status === 'PAID') return 'success';
-  if (status === 'VOID' || status === 'UNCOLLECTIBLE') return 'destructive';
+  if (status === 'VOID' || status === 'UNCOLLECTIBLE' || status === 'FAILED') {
+    return 'destructive';
+  }
   if (status === 'REFUNDED') return 'secondary';
   return 'outline';
 }
@@ -86,7 +92,7 @@ function formatDate(value: string | null): string {
 }
 
 export default function BillingDashboardPage() {
-  const { currentWorkspaceId, workspaces } = useAuth();
+  const { currentWorkspaceId, workspaces, user } = useAuth();
   const queryClient = useQueryClient();
   const currentRole = workspaces.find((w) => w.id === currentWorkspaceId)?.role;
   // Deliberately narrower than every other Sprint 6/7 "can manage"
@@ -98,7 +104,29 @@ export default function BillingDashboardPage() {
   const [busyPlanSlug, setBusyPlanSlug] = React.useState<string | null>(null);
   const [cancelBusy, setCancelBusy] = React.useState(false);
   const [pendingPlan, setPendingPlan] = React.useState<PlanDto | null>(null);
-  const checkoutCurrencyCode = currency?.code ?? 'USD';
+  // Sprint 18A — set once a paid plan selection creates a PENDING
+  // invoice; the invoice-review screen replaces PlanChangeConfirmDialog
+  // while this is non-null. Cleared on cancel (the invoice itself stays
+  // PENDING and retriable — see InvoicesService.createOrReusePendingInvoice).
+  const [pendingInvoice, setPendingInvoice] = React.useState<InvoiceDto | null>(
+    null,
+  );
+  const [payBusy, setPayBusy] = React.useState(false);
+  // Sprint 18B §10/§11 — the customer invoice center's "View Invoice"
+  // and "View Receipt" dialogs. Both are read-only views over the
+  // exact same Invoice row already fetched by invoicesQuery below —
+  // never a second network round-trip, never a fabricated value.
+  const [viewingInvoice, setViewingInvoice] = React.useState<InvoiceDto | null>(
+    null,
+  );
+  const [viewingReceipt, setViewingReceipt] = React.useState<InvoiceDto | null>(
+    null,
+  );
+  // Sprint 18B — NGN is the platform default (docs/architecture/
+  // currency.md); this only matters for the brief window before
+  // useCurrency's own resolution (explicit > preference > IP > platform
+  // default) has returned a value.
+  const checkoutCurrencyCode = currency?.code ?? 'NGN';
 
   const summaryQuery = useQuery({
     queryKey: ['billing', currentWorkspaceId],
@@ -140,10 +168,19 @@ export default function BillingDashboardPage() {
       const result = hasSubscription
         ? await changePlan(currentWorkspaceId, plan.slug, checkoutCurrencyCode)
         : await subscribe(currentWorkspaceId, plan.slug, checkoutCurrencyCode);
+      if (result.invoice) {
+        // Sprint 18A — a PENDING invoice was created for review; nothing
+        // about the subscription has changed. Keep `pendingPlan` set
+        // (the invoice-review screen needs it) and layer the invoice-
+        // review screen on top instead of redirecting or toasting
+        // success — the plan is NOT active yet.
+        setPendingInvoice(result.invoice);
+        return;
+      }
       if (result.checkoutUrl) {
-        // A real payment provider is configured — nothing is applied yet,
-        // the browser must complete checkout there. The inbound webhook
-        // (not this response) is what actually activates the plan.
+        // Only reachable via reactivate's older direct-checkout path
+        // (unaffected by this sprint) — nothing is applied yet, the
+        // browser must complete checkout there.
         window.location.href = result.checkoutUrl;
         return;
       }
@@ -160,6 +197,43 @@ export default function BillingDashboardPage() {
       );
     } finally {
       setBusyPlanSlug(null);
+    }
+  }
+
+  async function handleProceedToPayment() {
+    if (!currentWorkspaceId || !pendingInvoice) return;
+    setPayBusy(true);
+    try {
+      const { checkoutUrl } = await proceedToPayment(
+        currentWorkspaceId,
+        pendingInvoice.id,
+      );
+      window.location.href = checkoutUrl;
+    } catch (error) {
+      toast.error(
+        error instanceof ApiError ? error.message : 'Failed to start payment',
+      );
+      setPayBusy(false);
+    }
+  }
+
+  /** Retries a still-PENDING invoice straight from the billing-history
+   * table (Part 9 — "abandoned payment... invoice must be retriable")
+   * without re-walking the plan-selection step. */
+  async function handleRetryInvoice(invoice: InvoiceDto) {
+    if (!currentWorkspaceId) return;
+    setPayBusy(true);
+    try {
+      const { checkoutUrl } = await proceedToPayment(
+        currentWorkspaceId,
+        invoice.id,
+      );
+      window.location.href = checkoutUrl;
+    } catch (error) {
+      toast.error(
+        error instanceof ApiError ? error.message : 'Failed to start payment',
+      );
+      setPayBusy(false);
     }
   }
 
@@ -393,12 +467,12 @@ export default function BillingDashboardPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Billing history</CardTitle>
+          <CardTitle>Invoices</CardTitle>
           <CardDescription>
-            Invoices appear here once a payment provider is connected.
+            Every invoice for this workspace — pending, paid, and failed.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="overflow-x-auto">
           {!invoicesQuery.data || invoicesQuery.data.length === 0 ? (
             <p className="text-sm text-muted-foreground">No invoices yet.</p>
           ) : (
@@ -406,9 +480,11 @@ export default function BillingDashboardPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Invoice</TableHead>
+                  <TableHead>Plan</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Amount</TableHead>
                   <TableHead>Issued</TableHead>
+                  <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -416,6 +492,9 @@ export default function BillingDashboardPage() {
                   <TableRow key={invoice.id}>
                     <TableCell className="font-mono text-sm">
                       {invoice.number}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {invoice.targetPlan?.name ?? '—'}
                     </TableCell>
                     <TableCell>
                       <Badge variant={invoiceStatusVariant(invoice.status)}>
@@ -433,6 +512,36 @@ export default function BillingDashboardPage() {
                     <TableCell className="text-muted-foreground">
                       {formatDate(invoice.issueDate)}
                     </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        {canManage && invoice.status === 'PENDING' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={payBusy}
+                            onClick={() => void handleRetryInvoice(invoice)}
+                          >
+                            Pay now
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setViewingInvoice(invoice)}
+                        >
+                          View Invoice
+                        </Button>
+                        {invoice.status === 'PAID' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setViewingReceipt(invoice)}
+                          >
+                            View Receipt
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -441,7 +550,74 @@ export default function BillingDashboardPage() {
         </CardContent>
       </Card>
 
-      {pendingPlan && (
+      <Card>
+        <CardHeader>
+          <CardTitle>Payment history</CardTitle>
+          <CardDescription>
+            Every payment attempt that actually reached the payment provider —
+            pending invoices with no attempt yet are not shown here (see
+            Invoices above).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          {(() => {
+            const attempts = (invoicesQuery.data ?? []).filter(
+              (i) => i.status === 'PAID' || i.status === 'FAILED',
+            );
+            if (attempts.length === 0) {
+              return (
+                <p className="text-sm text-muted-foreground">
+                  No payment attempts yet.
+                </p>
+              );
+            }
+            return (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Provider</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Result</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {attempts.map((invoice) => (
+                    <TableRow key={invoice.id}>
+                      <TableCell className="text-muted-foreground">
+                        {formatDate(invoice.paidAt ?? invoice.issueDate)}
+                      </TableCell>
+                      <TableCell className="capitalize">
+                        {invoice.provider ?? '—'}
+                      </TableCell>
+                      <TableCell className="font-semibold tabular-nums">
+                        {formatAmount(
+                          invoice.amount,
+                          invoice.currency,
+                          currencies,
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            invoice.status === 'PAID'
+                              ? 'success'
+                              : 'destructive'
+                          }
+                        >
+                          {invoice.status === 'PAID' ? 'Success' : 'Failed'}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            );
+          })()}
+        </CardContent>
+      </Card>
+
+      {pendingPlan && !pendingInvoice && (
         <PlanChangeConfirmDialog
           targetPlan={pendingPlan}
           currentAmount={subscription?.amount ?? summary.plan.priceAmount}
@@ -453,6 +629,42 @@ export default function BillingDashboardPage() {
           onCurrencyChange={(code) => void setCurrency(code)}
           onConfirm={() => void handleSelectPlan(pendingPlan)}
           onCancel={() => setPendingPlan(null)}
+        />
+      )}
+
+      {pendingPlan && pendingInvoice && (
+        <InvoiceReviewDialog
+          invoice={pendingInvoice}
+          targetPlan={pendingPlan}
+          currentPlanName={summary.plan.name}
+          currencies={currencies}
+          activeProvider={summary.activeProvider}
+          busy={payBusy}
+          onProceed={() => void handleProceedToPayment()}
+          onCancel={() => {
+            setPendingInvoice(null);
+            setPendingPlan(null);
+          }}
+        />
+      )}
+
+      {viewingInvoice && (
+        <InvoiceDetailDialog
+          invoice={viewingInvoice}
+          currencies={currencies}
+          onClose={() => setViewingInvoice(null)}
+        />
+      )}
+
+      {viewingReceipt && (
+        <ReceiptDialog
+          invoice={viewingReceipt}
+          currencies={currencies}
+          customerName={
+            user ? `${user.firstName} ${user.lastName}`.trim() : 'Customer'
+          }
+          customerEmail={user?.email ?? ''}
+          onClose={() => setViewingReceipt(null)}
         />
       )}
     </div>

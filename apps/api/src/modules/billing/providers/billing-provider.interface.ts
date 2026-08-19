@@ -10,18 +10,31 @@ export interface CreateCheckoutSessionInput {
    * DevelopmentBillingProvider. */
   email: string;
   /** Sprint 16 — which currency to check out in. Undefined = use the
-   * plan's base currency/providerPlanId, exactly as every provider
-   * behaved before this sprint (fully backward compatible). When set,
-   * the provider resolves the matching PlanPrice (and its own
-   * per-currency providerPlanId) instead — see
-   * PaystackBillingProvider.createCheckoutSession. Callers
-   * (SubscriptionsService) are responsible for having already
-   * confirmed the currency is active AND provider-supported before
-   * reaching here; a provider implementation may still reject a
-   * currency it cannot process. */
+   * plan's own base currency. Callers (SubscriptionsService) are
+   * responsible for having already confirmed the currency is active
+   * AND provider-supported before reaching here; a provider
+   * implementation may still reject a currency it cannot process. */
   currencyCode?: string;
+  /** Sprint 18B §16/§17 — the EXACT amount (smallest currency unit) to
+   * charge, always caller-supplied and never re-derived from the
+   * Plan/PlanPrice catalog at checkout-initialization time. For the
+   * invoice-first flow (proceedToPayment) this is always
+   * `invoice.amount` — the one and only authoritative source, immune
+   * to a plan price edit landing between invoice creation and payment.
+   * Required for a real provider; ignored by DevelopmentBillingProvider
+   * (dev-flow never calls out to anything). */
+  amountMinorUnits: number;
   successUrl?: string;
   cancelUrl?: string;
+  /** Sprint 18A — the LinkIQ Invoice this checkout is for, embedded
+   * into the provider-side transaction metadata so the webhook/
+   * callback can correlate unambiguously (see
+   * PaystackWebhookProcessor.handleChargeSuccess) rather than relying
+   * solely on workspaceId+planSlug matching, which is ambiguous once a
+   * workspace can have more than one PENDING invoice for different
+   * target plans at once. Optional and unused by
+   * DevelopmentBillingProvider. */
+  invoiceId?: string;
 }
 
 export interface CheckoutSessionResult {
@@ -31,6 +44,13 @@ export interface CheckoutSessionResult {
    * implementation would set this false and populate checkoutUrl. */
   devFlow: boolean;
   checkoutUrl?: string;
+  /** Sprint 18A — the provider's own transaction/checkout reference
+   * (Paystack: the `reference` returned by initialize-transaction).
+   * Absent when devFlow is true. The caller (SubscriptionsService)
+   * attaches this to the originating Invoice via
+   * InvoicesService.attachProviderReference so later verification can
+   * find its way back to the right invoice. */
+  reference?: string;
 }
 
 export interface ProviderSubscriptionSnapshot {
@@ -60,14 +80,25 @@ export interface CreateProviderPlanResult {
 
 export interface VerifyTransactionResult {
   /** True when the provider confirms this transaction/checkout
-   * succeeded. This is a fast-path UX signal only, used by the
-   * checkout-callback route the user's browser lands on after
-   * redirect-based checkout — the inbound webhook (handleWebhook,
-   * processed asynchronously) remains the source of truth for
-   * actually mutating subscription state. Callers must not treat a
-   * true result here as license to activate anything themselves. */
+   * succeeded. */
   success: boolean;
   reference: string;
+  /** Sprint 18A — everything the shared confirm-and-activate function
+   * (SubscriptionsService.confirmAndActivate) needs to independently
+   * verify this transaction against its originating Invoice's own
+   * stored amount/currency (Part 6/11) before ever marking it PAID —
+   * the checkout-callback route now performs a real, server-side
+   * verification here rather than being a read-only fast-path
+   * courtesy; it must still never trust these values without this call
+   * having actually happened. */
+  amountKobo: number;
+  currency: string | null;
+  customerCode: string | null;
+  /** Echoed back from initializeTransaction's metadata — carries
+   * invoiceId when the checkout was created via the invoice-first flow
+   * (see CreateCheckoutSessionInput.invoiceId), falling back to
+   * workspaceId/planSlug correlation when absent. */
+  metadata: Record<string, unknown> | null;
 }
 
 /**

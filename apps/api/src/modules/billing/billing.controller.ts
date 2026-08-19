@@ -111,10 +111,58 @@ function subscriptionResponse(
   };
 }
 
+function invoiceResponse(invoice: {
+  id: string;
+  workspaceId: string;
+  subscriptionId: string | null;
+  targetPlanId: string | null;
+  targetPlan?: { id: string; name: string; slug: string } | null;
+  number: string;
+  amount: number;
+  currency: string;
+  status: string;
+  issueDate: Date;
+  dueDate: Date | null;
+  paidAt: Date | null;
+  provider: string | null;
+  providerInvoiceId: string | null;
+  hostedInvoiceUrl: string | null;
+  periodStart?: Date | null;
+  periodEnd?: Date | null;
+  exchangeRate: unknown;
+  exchangeRateAsOf: Date | null;
+}) {
+  return {
+    id: invoice.id,
+    workspaceId: invoice.workspaceId,
+    subscriptionId: invoice.subscriptionId,
+    targetPlanId: invoice.targetPlanId,
+    targetPlan: invoice.targetPlan ?? null,
+    number: invoice.number,
+    amount: invoice.amount,
+    currency: invoice.currency,
+    status: invoice.status,
+    issueDate: invoice.issueDate,
+    dueDate: invoice.dueDate,
+    paidAt: invoice.paidAt,
+    provider: invoice.provider,
+    providerInvoiceId: invoice.providerInvoiceId,
+    hostedInvoiceUrl: invoice.hostedInvoiceUrl,
+    periodStart: invoice.periodStart ?? null,
+    periodEnd: invoice.periodEnd ?? null,
+    exchangeRate: invoice.exchangeRate?.toString() ?? null,
+    exchangeRateAsOf: invoice.exchangeRateAsOf,
+  };
+}
+
 /** subscribe/changePlan/reactivate all return this shape (Sprint 10):
  * `checkoutUrl` non-null means the frontend must redirect there instead
- * of treating `subscription` as the new state — see
- * SubscriptionMutationResult's docs. */
+ * of treating `subscription` as the new state. Sprint 18A adds
+ * `invoice`: non-null means a PENDING invoice was created for review —
+ * the frontend shows the invoice-review screen and calls
+ * POST .../invoices/:invoiceId/pay ("Proceed to Payment") next. See
+ * SubscriptionMutationResult's own docs for why exactly one of
+ * checkoutUrl/invoice is ever set. */
 function mutationResponse(
   result: SubscriptionMutationResult,
   pastDueGraceDays: number,
@@ -122,6 +170,7 @@ function mutationResponse(
   return {
     ...subscriptionResponse(result.subscription, pastDueGraceDays),
     checkoutUrl: result.checkoutUrl,
+    invoice: result.invoice ? invoiceResponse(result.invoice) : null,
   };
 }
 
@@ -210,25 +259,61 @@ export class BillingController {
   @ApiOperation({ summary: 'Billing history / invoices' })
   @ApiResponse({ status: 200, description: 'Invoice list (may be empty)' })
   async getInvoices(@Param('workspaceId') workspaceId: string) {
-    return this.invoices.listForWorkspace(workspaceId);
+    const invoices = await this.invoices.listForWorkspace(workspaceId);
+    return invoices.map((invoice) => invoiceResponse(invoice));
+  }
+
+  /**
+   * Sprint 18A, step 3 — the explicit "Proceed to Payment" action from
+   * the invoice-review screen. Initializes a real Paystack transaction
+   * against the given PENDING invoice's OWN stored currency/amount
+   * (never a request body value — Part 11) and returns the
+   * authorization URL to redirect to. See
+   * SubscriptionsService.proceedToPayment's docs.
+   */
+  @Post('invoices/:invoiceId/pay')
+  @HttpCode(HttpStatus.OK)
+  @Roles(WorkspaceRole.ADMIN)
+  @ApiOperation({
+    summary: 'Proceed to payment for a pending invoice (ADMIN or OWNER)',
+  })
+  @ApiResponse({ status: 200, description: 'Checkout authorization URL' })
+  async payInvoice(
+    @Param('workspaceId') workspaceId: string,
+    @Param('invoiceId') invoiceId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Ctx() ctx: RequestContext,
+  ) {
+    return this.subscriptions.proceedToPayment(
+      workspaceId,
+      user.id,
+      invoiceId,
+      ctx,
+    );
   }
 
   /**
    * Where the user's browser lands after a redirect-based Paystack
-   * checkout (?reference=...). Fast-path UX only — see
-   * SubscriptionsService.verifyCheckout's docs: the inbound webhook is
-   * what actually activates the subscription, this just reports whether
-   * the payment itself succeeded and returns whatever state the
-   * Subscription row currently holds.
+   * checkout (?reference=...). Sprint 18A — no longer read-only: it
+   * independently re-verifies the transaction server-side
+   * (BillingProvider.verifyTransaction, never trusting the query
+   * string reference alone) and, only on a verified success, activates
+   * the subscription via SubscriptionsService.confirmAndActivate — the
+   * SAME shared, idempotent function the inbound webhook calls, so
+   * whichever of the two fires first does the real work and the other
+   * is a guaranteed no-op. A transaction with no correlated LinkIQ
+   * Invoice (applied: false, invoice: null) falls back to the old
+   * read-only verifyCheckout behavior, for any checkout that never
+   * went through the invoice-first flow.
    */
   @Get('checkout/callback')
   @Roles(WorkspaceRole.VIEWER)
   @ApiOperation({
-    summary: 'Fast-path verification after redirect-based checkout',
+    summary: 'Server-side verification and activation after checkout',
     description:
-      'Read-only — does not activate anything itself. The inbound Paystack webhook remains the source of truth.',
+      'Independently verifies the transaction with the payment provider before activating anything — never trusts the query string alone. Idempotent: safe to call repeatedly.',
   })
-  @ApiResponse({ status: 200, description: 'Verification result' })
+  @ApiResponse({ status: 200, description: 'Verification/activation result' })
   async checkoutCallback(
     @Param('workspaceId') workspaceId: string,
     @Query('reference') reference: string,
@@ -236,12 +321,40 @@ export class BillingController {
     if (!reference) {
       throw new BadRequestException('reference is required');
     }
-    const result = await this.subscriptions.verifyCheckout(
-      workspaceId,
+
+    const verification = await this.billingProvider.verifyTransaction(
       reference,
     );
+
+    const result = await this.subscriptions.confirmAndActivate({
+      reference: verification.reference,
+      status: verification.success ? 'success' : 'failed',
+      amountKobo: verification.amountKobo,
+      currency: verification.currency,
+      customerCode: verification.customerCode,
+      metadata: verification.metadata,
+    });
+
+    if (!result.invoice) {
+      // No invoice-first record for this transaction — fall back to
+      // the old read-only status peek (see verifyCheckout's docs). The
+      // verification above already told us whether payment succeeded;
+      // no need for a second provider call.
+      const subscription = await this.subscriptions.getForWorkspace(
+        workspaceId,
+      );
+      return {
+        success: verification.success,
+        invoice: null,
+        subscription: subscription
+          ? subscriptionResponse(subscription, this.pastDueGraceDays)
+          : null,
+      };
+    }
+
     return {
-      success: result.success,
+      success: result.invoice.status === 'PAID',
+      invoice: invoiceResponse(result.invoice),
       subscription: result.subscription
         ? subscriptionResponse(result.subscription, this.pastDueGraceDays)
         : null,

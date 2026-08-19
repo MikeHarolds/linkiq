@@ -9,9 +9,18 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
+
+/** Sprint 18B — an intentionally large ceiling on a monetary amount
+ * (minor units), not a realistic-pricing guess: comfortably under
+ * Prisma `Int`'s 32-bit signed range (2,147,483,647) so a value can
+ * never silently overflow the column, while still permitting any
+ * legitimate price (≈ 9,999,999.99 in a 2-decimal currency). See
+ * docs/architecture/billing.md's money-handling notes. */
+export const MAX_MONEY_MINOR_UNITS = 999_999_999;
 
 /**
  * Every field optional (partial update) and nothing pre-filled with an
@@ -34,11 +43,14 @@ export class UpdatePlanDto {
   @MaxLength(1000)
   description?: string | null;
 
-  @ApiPropertyOptional({ description: 'Smallest currency unit (cents).' })
+  @ApiPropertyOptional({
+    description: `Smallest currency unit (e.g. kobo, cents) — never a decimal. The admin UI converts a typed decimal amount (e.g. 19.99) to this integer using exact string arithmetic before sending. Max ${MAX_MONEY_MINOR_UNITS.toLocaleString('en-US')}.`,
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(MAX_MONEY_MINOR_UNITS)
   priceAmount?: number;
 
   @ApiPropertyOptional()

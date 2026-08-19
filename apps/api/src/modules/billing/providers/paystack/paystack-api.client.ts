@@ -24,8 +24,22 @@ export interface InitializeTransactionInput {
    * amount × 100, never a decimal major-unit value. */
   amountKobo: number;
   reference: string;
-  /** A Paystack plan_code — when present, a successful charge against
-   * this transaction auto-creates the recurring subscription. */
+  /** Sprint 18B §17 — the ISO 4217 code Paystack should charge in.
+   * LinkIQ's own Invoice amount/currency are authoritative for
+   * checkout (see docs/architecture/paystack-integration.md §17) —
+   * this is always sent explicitly now, never left for Paystack to
+   * infer from a `plan` code, which could silently drift from what
+   * LinkIQ actually invoiced (the exact bug this field exists to
+   * prevent — see that doc's worked example). */
+  currency: string;
+  /** A Paystack plan_code — DEPRECATED as of Sprint 18B for the
+   * invoice-first checkout flow (see PaystackBillingProvider
+   * .createCheckoutSession, which no longer sets this): passing both
+   * `plan` and `amount` lets Paystack silently use the PLAN's own
+   * stored price instead of `amount`, which is exactly the drift
+   * Sprint 18B eliminates. Kept on the interface only because
+   * `PaystackApiClient` is a thin, provider-shaped wrapper — not
+   * because any current caller sets it. */
   planCode?: string;
   callbackUrl?: string;
   metadata?: Record<string, unknown>;
@@ -45,6 +59,11 @@ export interface VerifyTransactionResult {
   status: string;
   reference: string;
   amountKobo: number;
+  /** Sprint 18A — Paystack's own ISO 4217 code for this transaction,
+   * needed to independently verify it matches the originating
+   * Invoice's currency (Part 6/11) rather than trusting the amount
+   * alone. */
+  currency: string | null;
   customerCode: string | null;
   authorizationCode: string | null;
   planCode: string | null;
@@ -195,6 +214,7 @@ export class PaystackApiClient {
     }>('POST', '/transaction/initialize', {
       email: input.email,
       amount: input.amountKobo,
+      currency: input.currency,
       reference: input.reference,
       plan: input.planCode,
       callback_url: input.callbackUrl,
@@ -212,6 +232,7 @@ export class PaystackApiClient {
       status: string;
       reference: string;
       amount: number;
+      currency?: string | null;
       customer?: { customer_code?: string } | null;
       authorization?: { authorization_code?: string } | null;
       plan?: string | null;
@@ -223,6 +244,7 @@ export class PaystackApiClient {
       status: data.status,
       reference: data.reference,
       amountKobo: data.amount,
+      currency: data.currency ?? null,
       customerCode: data.customer?.customer_code ?? null,
       authorizationCode: data.authorization?.authorization_code ?? null,
       planCode: data.plan ?? null,

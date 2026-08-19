@@ -11,6 +11,7 @@ import {
   Prisma,
   SubscriptionStatus,
   WebhookEventType,
+  type Invoice,
   type Subscription,
 } from '@prisma/client';
 
@@ -25,6 +26,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RoleResolutionService } from '../roles/role-resolution.service';
 import { WebhookEventsService } from '../webhooks/webhook-events.service';
 
+import { InvoicesService } from './invoices.service';
 import { PlansService, type PlanWithLimits } from './plans.service';
 import {
   BILLING_PROVIDER,
@@ -47,6 +49,45 @@ export type SubscriptionWithPlan = Subscription & { plan: PlanWithLimits };
 export interface SubscriptionMutationResult {
   subscription: SubscriptionWithPlan;
   checkoutUrl: string | null;
+  /** Sprint 18A — set instead of checkoutUrl when a paid plan change
+   * requires payment and a real payment provider is configured: a
+   * PENDING Invoice was created for the user to review, and nothing
+   * about the subscription itself has changed yet (`subscription`
+   * above is still the *unchanged* current one). The frontend shows an
+   * invoice-review screen and calls proceedToPayment with this
+   * invoice's id to actually initialize the Paystack checkout — see
+   * confirmAndActivate's docs for what happens after payment. Null in
+   * every other case (no payment required, or dev-flow apply). */
+  invoice: Invoice | null;
+}
+
+export interface ConfirmAndActivateInput {
+  /** The provider's own transaction/checkout reference — how this
+   * input correlates back to a LinkIQ Invoice (see
+   * InvoicesService.findByProviderReference / attachProviderReference). */
+  reference: string;
+  /** The provider's raw status string (Paystack: "success", "failed",
+   * "abandoned", ...) — only "success" can ever lead to activation. */
+  status: string;
+  amountKobo: number;
+  currency: string | null;
+  customerCode: string | null;
+  /** Echoed transaction metadata — used for the invoiceId/workspaceId
+   * fallback-correlation and cross-check described on confirmAndActivate. */
+  metadata: Record<string, unknown> | null;
+}
+
+export interface ConfirmAndActivateResult {
+  /** Null when no LinkIQ Invoice could be correlated to this reference
+   * at all — a legacy/orphaned transaction that never went through the
+   * invoice-first flow (see confirmAndActivate's docs). Callers must
+   * fall back to their own legacy handling in that case. */
+  invoice: Invoice | null;
+  subscription: SubscriptionWithPlan | null;
+  /** True only the one time this reference actually caused a state
+   * transition. False for every idempotent repeat call (duplicate
+   * webhook/callback delivery) — see confirmAndActivate's docs. */
+  applied: boolean;
 }
 
 export type SubscriptionWithPlanAndWorkspace = SubscriptionWithPlan & {
@@ -101,10 +142,22 @@ export class SubscriptionsService {
     private readonly webhookEvents: WebhookEventsService,
     private readonly roleResolution: RoleResolutionService,
     private readonly currencies: CurrencyService,
+    private readonly invoices: InvoicesService,
   ) {}
 
   private get pastDueGraceDays(): number {
     return this.config.get<number>('paystack.pastDueGraceDays') ?? 7;
+  }
+
+  /** Sprint 18A — the currently configured gateway's machine name, or
+   * null when none is configured (DevelopmentBillingProvider). Reuses
+   * the exact idiom Sprint 17 §6 already established for "is a real
+   * gateway configured" (BillingController.activeProvider) — this is
+   * also the fork point between "apply directly" (dev mode, or no
+   * payment required) and "go through the invoice-first flow" (a real
+   * provider, payment required). */
+  private get realProviderName(): string | null {
+    return this.provider.getProviderName?.() ?? null;
   }
 
   /**
@@ -148,8 +201,13 @@ export class SubscriptionsService {
   private assertProviderSupportsCurrency(code: string): void {
     const supported = this.provider.getSupportedCurrencies?.();
     if (supported && !supported.includes(code)) {
+      // Sprint 18B §16 — the one gate a currency must clear to reach
+      // checkout at all now that checkout is amount/currency-driven,
+      // not plan-code-driven (§17): is this currency in the configured
+      // provider's own allowlist. Worded for a customer to read
+      // directly, not just an admin/API consumer.
       throw new BadRequestException(
-        `${code} is not currently supported by the configured payment provider`,
+        `Payment in ${code} is not currently available. Please select another currency.`,
       );
     }
   }
@@ -235,7 +293,7 @@ export class SubscriptionsService {
    */
   private async syncOwnerRoles(
     workspaceId: string,
-    ctx: RequestContext,
+    ctx?: RequestContext,
   ): Promise<void> {
     const owners = await this.prisma.workspaceMember.findMany({
       where: { workspaceId, role: 'OWNER' },
@@ -300,15 +358,294 @@ export class SubscriptionsService {
   }
 
   /**
+   * Sprint 18A, step 3 of the invoice-first flow — the explicit
+   * "Proceed to Payment" action taken from the invoice-review screen.
+   * Loads the PENDING invoice scoped to its owning workspace (never
+   * acts on another workspace's invoice), initializes a real Paystack
+   * transaction using the invoice's OWN stored currency/amount — never
+   * a caller-supplied value, so a frontend currency can never override
+   * the backend-resolved invoice currency (Part 11) — and attaches the
+   * resulting reference so confirmAndActivate can find its way back
+   * here. Safe to call repeatedly against the same still-PENDING
+   * invoice (Part 9/14 test #13, "retry of pending invoice works"):
+   * each call simply starts a fresh Paystack transaction and
+   * overwrites the previous (abandoned) reference.
+   */
+  async proceedToPayment(
+    workspaceId: string,
+    userId: string,
+    invoiceId: string,
+    ctx: RequestContext,
+  ): Promise<{ checkoutUrl: string }> {
+    const invoice = await this.invoices.findPendingByIdForWorkspace(
+      workspaceId,
+      invoiceId,
+    );
+    if (!invoice || !invoice.targetPlanId) {
+      throw new NotFoundException(
+        'No pending invoice found for this workspace',
+      );
+    }
+    const plan = await this.plans.getByIdOrThrow(invoice.targetPlanId);
+
+    this.assertProviderSupportsCurrency(invoice.currency);
+    const email = await this.getUserEmail(userId);
+    const session = await this.provider.createCheckoutSession({
+      workspaceId,
+      planSlug: plan.slug,
+      email,
+      currencyCode: invoice.currency,
+      // Sprint 18B §17 — the invoice's own stored amount, never
+      // re-derived from the plan's current price catalog. This is what
+      // Paystack actually charges (see PaystackBillingProvider
+      // .createCheckoutSession's own docs on why it no longer reads
+      // any plan_code at all).
+      amountMinorUnits: invoice.amount,
+      invoiceId: invoice.id,
+    });
+
+    if (session.devFlow || !session.checkoutUrl) {
+      // PENDING invoices are only ever created when a real provider is
+      // configured (see subscribe/changePlan above) — reaching here
+      // would mean the provider was swapped out from under an
+      // in-flight invoice, not a normal user path.
+      throw new BadRequestException(
+        'No payment provider is configured to process this invoice',
+      );
+    }
+
+    if (session.reference) {
+      await this.invoices.attachProviderReference(
+        invoice.id,
+        session.reference,
+      );
+    }
+
+    await this.audit.record({
+      action: 'billing.checkout_initiated',
+      entity: 'Invoice',
+      entityId: invoice.id,
+      userId,
+      workspaceId,
+      metadata: {
+        planSlug: plan.slug,
+        amount: invoice.amount,
+        currency: invoice.currency,
+      },
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent,
+    });
+
+    return { checkoutUrl: session.checkoutUrl };
+  }
+
+  /**
+   * Sprint 18A, steps 5-7 — the ONE function both the checkout-callback
+   * route (BillingController.checkoutCallback) and the inbound
+   * Paystack webhook (PaystackWebhookProcessor.handleChargeSuccess)
+   * call to independently verify a transaction and, only on success,
+   * activate the target subscription. Whichever fires first performs
+   * the real state transition; the other is a guaranteed no-op — an
+   * invoice already PAID or FAILED is terminal and is never
+   * re-processed (no re-audit, no re-role-sync, no re-activation),
+   * which is a stricter, more literal reading of "must not... assign
+   * the role repeatedly" than merely relying on
+   * RoleResolutionService.syncStoredRole's own no-op-when-unchanged
+   * behavior (Sprint 15) — though that natural idempotency still
+   * exists as defense-in-depth.
+   *
+   * Verification checklist (Part 6) before ever marking PAID: the
+   * transaction's own reported status is "success", its amount matches
+   * the invoice's own stored amount exactly, its currency matches the
+   * invoice's own stored currency exactly (a null/absent provider
+   * currency is treated as non-conflicting, since not every caller can
+   * supply one), and — where the caller has it — the workspace implied
+   * by the transaction's metadata matches the invoice's own workspace.
+   * A failed check marks the invoice FAILED rather than activating on
+   * a mismatched/tampered value; a FAILED invoice is terminal (a retry
+   * goes through a fresh plan selection instead — see
+   * InvoicesService.markFailed's docs).
+   *
+   * Correlation: looks the reference up directly first (set by
+   * proceedToPayment's attachProviderReference); if that misses, falls
+   * back to an explicit `metadata.invoiceId` (attaching the reference
+   * then, for a caller — the webhook — that reaches this before
+   * proceedToPayment's own attach call would have). Returns
+   * `invoice: null` when neither correlates to anything — a legacy or
+   * orphaned transaction that never went through the invoice-first
+   * flow at all (e.g. a Paystack-initiated recurring-cycle charge, or
+   * an older/test webhook payload) — callers fall back to their own
+   * legacy handling in that case, never treating it as an error.
+   */
+  async confirmAndActivate(
+    input: ConfirmAndActivateInput,
+    ctx?: RequestContext,
+  ): Promise<ConfirmAndActivateResult> {
+    const providerName = this.realProviderName ?? 'paystack';
+
+    let invoice = await this.invoices.findByProviderReference(
+      providerName,
+      input.reference,
+    );
+
+    if (!invoice) {
+      const invoiceId =
+        typeof input.metadata?.invoiceId === 'string'
+          ? input.metadata.invoiceId
+          : undefined;
+      if (invoiceId) {
+        const byId = await this.invoices.findByIdForWorkspace(
+          typeof input.metadata?.workspaceId === 'string'
+            ? input.metadata.workspaceId
+            : '',
+          invoiceId,
+        );
+        invoice =
+          byId && byId.status === 'PENDING'
+            ? await this.invoices.attachProviderReference(
+                byId.id,
+                input.reference,
+              )
+            : byId;
+      }
+    }
+
+    if (!invoice) {
+      return { invoice: null, subscription: null, applied: false };
+    }
+
+    if (invoice.status === 'PAID' || invoice.status === 'FAILED') {
+      const subscription = await this.getForWorkspace(invoice.workspaceId);
+      return { invoice, subscription, applied: false };
+    }
+
+    const workspaceMatches =
+      typeof input.metadata?.workspaceId !== 'string' ||
+      input.metadata.workspaceId === invoice.workspaceId;
+    const verified =
+      input.status === 'success' &&
+      input.amountKobo === invoice.amount &&
+      (!input.currency || input.currency === invoice.currency) &&
+      workspaceMatches;
+
+    if (!verified) {
+      const failed = await this.invoices.markFailed(
+        invoice.id,
+        input.status !== 'success'
+          ? `Payment provider reported status "${input.status}"`
+          : 'Payment verification failed — amount, currency, or workspace did not match the invoice',
+      );
+      await this.audit.record({
+        action: 'billing.payment_failed',
+        entity: 'Invoice',
+        entityId: invoice.id,
+        workspaceId: invoice.workspaceId,
+        metadata: { reference: input.reference, providerStatus: input.status },
+        ipAddress: ctx?.ipAddress,
+        userAgent: ctx?.userAgent,
+      });
+      const subscription = await this.getForWorkspace(invoice.workspaceId);
+      return { invoice: failed, subscription, applied: true };
+    }
+
+    if (!invoice.targetPlanId) {
+      throw new Error(
+        `Invoice ${invoice.id} verified successfully but has no targetPlanId to activate`,
+      );
+    }
+    const plan = await this.plans.getByIdOrThrow(invoice.targetPlanId);
+    const existing = await this.getForWorkspace(invoice.workspaceId);
+    const now = new Date();
+    const periodDays = plan.billingInterval === 'ANNUAL' ? 365 : 30;
+
+    const subscription = await this.prisma.subscription.update({
+      where: { workspaceId: invoice.workspaceId },
+      data: {
+        planId: plan.id,
+        status: SubscriptionStatus.ACTIVE,
+        provider: providerName,
+        providerCustomerId:
+          input.customerCode ?? existing?.providerCustomerId ?? null,
+        currentPeriodStart: now,
+        currentPeriodEnd: addDays(now, periodDays),
+        pastDueSince: null,
+        cancelAt: null,
+        canceledAt: null,
+        trialStart: null,
+        trialEnd: null,
+        trialUsed: existing?.trialUsed ?? false,
+        currency: invoice.currency,
+        amount: invoice.amount,
+      },
+      include: SUBSCRIPTION_WITH_PLAN_INCLUDE,
+    });
+
+    const paidInvoice = await this.invoices.markPaid(invoice.id, now, {
+      start: now,
+      end: addDays(now, periodDays),
+    });
+
+    await this.audit.record({
+      action: 'billing.payment_succeeded',
+      entity: 'Subscription',
+      entityId: subscription.id,
+      workspaceId: invoice.workspaceId,
+      metadata: {
+        planSlug: plan.slug,
+        invoiceId: invoice.id,
+        reference: input.reference,
+      },
+      ipAddress: ctx?.ipAddress,
+      userAgent: ctx?.userAgent,
+    });
+
+    // Sprint 10's precedent: a fresh, real-provider FIRST paid
+    // conversion (moving off the FREE default, amount 0) emits
+    // SUBSCRIPTION_CREATED — subscribe()/changePlan() deliberately
+    // never emit anything for the real-provider path, since nothing
+    // was applied until now. Any other paid transition (an already-paid
+    // workspace upgrading/downgrading again) emits SUBSCRIPTION_PLAN_CHANGED,
+    // matching changePlan()'s own direct-apply emit.
+    const isFirstPaidConversion = (existing?.amount ?? 0) === 0;
+    await this.webhookEvents.emit(
+      isFirstPaidConversion
+        ? {
+            type: WebhookEventType.SUBSCRIPTION_CREATED,
+            workspaceId: invoice.workspaceId,
+            resourceId: subscription.id,
+            data: {
+              id: subscription.id,
+              planSlug: plan.slug,
+              status: subscription.status,
+              trialing: false,
+            },
+          }
+        : {
+            type: WebhookEventType.SUBSCRIPTION_PLAN_CHANGED,
+            workspaceId: invoice.workspaceId,
+            resourceId: subscription.id,
+            data: {
+              id: subscription.id,
+              fromPlanSlug: existing?.plan.slug ?? null,
+              toPlanSlug: plan.slug,
+              status: subscription.status,
+            },
+          },
+    );
+
+    await this.syncOwnerRoles(invoice.workspaceId, ctx);
+
+    return { invoice: paidInvoice, subscription, applied: true };
+  }
+
+  /**
    * Fast-path UX check for the page the user's browser lands on after a
-   * redirect-based checkout — see BillingProvider.verifyTransaction's
-   * docs. Deliberately read-only: it never mutates the Subscription row
-   * itself, even when the provider confirms success. The inbound webhook
-   * (processed asynchronously, usually within seconds) remains the sole
-   * source of truth for actually activating anything — this only tells
-   * the frontend whether the payment itself succeeded, and returns
-   * whatever the Subscription row currently says (which may already
-   * reflect the webhook's own update if it landed first).
+   * redirect-based checkout — kept for any caller that only wants a
+   * read-only status peek without server-side re-verification (e.g. a
+   * frontend polling loop). The checkout-callback ROUTE itself no
+   * longer calls this alone — see BillingController.checkoutCallback,
+   * which calls confirmAndActivate for the real, verification-gated
+   * activation and only falls back to this shape for its response.
    */
   async verifyCheckout(
     workspaceId: string,
@@ -394,33 +731,41 @@ export class SubscriptionsService {
 
     if (requiresPayment) {
       this.assertProviderSupportsCurrency(resolvedPrice.code);
-      const email = await this.getUserEmail(userId);
-      const session = await this.provider.createCheckoutSession({
-        workspaceId,
-        planSlug,
-        email,
-        currencyCode: resolvedPrice.code,
-      });
-      if (!session.devFlow) {
+      const providerName = this.realProviderName;
+      if (providerName) {
         if (!existing) {
           throw new NotFoundException(
             'No subscription found for this workspace',
           );
         }
+        // Sprint 18A — a paid move with a real provider configured
+        // NEVER applies here or calls the provider directly anymore.
+        // It creates a PENDING invoice for review; the subscription
+        // stays exactly as it is until proceedToPayment + a verified
+        // payment (confirmAndActivate) activate it.
+        const invoice = await this.invoices.createOrReusePendingInvoice({
+          workspaceId,
+          subscriptionId: existing.id,
+          targetPlanId: plan.id,
+          amount: resolvedPrice.amount,
+          currency: resolvedPrice.code,
+          provider: providerName,
+        });
         await this.audit.record({
-          action: 'billing.checkout_initiated',
-          entity: 'Subscription',
-          entityId: existing.id,
+          action: 'billing.invoice_created',
+          entity: 'Invoice',
+          entityId: invoice.id,
           userId,
           workspaceId,
-          metadata: { planSlug: plan.slug },
+          metadata: {
+            planSlug: plan.slug,
+            amount: invoice.amount,
+            currency: invoice.currency,
+          },
           ipAddress: ctx.ipAddress,
           userAgent: ctx.userAgent,
         });
-        return {
-          subscription: existing,
-          checkoutUrl: session.checkoutUrl ?? null,
-        };
+        return { subscription: existing, checkoutUrl: null, invoice };
       }
     }
 
@@ -491,7 +836,7 @@ export class SubscriptionsService {
     });
 
     await this.syncOwnerRoles(workspaceId, ctx);
-    return { subscription, checkoutUrl: null };
+    return { subscription, checkoutUrl: null, invoice: null };
   }
 
   /**
@@ -540,28 +885,35 @@ export class SubscriptionsService {
 
     if (requiresPayment) {
       this.assertProviderSupportsCurrency(resolvedPrice.code);
-      const email = await this.getUserEmail(userId);
-      const session = await this.provider.createCheckoutSession({
-        workspaceId,
-        planSlug: plan.slug,
-        email,
-        currencyCode: resolvedPrice.code,
-      });
-      if (!session.devFlow) {
+      const providerName = this.realProviderName;
+      if (providerName) {
+        // Sprint 18A — see subscribe()'s matching branch: create a
+        // PENDING invoice for review rather than calling the provider
+        // directly. Nothing about `existing` is touched here.
+        const invoice = await this.invoices.createOrReusePendingInvoice({
+          workspaceId,
+          subscriptionId: existing.id,
+          targetPlanId: plan.id,
+          amount: resolvedPrice.amount,
+          currency: resolvedPrice.code,
+          provider: providerName,
+        });
         await this.audit.record({
-          action: 'billing.checkout_initiated',
-          entity: 'Subscription',
-          entityId: existing.id,
+          action: 'billing.invoice_created',
+          entity: 'Invoice',
+          entityId: invoice.id,
           userId,
           workspaceId,
-          metadata: { fromPlanSlug: existing.plan.slug, toPlanSlug: plan.slug },
+          metadata: {
+            fromPlanSlug: existing.plan.slug,
+            toPlanSlug: plan.slug,
+            amount: invoice.amount,
+            currency: invoice.currency,
+          },
           ipAddress: ctx.ipAddress,
           userAgent: ctx.userAgent,
         });
-        return {
-          subscription: existing,
-          checkoutUrl: session.checkoutUrl ?? null,
-        };
+        return { subscription: existing, checkoutUrl: null, invoice };
       }
     }
 
@@ -619,7 +971,7 @@ export class SubscriptionsService {
     });
 
     await this.syncOwnerRoles(workspaceId, ctx);
-    return { subscription, checkoutUrl: null };
+    return { subscription, checkoutUrl: null, invoice: null };
   }
 
   /** Schedules cancellation for the end of the current billing period —
@@ -723,6 +1075,11 @@ export class SubscriptionsService {
         planSlug: existing.plan.slug,
         email,
         currencyCode: existing.currency,
+        // Sprint 18B §17 — the subscription's own immutable snapshot
+        // amount (Sprint 16 §12), matching the currency it already
+        // reuses above — never re-derived from the plan's current
+        // price catalog.
+        amountMinorUnits: existing.amount,
       });
       if (!session.devFlow) {
         await this.audit.record({
@@ -738,6 +1095,7 @@ export class SubscriptionsService {
         return {
           subscription: existing,
           checkoutUrl: session.checkoutUrl ?? null,
+          invoice: null,
         };
       }
     }
@@ -766,7 +1124,7 @@ export class SubscriptionsService {
     });
 
     await this.syncOwnerRoles(workspaceId, ctx);
-    return { subscription, checkoutUrl: null };
+    return { subscription, checkoutUrl: null, invoice: null };
   }
 
   /**

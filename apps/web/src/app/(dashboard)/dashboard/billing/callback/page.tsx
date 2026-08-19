@@ -15,15 +15,18 @@ import * as React from 'react';
 import { verifyCheckout } from '@/lib/billing-api';
 import { ApiError, useAuth } from '@/providers/auth-provider';
 
-type Status = 'verifying' | 'success' | 'pending' | 'failed';
+type Status = 'verifying' | 'success' | 'failed';
 
 /**
  * Where the browser lands after a redirect-based Paystack checkout
- * (?reference=...). This is a fast-path UX courtesy only — it never
- * activates anything itself. The inbound Paystack webhook (processed
- * asynchronously, usually within seconds) is the source of truth; this
- * page just reports whether the payment itself succeeded and links back
- * to the billing dashboard, which re-fetches the real subscription state.
+ * (?reference=...). Sprint 18A — a redirect-back is never trusted as
+ * proof of payment: this page calls the callback endpoint, which
+ * independently re-verifies the transaction server-side and, only on a
+ * verified success, activates the subscription (see
+ * SubscriptionsService.confirmAndActivate) — this page then simply
+ * reports the ALREADY-DECIDED outcome. Copy is deliberately never
+ * worded as if the plan is active before that verification completes
+ * (Part 13).
  */
 function BillingCallback() {
   const { currentWorkspaceId } = useAuth();
@@ -31,6 +34,7 @@ function BillingCallback() {
   const reference = searchParams.get('reference');
   const [status, setStatus] = React.useState<Status>('verifying');
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+  const [newPlanName, setNewPlanName] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!currentWorkspaceId || !reference) {
@@ -42,7 +46,8 @@ function BillingCallback() {
     verifyCheckout(currentWorkspaceId, reference)
       .then((result) => {
         if (cancelled) return;
-        setStatus(result.success ? 'success' : 'pending');
+        setStatus(result.success ? 'success' : 'failed');
+        setNewPlanName(result.subscription?.plan.name ?? null);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -65,18 +70,13 @@ function BillingCallback() {
     },
     success: {
       title: 'Payment successful',
-      description:
-        'Your plan will update automatically within a few seconds as Paystack confirms the subscription on our end.',
-    },
-    pending: {
-      title: 'Payment not yet confirmed',
-      description:
-        "We're still waiting to hear back from Paystack about this payment. This can take a moment — check the billing page shortly, or contact support if this persists.",
+      description: newPlanName
+        ? `Your plan has been upgraded to ${newPlanName}.`
+        : 'Your plan has been upgraded.',
     },
     failed: {
-      title: 'Verification failed',
-      description:
-        errorMessage ?? 'Something went wrong verifying this checkout.',
+      title: 'Payment was not completed.',
+      description: errorMessage ?? 'Your current plan is unchanged.',
     },
   };
 

@@ -101,7 +101,7 @@ const PLAN_CONFIGS: PlanSeedConfig[] = [
     tier: PlanTier.FREE,
     description: 'Get started with the essentials, no card required.',
     priceAmount: 0,
-    currency: 'USD',
+    currency: 'NGN',
     billingInterval: BillingInterval.MONTHLY,
     trialDays: null,
     displayOrder: 0,
@@ -125,8 +125,8 @@ const PLAN_CONFIGS: PlanSeedConfig[] = [
     slug: 'starter',
     tier: PlanTier.STARTER,
     description: 'For individuals and small projects ready to grow.',
-    priceAmount: 1900,
-    currency: 'USD',
+    priceAmount: 2_900_000, // ₦29,000.00 — see PLAN_PRICE_CONFIGS' USD/EUR alternates
+    currency: 'NGN',
     billingInterval: BillingInterval.MONTHLY,
     trialDays: 14,
     displayOrder: 1,
@@ -150,8 +150,8 @@ const PLAN_CONFIGS: PlanSeedConfig[] = [
     slug: 'professional',
     tier: PlanTier.PROFESSIONAL,
     description: 'For growing teams running multiple campaigns.',
-    priceAmount: 4900,
-    currency: 'USD',
+    priceAmount: 7_500_000, // ₦75,000.00 — see PLAN_PRICE_CONFIGS' USD/EUR alternates
+    currency: 'NGN',
     billingInterval: BillingInterval.MONTHLY,
     trialDays: 14,
     displayOrder: 2,
@@ -175,8 +175,8 @@ const PLAN_CONFIGS: PlanSeedConfig[] = [
     slug: 'business',
     tier: PlanTier.BUSINESS,
     description: 'For larger organizations with advanced branding needs.',
-    priceAmount: 14_900,
-    currency: 'USD',
+    priceAmount: 22_900_000, // ₦229,000.00 — see PLAN_PRICE_CONFIGS' USD/EUR alternates
+    currency: 'NGN',
     billingInterval: BillingInterval.MONTHLY,
     trialDays: 14,
     displayOrder: 3,
@@ -201,7 +201,7 @@ const PLAN_CONFIGS: PlanSeedConfig[] = [
     tier: PlanTier.ENTERPRISE,
     description: 'Custom limits, dedicated support, and contract billing.',
     priceAmount: 0, // contract pricing — not a real "free" plan, see docs
-    currency: 'USD',
+    currency: 'NGN',
     billingInterval: BillingInterval.ANNUAL,
     trialDays: null,
     displayOrder: 4,
@@ -532,22 +532,26 @@ export async function seedCurrencySettings(
   client: PrismaClient,
   currenciesByCode: Record<string, Currency>,
 ): Promise<void> {
-  const usd = currenciesByCode.USD;
-  if (!usd) return;
+  // Sprint 18B — NGN is the platform's default/fallback currency. Only
+  // ever applied on a fresh database (see `update: {}` below); an
+  // already-configured production database's admin-chosen settings are
+  // never silently overwritten by re-running this seed.
+  const ngn = currenciesByCode.NGN;
+  if (!ngn) return;
 
   await client.currencySettings.upsert({
     where: { id: '00000000-0000-0000-0000-000000000002' },
     update: {},
     create: {
       id: '00000000-0000-0000-0000-000000000002',
-      defaultCurrencyId: usd.id,
-      fallbackCurrencyId: usd.id,
+      defaultCurrencyId: ngn.id,
+      fallbackCurrencyId: ngn.id,
       autoDetectEnabled: true,
     },
   });
 
   console.log(
-    'Seeded currency settings (default/fallback: USD, auto-detect: on)',
+    'Seeded currency settings (default/fallback: NGN, auto-detect: on)',
   );
 }
 
@@ -557,16 +561,21 @@ export async function seedCurrencySettings(
  * prices (FREE is 0 in every currency by definition; ENTERPRISE is
  * contract-priced, never purchasable through automated checkout — see
  * docs/architecture/paystack-integration.md). No providerPlanId is set
- * here — a real per-currency Paystack plan_code is a SUPER_ADMIN action
- * via the admin UI's "sync to provider" flow, never fabricated by seed
- * data. */
+ * here — Paystack checkout is amount/currency-driven, not plan-code-
+ * driven, since Sprint 18B (see docs/architecture/paystack-integration
+ * .md §17) — nothing to sync to the provider ahead of time.
+ *
+ * Sprint 18B — NGN moved to each plan's own BASE Plan.currency/
+ * priceAmount (the platform default, see PLAN_CONFIGS above); USD is
+ * now one of the additional currencies here instead, carrying forward
+ * the exact pre-Sprint-18B USD amounts unchanged. */
 const PLAN_PRICE_CONFIGS: Record<
   string,
-  Partial<Record<'NGN' | 'EUR', number>>
+  Partial<Record<'USD' | 'EUR', number>>
 > = {
-  starter: { NGN: 2_900_000, EUR: 1800 },
-  professional: { NGN: 7_500_000, EUR: 4500 },
-  business: { NGN: 22_900_000, EUR: 13_900 },
+  starter: { USD: 1900, EUR: 1800 },
+  professional: { USD: 4900, EUR: 4500 },
+  business: { USD: 14_900, EUR: 13_900 },
 };
 
 export async function seedPlanPrices(
@@ -936,6 +945,14 @@ async function seedDemoSubscription(
       status: SubscriptionStatus.ACTIVE,
       currentPeriodStart: now,
       currentPeriodEnd: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+      // Sprint 18B — snapshot the plan's own current price, the same
+      // way a real subscribe() call would (Sprint 16 §12) — the
+      // Subscription.currency/amount column defaults (NGN/0) are a
+      // fallback for a row created with no explicit value, never the
+      // right value for a real (or demo) paid subscription.
+      currency: professional.currency,
+      amount: professional.priceAmount,
+      trialUsed: true,
     },
   });
   console.log('Seeded demo workspace subscription (Professional, ACTIVE)');
@@ -2013,6 +2030,8 @@ async function backfillMissingSubscriptions(plans: Record<string, Plan>) {
         workspaceId: workspace.id,
         planId: free.id,
         status: SubscriptionStatus.ACTIVE,
+        currency: free.currency,
+        amount: free.priceAmount,
       },
     });
   }

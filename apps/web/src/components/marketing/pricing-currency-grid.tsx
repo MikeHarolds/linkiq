@@ -35,7 +35,9 @@ export function PricingCurrencyGrid({
   ctaHref: string;
 }) {
   const { currency, currencies, setCurrency, isLoading } = useCurrency();
-  const selectedCode = currency?.code ?? 'USD';
+  // Sprint 18B — NGN is the platform default (docs/architecture/
+  // currency.md), used only before useCurrency's own resolution returns.
+  const selectedCode = currency?.code ?? 'NGN';
 
   return (
     <div>

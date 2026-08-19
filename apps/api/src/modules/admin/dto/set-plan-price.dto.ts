@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+
+import { MAX_MONEY_MINOR_UNITS } from './update-plan.dto';
 
 /**
  * Sets a plan's price in one currency (Sprint 16). Either `amount` is
@@ -14,11 +16,14 @@ export class SetPlanPriceDto {
   @IsUUID()
   currencyId!: string;
 
-  @ApiPropertyOptional({ description: 'Smallest currency unit. Required unless useExchangeRate is true.' })
+  @ApiPropertyOptional({
+    description: `Smallest currency unit — never a decimal. Required unless useExchangeRate is true. Max ${MAX_MONEY_MINOR_UNITS.toLocaleString('en-US')}.`,
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(MAX_MONEY_MINOR_UNITS)
   amount?: number;
 
   @ApiPropertyOptional({

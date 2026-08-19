@@ -134,8 +134,11 @@ export function createMockPrismaService() {
     },
     invoice: {
       findMany: jest.fn(),
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
       count: jest.fn(),
       create: jest.fn(),
+      update: jest.fn(),
       aggregate: jest.fn(),
     },
     apiKey: {

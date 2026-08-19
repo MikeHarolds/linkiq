@@ -30,16 +30,24 @@ function makeFakeApiClient() {
       accessCode: 'access_fake',
       reference: 'txn-fake-reference',
     }),
-    verifyTransaction: jest.fn().mockResolvedValue({
-      status: 'success',
-      reference: 'txn-fake-reference',
-      amountKobo: 190000,
-      customerCode: 'CUS_fake',
-      authorizationCode: null,
-      planCode: 'PLN_fake',
-      paidAt: new Date(),
-      metadata: null,
-    }),
+    // Echoes back whatever reference it's called with — matching real
+    // Paystack behavior (verify-by-reference returns data FOR that
+    // reference) and required for Sprint 18A's invoice correlation
+    // (InvoicesService.findByProviderReference) to find the invoice
+    // proceedToPayment actually attached a reference to.
+    verifyTransaction: jest.fn().mockImplementation((reference: string) =>
+      Promise.resolve({
+        status: 'success',
+        reference,
+        amountKobo: 190000,
+        currency: 'USD',
+        customerCode: 'CUS_fake',
+        authorizationCode: null,
+        planCode: 'PLN_fake',
+        paidAt: new Date(),
+        metadata: null,
+      }),
+    ),
     createPlan: jest.fn(),
     createSubscription: jest.fn(),
     disableSubscription: jest.fn().mockResolvedValue(undefined),
@@ -84,16 +92,19 @@ describe('Paystack Checkout Flow (e2e, BILLING_PROVIDER=paystack)', () => {
       accessCode: 'access_fake',
       reference: 'txn-fake-reference',
     });
-    fakeApiClient.verifyTransaction.mockResolvedValue({
-      status: 'success',
-      reference: 'txn-fake-reference',
-      amountKobo: 190000,
-      customerCode: 'CUS_fake',
-      authorizationCode: null,
-      planCode: 'PLN_fake',
-      paidAt: new Date(),
-      metadata: null,
-    });
+    fakeApiClient.verifyTransaction.mockImplementation((reference: string) =>
+      Promise.resolve({
+        status: 'success',
+        reference,
+        amountKobo: 190000,
+        currency: 'USD',
+        customerCode: 'CUS_fake',
+        authorizationCode: null,
+        planCode: 'PLN_fake',
+        paidAt: new Date(),
+        metadata: null,
+      }),
+    );
     fakeApiClient.disableSubscription.mockResolvedValue(undefined);
   });
 
@@ -164,7 +175,7 @@ describe('Paystack Checkout Flow (e2e, BILLING_PROVIDER=paystack)', () => {
   }
 
   describe('subscribe()', () => {
-    it('returns a checkoutUrl and leaves the subscription unchanged (no trial, real provider)', async () => {
+    it('Sprint 18A — creates a PENDING invoice and leaves the subscription unchanged (no trial, real provider)', async () => {
       const owner = await registerUser('checkout-sub1@example.com');
 
       const res = await request(server)
@@ -173,35 +184,55 @@ describe('Paystack Checkout Flow (e2e, BILLING_PROVIDER=paystack)', () => {
         .send({ planSlug: 'e2e-no-trial-1' });
 
       expect(res.status).toBe(200);
-      expect(res.body.checkoutUrl).toBe(
-        'https://checkout.paystack.com/fake-session',
+      expect(res.body.checkoutUrl).toBeNull();
+      expect(res.body.invoice).toEqual(
+        expect.objectContaining({ status: 'PENDING', amount: 190000, currency: 'USD' }),
       );
       // Nothing applied yet — still on the default FREE plan.
       expect(res.body.plan.slug).toBe('free');
-      expect(fakeApiClient.initializeTransaction).toHaveBeenCalledWith(
-        expect.objectContaining({
-          email: 'checkout-sub1@example.com',
-          planCode: 'PLN_e2e_1',
-        }),
-      );
+      // No Paystack call at all — invoice-first plan selection never
+      // initializes a real transaction; that only happens at
+      // "Proceed to Payment" (see the describe block below).
+      expect(fakeApiClient.initializeTransaction).not.toHaveBeenCalled();
 
       const sub = await prisma.subscription.findUnique({
         where: { workspaceId: owner.workspaceId },
       });
       expect(sub?.status).toBe('ACTIVE'); // still the default FREE subscription
       expect(sub?.providerCustomerId).toBeNull();
+
+      const invoice = await prisma.invoice.findUnique({
+        where: { id: res.body.invoice.id },
+      });
+      expect(invoice?.status).toBe('PENDING');
+      expect(invoice?.targetPlanId).not.toBeNull();
     });
 
-    it('rejects a plan with no providerPlanId configured (400), no checkout attempted', async () => {
+    it('Sprint 18B §17 — a plan with NO providerPlanId configured is still fully checkout-able (amount/currency-driven, not plan-code-driven)', async () => {
       const owner = await registerUser('checkout-sub2@example.com');
 
-      const res = await request(server)
+      const selectRes = await request(server)
         .post(`${billingBase(owner.workspaceId)}/subscribe`)
         .set(headers(owner))
         .send({ planSlug: 'e2e-no-trial-2' });
 
-      expect(res.status).toBe(400);
-      expect(fakeApiClient.initializeTransaction).not.toHaveBeenCalled();
+      expect(selectRes.status).toBe(200);
+      expect(selectRes.body.invoice.status).toBe('PENDING');
+
+      const payRes = await request(server)
+        .post(
+          `${billingBase(owner.workspaceId)}/invoices/${selectRes.body.invoice.id}/pay`,
+        )
+        .set(headers(owner));
+
+      expect(payRes.status).toBe(200);
+      expect(payRes.body.checkoutUrl).toBeTruthy();
+      expect(fakeApiClient.initializeTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({ amountKobo: 190000, currency: 'USD' }),
+      );
+      expect(fakeApiClient.initializeTransaction).toHaveBeenCalledWith(
+        expect.not.objectContaining({ planCode: expect.anything() }),
+      );
     });
 
     it('still starts a LinkIQ-only trial with zero Paystack calls for a trialing plan', async () => {
@@ -248,6 +279,7 @@ describe('Paystack Checkout Flow (e2e, BILLING_PROVIDER=paystack)', () => {
         status: 'abandoned',
         reference: 'txn-fake-reference',
         amountKobo: 190000,
+        currency: 'USD',
         customerCode: null,
         authorizationCode: null,
         planCode: null,
@@ -276,7 +308,7 @@ describe('Paystack Checkout Flow (e2e, BILLING_PROVIDER=paystack)', () => {
   });
 
   describe('changePlan() with an existing real provider subscription', () => {
-    it('routes through a fresh checkout instead of an in-place swap', async () => {
+    it('Sprint 18A — creates a PENDING invoice instead of an in-place swap or an immediate checkout', async () => {
       const owner = await registerUser('checkout-change1@example.com');
       await prisma.subscription.update({
         where: { workspaceId: owner.workspaceId },
@@ -292,13 +324,12 @@ describe('Paystack Checkout Flow (e2e, BILLING_PROVIDER=paystack)', () => {
         .send({ planSlug: 'e2e-no-trial-3' });
 
       expect(res.status).toBe(200);
-      expect(res.body.checkoutUrl).toBe(
-        'https://checkout.paystack.com/fake-session',
-      );
-      expect(fakeApiClient.initializeTransaction).toHaveBeenCalled();
+      expect(res.body.checkoutUrl).toBeNull();
+      expect(res.body.invoice.status).toBe('PENDING');
+      expect(fakeApiClient.initializeTransaction).not.toHaveBeenCalled();
 
-      // The old plan is still in effect — nothing applied until the
-      // webhook confirms the new checkout.
+      // The old plan is still in effect — nothing applied until payment
+      // is initiated (proceed-to-payment) AND verified.
       const sub = await prisma.subscription.findUnique({
         where: { workspaceId: owner.workspaceId },
         include: { plan: true },
@@ -307,12 +338,210 @@ describe('Paystack Checkout Flow (e2e, BILLING_PROVIDER=paystack)', () => {
     });
   });
 
+  describe('Invoice-first flow: proceed to payment, callback verification, and activation', () => {
+    it('proceeds to payment, initializes a real transaction against the invoice, and returns a checkoutUrl', async () => {
+      const owner = await registerUser('checkout-e2e-pay1@example.com');
+
+      const selectRes = await request(server)
+        .post(`${billingBase(owner.workspaceId)}/subscribe`)
+        .set(headers(owner))
+        .send({ planSlug: 'e2e-no-trial-1' });
+      const invoiceId = selectRes.body.invoice.id as string;
+
+      const payRes = await request(server)
+        .post(`${billingBase(owner.workspaceId)}/invoices/${invoiceId}/pay`)
+        .set(headers(owner));
+
+      expect(payRes.status).toBe(200);
+      expect(payRes.body.checkoutUrl).toBe(
+        'https://checkout.paystack.com/fake-session',
+      );
+      expect(fakeApiClient.initializeTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'checkout-e2e-pay1@example.com',
+          amountKobo: 190000,
+          currency: 'USD',
+          metadata: expect.objectContaining({ invoiceId }),
+        }),
+      );
+
+      const invoice = await prisma.invoice.findUnique({
+        where: { id: invoiceId },
+      });
+      expect(invoice?.status).toBe('PENDING');
+      // The fake client generates its own reference at initialize-time
+      // (see PaystackBillingProvider.createCheckoutSession) — not the
+      // hardcoded value verifyTransaction happens to echo back.
+      expect(invoice?.providerInvoiceId).toEqual(expect.any(String));
+    });
+
+    it('the callback independently verifies, marks the invoice PAID, and activates the subscription only on success', async () => {
+      const owner = await registerUser('checkout-e2e-pay2@example.com');
+      const selectRes = await request(server)
+        .post(`${billingBase(owner.workspaceId)}/subscribe`)
+        .set(headers(owner))
+        .send({ planSlug: 'e2e-no-trial-1' });
+      const invoiceId = selectRes.body.invoice.id as string;
+
+      await request(server)
+        .post(`${billingBase(owner.workspaceId)}/invoices/${invoiceId}/pay`)
+        .set(headers(owner));
+      const pendingInvoice = await prisma.invoice.findUniqueOrThrow({
+        where: { id: invoiceId },
+      });
+      const reference = pendingInvoice.providerInvoiceId!;
+
+      // Still unchanged before the callback — redirect-back alone must
+      // never be trusted as success.
+      const beforeCallback = await prisma.subscription.findUnique({
+        where: { workspaceId: owner.workspaceId },
+        include: { plan: true },
+      });
+      expect(beforeCallback?.plan.slug).toBe('free');
+
+      const callbackRes = await request(server)
+        .get(`${billingBase(owner.workspaceId)}/checkout/callback`)
+        .query({ reference })
+        .set(headers(owner));
+
+      expect(callbackRes.status).toBe(200);
+      expect(callbackRes.body.success).toBe(true);
+      expect(callbackRes.body.invoice.status).toBe('PAID');
+      expect(fakeApiClient.verifyTransaction).toHaveBeenCalledWith(reference);
+
+      const afterCallback = await prisma.subscription.findUnique({
+        where: { workspaceId: owner.workspaceId },
+        include: { plan: true },
+      });
+      expect(afterCallback?.plan.slug).toBe('e2e-no-trial-1');
+      expect(afterCallback?.status).toBe('ACTIVE');
+      expect(afterCallback?.amount).toBe(190000);
+      expect(afterCallback?.currency).toBe('USD');
+
+      const invoice = await prisma.invoice.findUnique({
+        where: { id: invoiceId },
+      });
+      expect(invoice?.status).toBe('PAID');
+      expect(invoice?.paidAt).not.toBeNull();
+    });
+
+    it('is idempotent — a repeat callback call never re-activates or duplicates the invoice', async () => {
+      const owner = await registerUser('checkout-e2e-pay3@example.com');
+      const selectRes = await request(server)
+        .post(`${billingBase(owner.workspaceId)}/subscribe`)
+        .set(headers(owner))
+        .send({ planSlug: 'e2e-no-trial-1' });
+      const invoiceId = selectRes.body.invoice.id as string;
+      await request(server)
+        .post(`${billingBase(owner.workspaceId)}/invoices/${invoiceId}/pay`)
+        .set(headers(owner));
+      const pendingInvoice = await prisma.invoice.findUniqueOrThrow({
+        where: { id: invoiceId },
+      });
+      const reference = pendingInvoice.providerInvoiceId!;
+
+      await request(server)
+        .get(`${billingBase(owner.workspaceId)}/checkout/callback`)
+        .query({ reference })
+        .set(headers(owner));
+
+      const invoiceCountBefore = await prisma.invoice.count({
+        where: { workspaceId: owner.workspaceId },
+      });
+
+      const secondRes = await request(server)
+        .get(`${billingBase(owner.workspaceId)}/checkout/callback`)
+        .query({ reference })
+        .set(headers(owner));
+
+      expect(secondRes.status).toBe(200);
+      expect(secondRes.body.invoice.status).toBe('PAID');
+      const invoiceCountAfter = await prisma.invoice.count({
+        where: { workspaceId: owner.workspaceId },
+      });
+      expect(invoiceCountAfter).toBe(invoiceCountBefore);
+    });
+
+    it('an amount mismatch is rejected — the invoice is marked FAILED and the subscription is never activated', async () => {
+      const owner = await registerUser('checkout-e2e-pay4@example.com');
+      const selectRes = await request(server)
+        .post(`${billingBase(owner.workspaceId)}/subscribe`)
+        .set(headers(owner))
+        .send({ planSlug: 'e2e-no-trial-1' });
+      const invoiceId = selectRes.body.invoice.id as string;
+      await request(server)
+        .post(`${billingBase(owner.workspaceId)}/invoices/${invoiceId}/pay`)
+        .set(headers(owner));
+      const pendingInvoice = await prisma.invoice.findUniqueOrThrow({
+        where: { id: invoiceId },
+      });
+      const reference = pendingInvoice.providerInvoiceId!;
+
+      fakeApiClient.verifyTransaction.mockResolvedValueOnce({
+        status: 'success',
+        reference,
+        amountKobo: 1, // tampered — does not match the invoice's own 190000
+        currency: 'USD',
+        customerCode: 'CUS_fake',
+        authorizationCode: null,
+        planCode: 'PLN_fake',
+        paidAt: new Date(),
+        metadata: null,
+      });
+
+      const res = await request(server)
+        .get(`${billingBase(owner.workspaceId)}/checkout/callback`)
+        .query({ reference })
+        .set(headers(owner));
+
+      expect(res.status).toBe(200);
+      expect(res.body.invoice.status).toBe('FAILED');
+      expect(res.body.success).toBe(false);
+
+      const sub = await prisma.subscription.findUnique({
+        where: { workspaceId: owner.workspaceId },
+        include: { plan: true },
+      });
+      expect(sub?.plan.slug).toBe('free');
+    });
+
+    it('a downgrade never creates an invoice or calls Paystack', async () => {
+      const owner = await registerUser('checkout-e2e-downgrade1@example.com');
+      // Move to a paid plan first (force it directly, since this test
+      // only cares about the downgrade path, not how it got there).
+      const highPlan = await prisma.plan.findUniqueOrThrow({
+        where: { slug: 'e2e-no-trial-3' },
+      });
+      await prisma.subscription.update({
+        where: { workspaceId: owner.workspaceId },
+        data: { planId: highPlan.id, amount: 190000, currency: 'USD' },
+      });
+
+      // Downgrading to the (already-cached, seeded) FREE plan is a pure
+      // downgrade (0 < 190000) — never trial-eligible regardless of
+      // trialDays, since trialEligible only applies to an upgrade.
+      const res = await request(server)
+        .post(`${billingBase(owner.workspaceId)}/change-plan`)
+        .set(headers(owner))
+        .send({ planSlug: 'free' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.invoice).toBeNull();
+      expect(res.body.checkoutUrl).toBeNull();
+      expect(fakeApiClient.initializeTransaction).not.toHaveBeenCalled();
+
+      const invoiceCount = await prisma.invoice.count({
+        where: { workspaceId: owner.workspaceId, status: 'PENDING' },
+      });
+      expect(invoiceCount).toBe(0);
+    });
+  });
+
   describe('reactivate() after the underlying Paystack subscription was already disabled', () => {
     it('routes through a fresh checkout rather than silently clearing cancelAt', async () => {
       const owner = await registerUser('checkout-reactivate1@example.com');
-      // Must be on a purchasable (providerPlanId-set) plan — the default
-      // FREE plan isn't, and createCheckoutSession would 400 for reasons
-      // unrelated to what this test is exercising.
+      // Use a real (non-FREE) plan so the assertions below are about a
+      // genuine paid reactivation, not incidental FREE-plan behavior.
       const plan = await prisma.plan.findUniqueOrThrow({
         where: { slug: 'e2e-no-trial-1' },
       });

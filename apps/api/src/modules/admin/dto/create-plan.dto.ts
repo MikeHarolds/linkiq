@@ -10,10 +10,13 @@ import {
   IsString,
   IsUUID,
   Matches,
+  Max,
   MaxLength,
   Min,
   MinLength,
 } from 'class-validator';
+
+import { MAX_MONEY_MINOR_UNITS } from './update-plan.dto';
 
 /**
  * Creates a brand-new plan row. Unlike UpdatePlanDto, `slug` and `tier`
@@ -50,13 +53,19 @@ export class CreatePlanDto {
   @MaxLength(1000)
   description?: string;
 
-  @ApiProperty({ description: 'Smallest currency unit (cents).' })
+  @ApiProperty({
+    description: `Smallest currency unit (e.g. kobo, cents) — never a decimal. The admin UI converts a typed decimal amount (e.g. 19.99) to this integer using exact string arithmetic before sending. Max ${MAX_MONEY_MINOR_UNITS.toLocaleString('en-US')}.`,
+  })
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(MAX_MONEY_MINOR_UNITS)
   priceAmount!: number;
 
-  @ApiPropertyOptional({ default: 'USD' })
+  @ApiPropertyOptional({
+    default: 'NGN',
+    description: "Platform default is NGN — see docs/architecture/currency.md.",
+  })
   @IsOptional()
   @IsString()
   @MaxLength(10)

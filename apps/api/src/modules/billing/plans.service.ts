@@ -215,7 +215,7 @@ export class PlansService {
           tier: input.tier,
           description: input.description,
           priceAmount: input.priceAmount,
-          currency: input.currency ?? 'USD',
+          currency: input.currency ?? 'NGN',
           billingInterval: input.billingInterval ?? BillingInterval.MONTHLY,
           trialDays: input.trialDays,
           isActive: input.isActive ?? true,

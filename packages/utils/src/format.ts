@@ -40,6 +40,60 @@ export function formatCurrency(
   return `${currency.symbol}${formatted}`;
 }
 
+/**
+ * Sprint 18B — the exact, round-trip-safe counterpart to
+ * `formatCurrency` for an EDITABLE money field (the admin plan-price
+ * inputs): converts a decimal major-unit string an admin typed (e.g.
+ * "19.99") into an exact integer minor-unit amount (e.g. 1999 for
+ * decimalPlaces=2). Deliberately never `Math.round(value * 100)` —
+ * floating-point multiplication of a decimal fraction is not exact in
+ * IEEE-754 (e.g. `19.99 * 100` is `1998.9999999999998` before
+ * rounding recovers the right answer for THIS particular input, but
+ * the same class of error compounds for other values) — this uses
+ * only string slicing and integer parsing, so the result is exact for
+ * every input, with no silent rounding or truncation. Throws rather
+ * than silently dropping precision the admin actually typed (e.g.
+ * "19.999" against a 2-decimal currency) or accepting garbage input.
+ */
+export function majorUnitsToMinor(
+  input: string,
+  decimalPlaces: number,
+): number {
+  const trimmed = input.trim();
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) {
+    throw new Error(`Invalid monetary amount: "${input}"`);
+  }
+  const [wholePartRaw, fractionPartRaw = ''] = trimmed.split('.');
+  if (fractionPartRaw.length > decimalPlaces) {
+    throw new Error(
+      `"${input}" has more decimal places than this currency supports (max ${decimalPlaces})`,
+    );
+  }
+  const wholePart = wholePartRaw ?? '0';
+  const fractionPart = fractionPartRaw.padEnd(decimalPlaces, '0');
+  const combined = `${wholePart}${fractionPart}`.replace(/^0+(?=\d)/, '');
+  return Number.parseInt(combined || '0', 10);
+}
+
+/**
+ * The inverse of `majorUnitsToMinor` — an exact integer minor-unit
+ * amount back to a canonical decimal major-unit string (e.g. 1999 ->
+ * "19.99"), for populating an editable form field with an existing
+ * value. Same pure string/integer arithmetic rationale.
+ */
+export function minorUnitsToMajorString(
+  amountMinorUnits: number,
+  decimalPlaces: number,
+): string {
+  const sign = amountMinorUnits < 0 ? '-' : '';
+  const abs = Math.abs(Math.trunc(amountMinorUnits)).toString();
+  if (decimalPlaces === 0) return `${sign}${abs}`;
+  const padded = abs.padStart(decimalPlaces + 1, '0');
+  const whole = padded.slice(0, -decimalPlaces);
+  const fraction = padded.slice(-decimalPlaces);
+  return `${sign}${whole}.${fraction}`;
+}
+
 /** Format a compact number, e.g. 1200 -> "1.2K". */
 export function formatCompactNumber(value: number, locale = 'en-US'): string {
   return new Intl.NumberFormat(locale, {

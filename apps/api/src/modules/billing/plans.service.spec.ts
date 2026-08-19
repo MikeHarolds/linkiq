@@ -344,7 +344,7 @@ describe('PlansService', () => {
       expect(prisma.plan.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            currency: 'USD',
+            currency: 'NGN',
             billingInterval: 'MONTHLY',
             displayOrder: 0,
             isActive: true,
