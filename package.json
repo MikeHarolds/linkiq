@@ -33,7 +33,7 @@
     "docker:down": "docker compose --env-file .env --project-directory . -f docker/docker-compose.dev.yml down",
     "docker:prod:up": "docker compose --env-file .env --project-directory . -f docker/docker-compose.prod.yml up -d --build",
     "docker:prod:down": "docker compose --env-file .env --project-directory . -f docker/docker-compose.prod.yml down",
-    "prepare": "husky"
+    "prepare": "husky || true"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.5.0",
