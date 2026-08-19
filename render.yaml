@@ -17,32 +17,49 @@
 # `npm ci` must see the root lockfile), using the exact same root-level
 # scripts documented in the README (build:api/start:api, build:web
 # via `--workspace=apps/web`/start:web) — no Render-specific commands.
+#
+# `free` plan on every resource — deliberate for an investor-demo
+# deployment: no billing-account requirement, and this repo does not
+# need real production-tier compute to demonstrate the product. Known
+# free-tier tradeoffs, both reversible by editing this file and
+# redeploying once a paid plan is wanted: free Postgres instances
+# expire after 90 days of inactivity (Render emails a warning first);
+# free web services spin down after ~15 minutes idle and take a few
+# seconds to wake on the next request — acceptable for a demo, not for
+# a real production SLA.
 
 databases:
   - name: linkiq-postgres
-    plan: starter
+    plan: free
     databaseName: linkiq
     user: linkiq
 
 services:
   - type: keyvalue
     name: linkiq-redis
-    plan: starter
+    plan: free
     ipAllowList: [] # private network only — no public internet access
     maxmemoryPolicy: noeviction
 
   - type: web
     name: linkiq-api
     runtime: node
-    plan: starter
+    plan: free
     buildCommand: npm ci && npm run db:generate && npm run build:api
-    # `prisma migrate deploy` (non-destructive, applies pending
-    # migrations only) runs as a pre-deploy step, never at container
-    # boot inside the app process itself, and NEVER `migrate reset` —
-    # see Sprint 19 §7 / docs/architecture/paystack-integration.md for
-    # why this project never auto-resets a database.
-    preDeployCommand: npm run db:deploy
-    startCommand: npm run start:api
+    # `prisma migrate deploy` (non-destructive, applies only PENDING
+    # migrations, NEVER `migrate reset`) runs immediately before the
+    # app boots. `preDeployCommand` (a dedicated pre-deploy phase) is
+    # the preferred mechanism but is not available on the free plan —
+    # discovered via `render blueprints validate` against this actual
+    # account ("pre-deploy command is not supported for free tier
+    # services"). Folding it into startCommand is the standard fallback
+    # for tiers without that hook: still idempotent, still applied
+    # before `node dist/main` starts serving traffic, still never
+    # destructive — see docs/architecture/paystack-integration.md for
+    # why this project never auto-resets a database. Upgrading the
+    # `linkiq-api` service off the free plan later can restore the
+    # separate preDeployCommand step if wanted.
+    startCommand: npm run db:deploy && npm run start:api
     healthCheckPath: /api/v1/health
     buildFilter:
       paths:
@@ -106,7 +123,7 @@ services:
   - type: web
     name: linkiq-web
     runtime: node
-    plan: starter
+    plan: free
     buildCommand: npm ci && npm run build --workspace=apps/web
     startCommand: npm run start:web
     buildFilter:
