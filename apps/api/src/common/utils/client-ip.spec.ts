@@ -1,6 +1,6 @@
 import type { IncomingHttpHeaders } from 'http';
 
-import { extractClientIp } from './client-ip';
+import { extractClientIp, getViaWebProxyTrustedHops } from './client-ip';
 
 function headers(
   overrides: Partial<IncomingHttpHeaders> = {},
@@ -169,6 +169,77 @@ describe('extractClientIp', () => {
       const h = headers({ 'x-forwarded-for': ',,,,,' });
       expect(() => extractClientIp(h, '203.0.113.7')).not.toThrow();
       expect(extractClientIp(h, '203.0.113.7')).toBe('203.0.113.7');
+    });
+  });
+
+  describe('getViaWebProxyTrustedHops (Render/Codespaces split-hostname topology)', () => {
+    const ORIGINAL_ENV = process.env;
+
+    beforeEach(() => {
+      process.env = { ...ORIGINAL_ENV };
+      delete process.env.TRUSTED_PROXY_HOPS;
+      delete process.env.WEB_PROXY_TRUSTED_HOPS;
+    });
+
+    afterAll(() => {
+      process.env = ORIGINAL_ENV;
+    });
+
+    it('equals the base default (1) when neither env var is set — self-hosted nginx, unaffected', () => {
+      expect(getViaWebProxyTrustedHops()).toBe(1);
+    });
+
+    it('adds WEB_PROXY_TRUSTED_HOPS on top of the default base hop count', () => {
+      process.env.WEB_PROXY_TRUSTED_HOPS = '3';
+      expect(getViaWebProxyTrustedHops()).toBe(1 + 3);
+    });
+
+    it('sums TRUSTED_PROXY_HOPS and WEB_PROXY_TRUSTED_HOPS — the real Render configuration', () => {
+      process.env.TRUSTED_PROXY_HOPS = '3';
+      process.env.WEB_PROXY_TRUSTED_HOPS = '3';
+      expect(getViaWebProxyTrustedHops()).toBe(6);
+    });
+
+    it('ignores an invalid WEB_PROXY_TRUSTED_HOPS and falls back to 0 extra hops', () => {
+      process.env.TRUSTED_PROXY_HOPS = '3';
+      process.env.WEB_PROXY_TRUSTED_HOPS = 'not-a-number';
+      expect(getViaWebProxyTrustedHops()).toBe(3);
+    });
+
+    it('ignores a negative WEB_PROXY_TRUSTED_HOPS and falls back to 0 extra hops', () => {
+      process.env.TRUSTED_PROXY_HOPS = '3';
+      process.env.WEB_PROXY_TRUSTED_HOPS = '-1';
+      expect(getViaWebProxyTrustedHops()).toBe(3);
+    });
+
+    it('produces the correct client IP for the live-observed Render redirect chain (6 trusted hops)', () => {
+      // Exact shape captured from the real Render deployment: client,
+      // then 3 trusted entries appended crossing into linkiq-web, then
+      // 3 more crossing into linkiq-api via the rewrite proxy.
+      const h = headers({
+        'x-forwarded-for':
+          '102.90.99.117, 104.23.170.56, 10.24.83.130, 74.220.48.219, 172.68.175.28, 10.24.83.130',
+      });
+      process.env.TRUSTED_PROXY_HOPS = '3';
+      process.env.WEB_PROXY_TRUSTED_HOPS = '3';
+      expect(extractClientIp(h, '::1', getViaWebProxyTrustedHops())).toBe(
+        '102.90.99.117',
+      );
+    });
+
+    it('a spoofed leading entry still cannot reach the trusted zone at 6 hops', () => {
+      const h = headers({
+        'x-forwarded-for':
+          '6.6.6.6, 7.7.7.7, 102.90.99.117, 172.71.146.207, 10.24.83.130, 74.220.48.219, 172.68.175.27, 10.28.130.129',
+      });
+      process.env.TRUSTED_PROXY_HOPS = '3';
+      process.env.WEB_PROXY_TRUSTED_HOPS = '3';
+      expect(extractClientIp(h, '::1', getViaWebProxyTrustedHops())).toBe(
+        '102.90.99.117',
+      );
+      expect(extractClientIp(h, '::1', getViaWebProxyTrustedHops())).not.toBe(
+        '6.6.6.6',
+      );
     });
   });
 });

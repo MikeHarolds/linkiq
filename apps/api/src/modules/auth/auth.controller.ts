@@ -61,7 +61,10 @@ export class AuthController {
   @ApiResponse({ status: 409, description: 'Email already registered' })
   async register(
     @Body() dto: RegisterDto,
-    @Ctx() ctx: RequestContext,
+    // true: this endpoint is always reached via the web app's own
+    // rewrite proxy in a split-hostname deployment — see Ctx's own
+    // doc comment.
+    @Ctx(true) ctx: RequestContext,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthResponseDto> {
     const { user, workspaces, session } = await this.authService.register(
@@ -99,7 +102,8 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Invalid email or password' })
   async login(
     @Body() dto: LoginDto,
-    @Ctx() ctx: RequestContext,
+    // See register()'s @Ctx(true) comment above.
+    @Ctx(true) ctx: RequestContext,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthResponseDto> {
     const { user, workspaces, session } = await this.authService.login(
@@ -140,7 +144,8 @@ export class AuthController {
   })
   async refresh(
     @Req() req: Request,
-    @Ctx() ctx: RequestContext,
+    // See register()'s @Ctx(true) comment above.
+    @Ctx(true) ctx: RequestContext,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthResponseDto> {
     const cookieName = this.config.get<string>('auth.cookie.name')!;

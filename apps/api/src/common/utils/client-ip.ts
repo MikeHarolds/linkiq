@@ -23,6 +23,48 @@ function getTrustedProxyHops(): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
 }
 
+/**
+ * Extra trusted hops crossed ONLY by a request that arrives via this
+ * app's own Next.js rewrite proxy (apps/web/next.config.js) instead of
+ * hitting the API directly — the short-link redirect route, plus the
+ * login/register/refresh auth endpoints (see auth-provider.tsx's
+ * SAME_ORIGIN_API_PREFIX). Self-hosted nginx never takes this path at
+ * all (infrastructure/nginx/linkiq.conf routes both of those straight
+ * to the API in one hop, matching TRUSTED_PROXY_HOPS alone), so this
+ * defaults to 0 there and must stay unset. On a split-hostname
+ * deployment (Render, or Codespaces' forwarded ports) a proxied
+ * request crosses the SAME front-line boundary TWICE — once reaching
+ * linkiq-web, once again when linkiq-web's own outbound rewrite
+ * request reaches linkiq-api — live-confirmed on Render via a
+ * temporary header dump: a direct request to linkiq-api carried
+ * exactly 3 trusted-appended X-Forwarded-For entries (Cloudflare +
+ * Render's two internal routing hops), and the identical request
+ * proxied through linkiq-web carried exactly 6 (the same 3 crossed
+ * twice) — hence this being a genuinely separate, independently
+ * configured value rather than an assumption that it always equals
+ * TRUSTED_PROXY_HOPS again (a different split-hostname platform, e.g.
+ * Codespaces, could have a different front-line depth on each side).
+ */
+function getWebProxyExtraHops(): number {
+  const raw = process.env.WEB_PROXY_TRUSTED_HOPS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+/**
+ * Trusted-hop count for a call site that is ALWAYS reached via this
+ * app's own rewrite proxy in a split-hostname deployment (the redirect
+ * route; the login/register/refresh auth endpoints) — see
+ * getWebProxyExtraHops() above for why this can't just reuse
+ * getTrustedProxyHops() unchanged. Safe to call unconditionally in
+ * every deployment: on self-hosted nginx, where this scenario never
+ * happens, WEB_PROXY_TRUSTED_HOPS stays unset (0) and this is
+ * identical to the base hop count.
+ */
+export function getViaWebProxyTrustedHops(): number {
+  return getTrustedProxyHops() + getWebProxyExtraHops();
+}
+
 /** Validates and normalizes a single header value that should contain
  * exactly one IP address — never a comma-separated list. Returns
  * undefined for anything that doesn't parse as IPv4 or IPv6. */
