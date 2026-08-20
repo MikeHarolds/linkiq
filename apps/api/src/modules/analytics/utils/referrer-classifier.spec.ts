@@ -91,6 +91,26 @@ describe('classifyReferrer', () => {
     });
   });
 
+  describe('WhatsApp', () => {
+    it('classifies whatsapp.com as social', () => {
+      const result = classifyReferrer('https://whatsapp.com/');
+      expect(result.category).toBe('social');
+      expect(result.domain).toBe('whatsapp.com');
+    });
+
+    it('classifies www.whatsapp.com as social, normalized to the apex domain', () => {
+      const result = classifyReferrer('https://www.whatsapp.com/');
+      expect(result.category).toBe('social');
+      expect(result.domain).toBe('whatsapp.com');
+    });
+
+    it('classifies web.whatsapp.com (WhatsApp Web) as social', () => {
+      const result = classifyReferrer('https://web.whatsapp.com/');
+      expect(result.category).toBe('social');
+      expect(result.domain).toBe('web.whatsapp.com');
+    });
+  });
+
   describe('YouTube', () => {
     it('classifies youtube.com as social', () => {
       const result = classifyReferrer('https://youtube.com/watch?v=abc');

@@ -39,6 +39,16 @@ const SOCIAL_DOMAINS = new Set([
   'threads.net',
   'youtube.com',
   'youtu.be',
+  // WhatsApp Web (desktop) runs in a normal browser tab, so a click
+  // there carries a real Referer like any other site — confirmed
+  // recognized here. WhatsApp's mobile app, by contrast, is
+  // well-documented to strip the Referer header entirely for links
+  // opened from a chat (no Domain, no origin, nothing at all) — no
+  // classifier change can identify that traffic after the fact; see
+  // extractMarketingParams below and this file's own module doc for
+  // the recommended fix (explicit utm_source, checked before Referer).
+  'whatsapp.com',
+  'web.whatsapp.com',
 ]);
 
 /** Strips a leading "www." and lowercases, for consistent domain matching. */
