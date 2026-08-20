@@ -1,9 +1,16 @@
-import type { INestApplication } from '@nestjs/common';
+import { Logger, type INestApplication } from '@nestjs/common';
 import type { Request, Response } from 'express';
 
 import { extractClientIp } from '../../common/utils/client-ip';
 
 import { RedirectService } from './redirect.service';
+
+// TEMPORARY diagnostic for the Sprint 13 Render attribution investigation
+// (Unknown country / Direct referrer on the real Render deployment).
+// Logs only the proxy-chain headers and the resolved client IP needed to
+// verify TRUSTED_PROXY_HOPS against Render's actual edge topology — never
+// cookies, tokens, passwords, or any other secret. Remove once root-caused.
+const diagnosticLogger = new Logger('RedirectAttributionDiagnostic');
 
 /**
  * Registers GET /:shortCode directly on the underlying HTTP adapter,
@@ -36,8 +43,20 @@ export function registerRedirectRoute(app: INestApplication): void {
       return;
     }
 
+    const resolvedIp = extractClientIp(req.headers, req.socket.remoteAddress);
+
+    // TEMPORARY — see diagnosticLogger comment above.
+    diagnosticLogger.log({
+      xForwardedFor: req.headers['x-forwarded-for'] ?? null,
+      xRealIp: req.headers['x-real-ip'] ?? null,
+      socketRemoteAddress: req.socket.remoteAddress ?? null,
+      resolvedIp: resolvedIp ?? null,
+      referer: req.headers['referer'] ?? null,
+      host: req.headers.host ?? null,
+    });
+
     const outcome = await redirectService.resolve(shortCode, {
-      ipAddress: extractClientIp(req.headers, req.socket.remoteAddress),
+      ipAddress: resolvedIp,
       userAgent: req.headers['user-agent'],
       referer: req.headers['referer'],
       queryString: req.url.includes('?') ? req.url.split('?')[1] : undefined,
