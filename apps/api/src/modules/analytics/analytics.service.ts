@@ -239,6 +239,53 @@ export class AnalyticsService {
     return rows;
   }
 
+  /**
+   * Explicit Link Source / Campaign Attribution breakdown — the
+   * resolved-attribution complement to getReferrers above (raw Referer
+   * domain), reading ClickEvent's attributedSource/Medium/attributionType
+   * columns instead of referrerDomain/referrerCategory. `attributionType`
+   * lets the dashboard visibly distinguish an explicit LinkSource match
+   * ('campaign') from a plain UTM param ('utm'), the Sprint 13 referrer
+   * classifier ('referrer'), or no signal at all ('direct') — see
+   * resolveAttribution's own doc comment for the full priority cascade.
+   */
+  async getSourceBreakdown(
+    workspaceId: string,
+    query: AnalyticsQueryDto,
+    limit = 10,
+  ) {
+    const cacheKey = { ...query, limit };
+    const cached = await this.cache.get(workspaceId, 'sources', cacheKey);
+    if (cached) return cached;
+
+    const filters = this.resolveFilters(workspaceId, query);
+    const { clause, params } = this.buildWhere(filters, 1);
+
+    const rows = await this.prisma.$queryRawUnsafe<
+      Array<{
+        source: string;
+        medium: string | null;
+        attributionType: string;
+        clicks: number;
+      }>
+    >(
+      `SELECT
+        COALESCE("attributedSource", 'Direct') AS source,
+        "attributedMedium" AS medium,
+        COALESCE("attributionType", 'direct') AS "attributionType",
+        count(*)::int AS clicks
+      FROM click_events
+      WHERE ${clause}
+      GROUP BY source, medium, "attributionType"
+      ORDER BY clicks DESC
+      LIMIT ${limit}`,
+      ...params,
+    );
+
+    await this.cache.set(workspaceId, 'sources', cacheKey, rows);
+    return rows;
+  }
+
   async getGeography(
     workspaceId: string,
     query: AnalyticsQueryDto,

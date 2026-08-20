@@ -15,6 +15,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import * as React from 'react';
 
+import { TrackingSourcesCard } from '@/components/links/tracking-sources-card';
 import { CreateQrCodeDialog } from '@/components/qr-codes/create-qr-code-dialog';
 import { EditQrCodeDialog } from '@/components/qr-codes/edit-qr-code-dialog';
 import { QrCodeCard } from '@/components/qr-codes/qr-code-card';
@@ -197,6 +198,12 @@ export default function LinkDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      <TrackingSourcesCard
+        workspaceId={currentWorkspaceId}
+        linkId={linkId}
+        canManage={canManage}
+      />
 
       <CreateQrCodeDialog
         workspaceId={currentWorkspaceId}

@@ -201,16 +201,17 @@ All endpoints require `Authorization: Bearer <token>` and
 response schemas are in Swagger at `/api/v1/docs` once the server is
 running.
 
-| Endpoint                           | Purpose                                  |
-| ---------------------------------- | ---------------------------------------- |
-| `GET /analytics/overview`          | Total/human/bot clicks + unique visitors |
-| `GET /analytics/timeseries`        | Clicks bucketed by hour or day           |
-| `GET /analytics/links`             | Top links by click volume                |
-| `GET /analytics/referrers`         | Top referrer domains + category          |
-| `GET /analytics/geography`         | Top countries and regions                |
-| `GET /analytics/devices`           | Device type breakdown                    |
-| `GET /analytics/browsers`          | Browser breakdown                        |
-| `GET /analytics/operating-systems` | OS breakdown                             |
+| Endpoint                           | Purpose                                                                                                   |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `GET /analytics/overview`          | Total/human/bot clicks + unique visitors                                                                  |
+| `GET /analytics/timeseries`        | Clicks bucketed by hour or day                                                                            |
+| `GET /analytics/links`             | Top links by click volume                                                                                 |
+| `GET /analytics/referrers`         | Top referrer domains + category                                                                           |
+| `GET /analytics/geography`         | Top countries and regions                                                                                 |
+| `GET /analytics/devices`           | Device type breakdown                                                                                     |
+| `GET /analytics/browsers`          | Browser breakdown                                                                                         |
+| `GET /analytics/operating-systems` | OS breakdown                                                                                              |
+| `GET /analytics/sources`           | Explicit Link Source / Campaign Attribution breakdown — resolved source/medium + which tier won (see §12) |
 
 Common query params: `linkId`, `range` (`today`/`yesterday`/`7d`/`30d`/
 `90d`/`custom`), `from`/`to` (custom range), `timezone`, `includeBots`.
@@ -287,11 +288,103 @@ LinkIQ does server-side. This is most likely to bite in local testing
 (`http://localhost:3000/...`); it is not an issue against a real HTTPS
 production deployment. Once a real `Referer` does arrive, known
 referrer domains — including Facebook's `www.`/`m.`/`l.`/`lm.`
-subdomains and YouTube's `youtube.com`/`youtu.be` — are classified via
+subdomains, WhatsApp's `whatsapp.com`/`web.whatsapp.com`, and YouTube's
+`youtube.com`/`youtu.be` — are classified via
 `analytics/utils/referrer-classifier.ts`'s `SOCIAL_DOMAINS`/
 `SEARCH_DOMAINS` sets; see `referrer-classifier.spec.ts` for the full
 list this covers today.
 
+**A WhatsApp (or Facebook in-app-browser) click always shows "Direct,"
+even with a real HTTPS production deployment.** This is a genuine
+platform limitation, not a LinkIQ bug, and no `Referer`-based fix is
+possible: WhatsApp's mobile app, and Facebook's in-app browser for
+organic (non-ad) message shares, are well-documented to strip the
+`Referer` header entirely for links opened from a chat — no domain, no
+origin, nothing reaches the server at all. See §12 for the actual fix
+(an explicit LinkIQ tracking source), which does not depend on the
+originating app sending anything.
+
 **Unique visitor counts look higher than expected.** This is very likely
 the by-design daily hash rotation (§4) — someone returning on a different
 day is counted as an additional unique visitor. This is not a bug.
+
+## 12. Explicit Link Source / Campaign Attribution
+
+Built specifically because of the WhatsApp/Facebook limitation
+described above: `Referer` is inherently unreliable for native mobile
+apps, so this gives a user an explicit, `Referer`-independent way to
+tag traffic by source. See `LinkSource` in `schema.prisma`,
+`modules/link-sources/`, and `analytics/utils/attribution-resolver.ts`
+for the implementation.
+
+### Concept
+
+A `LinkSource` is a named tracking variant of an existing `Link` — many
+can belong to one link, all sharing the same `shortCode`/destination,
+distinguished only by the `utm_source`/`utm_medium`/`utm_campaign`
+query params their generated tracking URL carries (e.g.
+`https://linkiq.example/abc123?utm_source=whatsapp&utm_medium=messaging`).
+This reuses the existing UTM query-string convention end to end — no
+new URL scheme, and no duplicate parser: `extractMarketingParams`
+(referrer-classifier.ts, Sprint 13) is the single place that reads
+`utm_*` off the incoming request, unchanged.
+
+Predefined sources (Facebook, Instagram, WhatsApp, TikTok, Google,
+YouTube, LinkedIn, Email, SMS, Telegram) plus a free-text "Custom"
+option live in exactly one place — `packages/utils/src/tracking-sources.ts`
+— imported by both apps rather than hardcoded in either.
+
+### Attribution priority
+
+Resolved once, asynchronously, in `ClickEventProcessor.process()` —
+the same async worker Sprint 13's referrer classification already runs
+in, right before the persistence step:
+
+```
+1. Explicit LinkIQ tracking source   (an ACTIVE LinkSource matching
+                                       the incoming utm_source, scoped
+                                       to this link)
+2. Plain UTM                          (utm_source present, but matching
+                                       no active LinkSource)
+3. HTTP Referer                       (Sprint 13's classifyReferrer —
+                                       always computed independently)
+4. Direct
+```
+
+An explicit source wins even against a **conflicting** `Referer` — e.g.
+`?utm_source=facebook` with `Referer: https://whatsapp.com/` resolves
+to Facebook, not WhatsApp. This is intentional: an explicit tag from a
+tracking URL the user themselves generated is a stronger signal than
+whatever a browser happened to send. See `resolveAttribution`'s own
+doc comment and `attribution-resolver.spec.ts` for the full cascade,
+covered case by case.
+
+### Data model
+
+`ClickEvent` gained five new, fully additive, nullable columns —
+`linkSourceId`, `attributedSource`, `attributedMedium`,
+`attributedCampaign`, `attributionType` (`'campaign' | 'utm' |
+'referrer' | 'direct'`). Sprint 13's own `referrerUrl`/`referrerDomain`/
+`referrerCategory` columns are **untouched** and always computed
+exactly as before, regardless of which tier ultimately wins — the two
+are deliberately independent, so raw-referrer data is never lost even
+when explicit/UTM attribution takes priority for display purposes.
+
+`attributedSource`/`Medium`/`Campaign` are a **denormalized snapshot**
+written at click time, not a live join through `linkSourceId` — a
+`ClickEvent`'s attribution is permanent and historically accurate even
+after its `LinkSource` is later deactivated or (soft-)deleted. Only
+_future_ clicks are affected by a deactivation (`isActive: false`
+simply stops that row matching `WHERE ... isActive: true` in the
+processor's lookup) — existing `ClickEvent` rows are never rewritten.
+
+### API surface
+
+`POST /links/:linkId/sources`, `GET /links/:linkId/sources` (with a
+live click count per source), `PATCH /link-sources/:id` (rename,
+change medium/campaign, or toggle `isActive`), `DELETE /link-sources/:id`
+(soft delete). Same `WorkspaceRolesGuard` + `X-Workspace-Id` RBAC every
+other link-scoped resource uses — no separate authorization system.
+`GET /analytics/sources` reports the resolved breakdown, distinct from
+`GET /analytics/referrers` (which continues to report the raw `Referer`
+domain, untouched, for exactly the cases above where the two diverge).

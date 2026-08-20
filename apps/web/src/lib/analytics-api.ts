@@ -5,6 +5,7 @@ import type {
   BreakdownItemDto,
   GeographyDto,
   ReferrerDto,
+  SourceBreakdownDto,
   TopLinkDto,
 } from '@linkiq/types';
 
@@ -61,6 +62,15 @@ export function getReferrers(
   params: AnalyticsQueryParams,
 ): Promise<ReferrerDto[]> {
   return api.get(`/analytics/referrers${buildQuery(params)}`, {
+    headers: workspaceHeaders(workspaceId),
+  });
+}
+
+export function getSourceBreakdown(
+  workspaceId: string,
+  params: AnalyticsQueryParams,
+): Promise<SourceBreakdownDto[]> {
+  return api.get(`/analytics/sources${buildQuery(params)}`, {
     headers: workspaceHeaders(workspaceId),
   });
 }

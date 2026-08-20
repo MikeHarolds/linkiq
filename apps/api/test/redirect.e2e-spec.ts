@@ -333,4 +333,123 @@ describe('Redirect engine (e2e)', () => {
       expect(event.country).toBeNull();
     });
   });
+
+  // Real end-to-end coverage (registration -> link -> tracking source ->
+  // redirect -> BullMQ -> ClickEventProcessor -> DB) of Explicit Link
+  // Source / Campaign Attribution — see analytics/utils/attribution-
+  // resolver.ts for the unit-level coverage of the priority cascade
+  // itself; these confirm the real wiring through the actual redirect
+  // route and a real created LinkSource row.
+  describe('Explicit Link Source / Campaign Attribution', () => {
+    it('an explicit tracking source wins over a conflicting Referer', async () => {
+      const { accessToken, workspaceId, link } = await registerAndCreateLink(
+        'attribution1@example.com',
+        { slug: 'attribution-explicit-test' },
+      );
+      const headers = {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Workspace-Id': workspaceId,
+      };
+      await request(server)
+        .post(`/api/v1/links/${link.id}/sources`)
+        .set(headers)
+        .send({ name: 'WhatsApp', source: 'whatsapp', medium: 'messaging' })
+        .expect(201);
+
+      await request(server)
+        .get(`/${link.shortCode}?utm_source=whatsapp`)
+        .set('Referer', 'https://www.facebook.com/some-post')
+        .redirects(0)
+        .expect(302);
+
+      const event = await waitForClickEvent(prisma, link.id);
+      expect(event.attributionType).toBe('campaign');
+      expect(event.attributedSource).toBe('whatsapp');
+      expect(event.attributedMedium).toBe('messaging');
+      // Sprint 13 fields are computed completely independently.
+      expect(event.referrerDomain).toBe('facebook.com');
+    });
+
+    it('utm_source with no matching tracking source still beats a present Referer', async () => {
+      const { link } = await registerAndCreateLink('attribution2@example.com', {
+        slug: 'attribution-utm-only-test',
+      });
+
+      await request(server)
+        .get(`/${link.shortCode}?utm_source=newsletter&utm_medium=email`)
+        .set('Referer', 'https://www.google.com/search?q=x')
+        .redirects(0)
+        .expect(302);
+
+      const event = await waitForClickEvent(prisma, link.id);
+      expect(event.attributionType).toBe('utm');
+      expect(event.attributedSource).toBe('newsletter');
+      expect(event.linkSourceId).toBeNull();
+    });
+
+    it('a deactivated tracking source no longer wins attribution for a new click', async () => {
+      const { accessToken, workspaceId, link } = await registerAndCreateLink(
+        'attribution3@example.com',
+        { slug: 'attribution-deactivated-test' },
+      );
+      const headers = {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Workspace-Id': workspaceId,
+      };
+      const created = await request(server)
+        .post(`/api/v1/links/${link.id}/sources`)
+        .set(headers)
+        .send({ name: 'WhatsApp', source: 'whatsapp', medium: 'messaging' })
+        .expect(201);
+
+      await request(server)
+        .patch(`/api/v1/link-sources/${created.body.id}`)
+        .set(headers)
+        .send({ isActive: false })
+        .expect(200);
+
+      await request(server)
+        .get(`/${link.shortCode}?utm_source=whatsapp`)
+        .redirects(0)
+        .expect(302);
+
+      const event = await waitForClickEvent(prisma, link.id);
+      expect(event.attributionType).toBe('utm');
+      expect(event.linkSourceId).toBeNull();
+    });
+
+    it('deleting a tracking source does not alter the ClickEvent already attributed to it', async () => {
+      const { accessToken, workspaceId, link } = await registerAndCreateLink(
+        'attribution4@example.com',
+        { slug: 'attribution-delete-test' },
+      );
+      const headers = {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Workspace-Id': workspaceId,
+      };
+      const created = await request(server)
+        .post(`/api/v1/links/${link.id}/sources`)
+        .set(headers)
+        .send({ name: 'Facebook', source: 'facebook', medium: 'social' })
+        .expect(201);
+
+      await request(server)
+        .get(`/${link.shortCode}?utm_source=facebook`)
+        .redirects(0)
+        .expect(302);
+      const event = await waitForClickEvent(prisma, link.id);
+      expect(event.attributionType).toBe('campaign');
+
+      await request(server)
+        .delete(`/api/v1/link-sources/${created.body.id}`)
+        .set(headers)
+        .expect(204);
+
+      const stillIntact = await prisma.clickEvent.findUnique({
+        where: { id: event.id },
+      });
+      expect(stillIntact?.attributionType).toBe('campaign');
+      expect(stillIntact?.attributedSource).toBe('facebook');
+    });
+  });
 });

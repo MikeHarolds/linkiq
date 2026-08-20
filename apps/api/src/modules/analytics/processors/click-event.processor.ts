@@ -5,6 +5,7 @@ import { Prisma, WebhookEventType } from '@prisma/client';
 import type { Job } from 'bullmq';
 
 import { isUniqueConstraintViolation } from '../../../common/utils/prisma-errors';
+import { normalizeSourceKey } from '../../link-sources/utils/normalize-source-key';
 import {
   CLICK_EVENT_QUEUE,
   type RecordClickJobData,
@@ -15,6 +16,7 @@ import {
   GEO_IP_PROVIDER,
   type GeoIpProvider,
 } from '../geo/geo-ip-provider.interface';
+import { resolveAttribution } from '../utils/attribution-resolver';
 import {
   classifyReferrer,
   extractMarketingParams,
@@ -36,6 +38,12 @@ import { computeVisitorHash } from '../utils/visitor-hash';
  * duplicate row — caught and treated as a successful no-op, including
  * skipping the daily-rollup increment (which already happened on the
  * original successful attempt).
+ *
+ * Also where Explicit Link Source / Campaign Attribution resolves —
+ * see resolveAttribution's own doc comment for the full priority
+ * cascade. referrerUrl/referrerDomain/referrerCategory below are Sprint
+ * 13's original fields, always computed exactly as before, completely
+ * independent of that resolution.
  */
 @Processor(CLICK_EVENT_QUEUE, {
   // Bursty by nature (redirects happen in real time); a small concurrency
@@ -105,6 +113,27 @@ export class ClickEventProcessor extends WorkerHost {
       ? this.geoProvider.lookup(ipAddress)
       : { country: null, region: null, city: null };
 
+    // --- Explicit Link Source / Campaign Attribution -------------------
+    // Tier 1 of the priority cascade (explicit source > UTM > Referer >
+    // Direct) — see resolveAttribution's own doc comment. Only a single
+    // extra indexed lookup (linkId + source, both indexed — see
+    // LinkSource in schema.prisma), and only when utm_source is present
+    // at all; this stays off the redirect hot path either way, since
+    // this whole method already runs asynchronously.
+    const rawSource = queryParams?.utm_source;
+    const matchedSource = rawSource
+      ? await this.prisma.linkSource.findFirst({
+          where: {
+            linkId,
+            source: normalizeSourceKey(rawSource),
+            isActive: true,
+            deletedAt: null,
+          },
+          select: { id: true, source: true, medium: true, campaign: true },
+        })
+      : null;
+    const attribution = resolveAttribution(matchedSource, queryParams, referrer);
+
     // --- Persist idempotently + update the daily rollup ---------------
     const utcDay = new Date(
       Date.UTC(
@@ -134,6 +163,11 @@ export class ClickEventProcessor extends WorkerHost {
             referrerDomain: referrer.domain,
             referrerCategory: referrer.category,
             queryParams: queryParams ?? Prisma.JsonNull,
+            linkSourceId: attribution.linkSourceId,
+            attributedSource: attribution.attributedSource,
+            attributedMedium: attribution.attributedMedium,
+            attributedCampaign: attribution.attributedCampaign,
+            attributionType: attribution.attributionType,
             isBot: ua.isBot,
           },
         });
@@ -157,7 +191,13 @@ export class ClickEventProcessor extends WorkerHost {
       });
 
       this.logger.log(
-        { eventId, linkId, isBot: ua.isBot, country: geo.country },
+        {
+          eventId,
+          linkId,
+          isBot: ua.isBot,
+          country: geo.country,
+          attributionType: attribution.attributionType,
+        },
         'Click event processed',
       );
 
@@ -182,6 +222,9 @@ export class ClickEventProcessor extends WorkerHost {
           browser: ua.browser,
           referrerDomain: referrer.domain,
           referrerCategory: referrer.category,
+          attributedSource: attribution.attributedSource,
+          attributedMedium: attribution.attributedMedium,
+          attributionType: attribution.attributionType,
           isBot: ua.isBot,
         },
       });

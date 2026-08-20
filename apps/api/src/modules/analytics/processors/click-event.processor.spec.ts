@@ -30,6 +30,7 @@ describe('ClickEventProcessor', () => {
   let prisma: {
     clickEvent: { create: jest.Mock };
     linkDailyStat: { upsert: jest.Mock };
+    linkSource: { findFirst: jest.Mock };
     $transaction: jest.Mock;
   };
   let config: { get: jest.Mock };
@@ -41,6 +42,10 @@ describe('ClickEventProcessor', () => {
     prisma = {
       clickEvent: { create: jest.fn().mockResolvedValue({}) },
       linkDailyStat: { upsert: jest.fn().mockResolvedValue({}) },
+      // Default: no active LinkSource matches — every existing test's
+      // default job (queryString: 'utm_source=test') would otherwise
+      // hit this new lookup path and throw "not a function".
+      linkSource: { findFirst: jest.fn().mockResolvedValue(null) },
       $transaction: jest.fn(async (fn: (tx: unknown) => Promise<void>) =>
         fn(prisma),
       ),
@@ -208,6 +213,236 @@ describe('ClickEventProcessor', () => {
 
       const createCall = prisma.clickEvent.create.mock.calls[0][0];
       expect(createCall.data.country).toBeNull();
+    });
+  });
+
+  describe('Explicit Link Source / Campaign Attribution', () => {
+    it('a normal link with no tracking configured behaves exactly as before (no linkSource lookup, resolves via Referer)', async () => {
+      await processor.process(
+        makeJob({ queryString: undefined, referer: 'https://www.google.com/' }),
+      );
+
+      expect(prisma.linkSource.findFirst).not.toHaveBeenCalled();
+      const data = prisma.clickEvent.create.mock.calls[0][0].data;
+      expect(data.attributionType).toBe('referrer');
+      expect(data.attributedSource).toBe('google.com');
+      expect(data.linkSourceId).toBeNull();
+    });
+
+    it('explicit Facebook tracking source resolves to Facebook / Social, ignoring a conflicting Referer', async () => {
+      prisma.linkSource.findFirst.mockResolvedValue({
+        id: 'src-fb',
+        source: 'facebook',
+        medium: 'social',
+        campaign: 'summer_sale',
+      });
+
+      await processor.process(
+        makeJob({
+          queryString: 'utm_source=facebook&utm_medium=ignored',
+          referer: 'https://whatsapp.com/', // conflicting — explicit source must still win
+        }),
+      );
+
+      expect(prisma.linkSource.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            linkId: 'link-1',
+            source: 'facebook',
+            isActive: true,
+            deletedAt: null,
+          }),
+        }),
+      );
+      const data = prisma.clickEvent.create.mock.calls[0][0].data;
+      expect(data.linkSourceId).toBe('src-fb');
+      expect(data.attributedSource).toBe('facebook');
+      expect(data.attributedMedium).toBe('social');
+      expect(data.attributedCampaign).toBe('summer_sale');
+      expect(data.attributionType).toBe('campaign');
+      // Sprint 13 fields are computed completely independently and stay
+      // exactly what the raw Referer says, regardless of which tier won.
+      expect(data.referrerDomain).toBe('whatsapp.com');
+    });
+
+    it('explicit WhatsApp tracking source resolves to WhatsApp / Messaging with NO Referer at all', async () => {
+      prisma.linkSource.findFirst.mockResolvedValue({
+        id: 'src-wa',
+        source: 'whatsapp',
+        medium: 'messaging',
+        campaign: null,
+      });
+
+      await processor.process(
+        makeJob({
+          queryString: 'utm_source=whatsapp&utm_medium=messaging',
+          referer: undefined, // WhatsApp's mobile app strips Referer entirely
+        }),
+      );
+
+      const data = prisma.clickEvent.create.mock.calls[0][0].data;
+      expect(data.attributedSource).toBe('whatsapp');
+      expect(data.attributedMedium).toBe('messaging');
+      expect(data.attributionType).toBe('campaign');
+      expect(data.referrerCategory).toBe('direct'); // Sprint 13 field, independent
+    });
+
+    it('explicit Instagram tracking source resolves to Instagram / Social', async () => {
+      prisma.linkSource.findFirst.mockResolvedValue({
+        id: 'src-ig',
+        source: 'instagram',
+        medium: 'social',
+        campaign: null,
+      });
+
+      await processor.process(
+        makeJob({ queryString: 'utm_source=instagram', referer: undefined }),
+      );
+
+      const data = prisma.clickEvent.create.mock.calls[0][0].data;
+      expect(data.attributedSource).toBe('instagram');
+      expect(data.attributedMedium).toBe('social');
+      expect(data.attributionType).toBe('campaign');
+    });
+
+    it('explicit Email tracking source resolves to Email / Email', async () => {
+      prisma.linkSource.findFirst.mockResolvedValue({
+        id: 'src-email',
+        source: 'email',
+        medium: 'email',
+        campaign: 'newsletter',
+      });
+
+      await processor.process(
+        makeJob({ queryString: 'utm_source=email', referer: undefined }),
+      );
+
+      const data = prisma.clickEvent.create.mock.calls[0][0].data;
+      expect(data.attributedSource).toBe('email');
+      expect(data.attributedMedium).toBe('email');
+      expect(data.attributedCampaign).toBe('newsletter');
+      expect(data.attributionType).toBe('campaign');
+    });
+
+    it('explicit custom tracking source resolves using whatever key/medium the user configured', async () => {
+      prisma.linkSource.findFirst.mockResolvedValue({
+        id: 'src-custom',
+        source: 'partner_x',
+        medium: 'affiliate',
+        campaign: null,
+      });
+
+      await processor.process(
+        makeJob({ queryString: 'utm_source=partner_x', referer: undefined }),
+      );
+
+      const data = prisma.clickEvent.create.mock.calls[0][0].data;
+      expect(data.attributedSource).toBe('partner_x');
+      expect(data.attributedMedium).toBe('affiliate');
+      expect(data.attributionType).toBe('campaign');
+    });
+
+    it('utm_source present but matching no active LinkSource beats a present Referer (tier 2 over tier 3)', async () => {
+      prisma.linkSource.findFirst.mockResolvedValue(null);
+
+      await processor.process(
+        makeJob({
+          queryString: 'utm_source=newsletter_march&utm_medium=email',
+          referer: 'https://www.google.com/',
+        }),
+      );
+
+      const data = prisma.clickEvent.create.mock.calls[0][0].data;
+      expect(data.linkSourceId).toBeNull();
+      expect(data.attributedSource).toBe('newsletter_march');
+      expect(data.attributedMedium).toBe('email');
+      expect(data.attributionType).toBe('utm');
+    });
+
+    it('no explicit source, no UTM, a Referer present — falls through to the existing Sprint 13 classifier (tier 3)', async () => {
+      await processor.process(
+        makeJob({ queryString: undefined, referer: 'https://x.com/somepost' }),
+      );
+
+      expect(prisma.linkSource.findFirst).not.toHaveBeenCalled();
+      const data = prisma.clickEvent.create.mock.calls[0][0].data;
+      expect(data.attributedSource).toBe('x.com');
+      expect(data.attributedMedium).toBe('social');
+      expect(data.attributionType).toBe('referrer');
+    });
+
+    it('nothing at all (no source, no UTM, no Referer) resolves to Direct', async () => {
+      await processor.process(
+        makeJob({ queryString: undefined, referer: undefined }),
+      );
+
+      const data = prisma.clickEvent.create.mock.calls[0][0].data;
+      expect(data.linkSourceId).toBeNull();
+      expect(data.attributedSource).toBeNull();
+      expect(data.attributedMedium).toBeNull();
+      expect(data.attributionType).toBe('direct');
+    });
+
+    it('a malformed/oversized utm_source is handled safely — treated as a plain (non-matching) UTM value, never throws', async () => {
+      prisma.linkSource.findFirst.mockResolvedValue(null);
+      const oversized = 'x'.repeat(500);
+
+      await expect(
+        processor.process(
+          makeJob({
+            queryString: `utm_source=${encodeURIComponent(oversized)}`,
+            referer: undefined,
+          }),
+        ),
+      ).resolves.toBeUndefined();
+
+      const data = prisma.clickEvent.create.mock.calls[0][0].data;
+      // extractMarketingParams (Sprint 13, unchanged) already truncates
+      // to 255 chars before this code ever sees the value.
+      expect(data.attributedSource.length).toBeLessThanOrEqual(255);
+      expect(data.attributionType).toBe('utm');
+    });
+
+    it('a deactivated tracking source no longer wins tier-1 attribution for a new click (falls through to tier 2)', async () => {
+      // isActive: true is part of the WHERE clause itself — a deactivated
+      // row simply never matches findFirst, so this asserts the query
+      // shape rather than mocking a specific "inactive row" return.
+      prisma.linkSource.findFirst.mockResolvedValue(null);
+
+      await processor.process(
+        makeJob({ queryString: 'utm_source=whatsapp', referer: undefined }),
+      );
+
+      expect(prisma.linkSource.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ isActive: true }),
+        }),
+      );
+      const data = prisma.clickEvent.create.mock.calls[0][0].data;
+      expect(data.attributionType).toBe('utm');
+      expect(data.linkSourceId).toBeNull();
+    });
+
+    it('deleting a LinkSource does not affect an already-processed ClickEvent — attribution fields are a write-time snapshot, never re-derived', async () => {
+      // The deletedAt: null WHERE clause is what a deleted source fails
+      // to match on any FUTURE click; a past ClickEvent's own
+      // attributedSource/Medium/Campaign columns were already written at
+      // the time this same processor ran for it and are never touched
+      // again — there is no update/backfill path in this processor at
+      // all, asserted here structurally: processing never calls
+      // clickEvent.update, only clickEvent.create, once.
+      prisma.linkSource.findFirst.mockResolvedValue({
+        id: 'src-wa',
+        source: 'whatsapp',
+        medium: 'messaging',
+        campaign: null,
+      });
+
+      await processor.process(
+        makeJob({ queryString: 'utm_source=whatsapp', referer: undefined }),
+      );
+
+      expect(prisma.clickEvent.create).toHaveBeenCalledTimes(1);
     });
   });
 });

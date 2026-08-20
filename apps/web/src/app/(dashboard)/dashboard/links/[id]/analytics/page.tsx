@@ -37,10 +37,30 @@ import {
   getOperatingSystems,
   getOverview,
   getReferrers,
+  getSourceBreakdown,
   getTimeseries,
 } from '@/lib/analytics-api';
 import { getLink } from '@/lib/links-api';
 import { ApiError, useAuth } from '@/providers/auth-provider';
+
+/** Labels the tier that won attribution for a row (see
+ * resolveAttribution on the API side) — 'campaign' means an explicit
+ * LinkSource matched; everything else is a lower-confidence signal. */
+function attributionBadge(type: 'campaign' | 'utm' | 'referrer' | 'direct'): {
+  label: string;
+  variant: 'success' | 'secondary' | 'outline';
+} {
+  switch (type) {
+    case 'campaign':
+      return { label: 'Campaign', variant: 'success' };
+    case 'utm':
+      return { label: 'UTM', variant: 'secondary' };
+    case 'referrer':
+      return { label: 'Detected referrer', variant: 'outline' };
+    default:
+      return { label: 'Direct', variant: 'outline' };
+  }
+}
 
 export default function LinkAnalyticsPage() {
   const params = useParams<{ id: string }>();
@@ -113,6 +133,12 @@ export default function LinkAnalyticsPage() {
   const referrers = useQuery({
     queryKey: ['analytics', 'referrers', currentWorkspaceId, queryParams],
     queryFn: () => getReferrers(currentWorkspaceId!, queryParams),
+    enabled,
+  });
+
+  const sources = useQuery({
+    queryKey: ['analytics', 'sources', currentWorkspaceId, queryParams],
+    queryFn: () => getSourceBreakdown(currentWorkspaceId!, queryParams),
     enabled,
   });
 
@@ -321,6 +347,49 @@ export default function LinkAnalyticsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Traffic Sources</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {sources.isLoading ? (
+            <AnalyticsLoadingState />
+          ) : !sources.data || sources.data.length === 0 ? (
+            <AnalyticsEmptyState message="No attributed traffic yet." />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Medium</TableHead>
+                  <TableHead>Attribution</TableHead>
+                  <TableHead className="text-right">Clicks</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sources.data.map((row) => {
+                  const badge = attributionBadge(row.attributionType);
+                  return (
+                    <TableRow key={`${row.source}-${row.attributionType}`}>
+                      <TableCell>{row.source}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {row.medium ?? '—'}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={badge.variant}>{badge.label}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {row.clicks}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

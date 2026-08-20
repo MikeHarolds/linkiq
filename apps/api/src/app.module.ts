@@ -21,6 +21,7 @@ import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { DomainsModule } from './modules/domains/domains.module';
 import { HealthModule } from './modules/health/health.module';
 import { LandingPageModule } from './modules/landing-page/landing-page.module';
+import { LinkSourcesModule } from './modules/link-sources/link-sources.module';
 import { LinksModule } from './modules/links/links.module';
 import { LoggingModule } from './modules/logging/logging.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
@@ -75,6 +76,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
     LinksModule,
     AnalyticsModule,
     QrCodesModule,
+    LinkSourcesModule,
     CampaignsModule,
     DomainsModule,
     WebhooksModule,

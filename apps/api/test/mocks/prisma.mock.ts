@@ -62,6 +62,15 @@ export function createMockPrismaService() {
       findUnique: jest.fn(),
       findMany: jest.fn(),
       count: jest.fn(),
+      groupBy: jest.fn(),
+    },
+    linkSource: {
+      create: jest.fn(),
+      findUnique: jest.fn(),
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+      update: jest.fn(),
+      count: jest.fn(),
     },
     linkDailyStat: {
       create: jest.fn(),

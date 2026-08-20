@@ -92,6 +92,22 @@ export class AnalyticsController {
     return this.analyticsService.getReferrers(workspace.workspaceId, query);
   }
 
+  @Get('sources')
+  @ApiOperation({
+    summary:
+      'Explicit Link Source / Campaign Attribution breakdown — resolved source/medium via the explicit-source > UTM > Referer > Direct priority cascade, with attributionType distinguishing which tier won',
+  })
+  @ApiResponse({ status: 200, description: 'Resolved source breakdown' })
+  sources(
+    @CurrentWorkspace() workspace: WorkspaceMember,
+    @Query() query: AnalyticsQueryDto,
+  ) {
+    return this.analyticsService.getSourceBreakdown(
+      workspace.workspaceId,
+      query,
+    );
+  }
+
   @Get('geography')
   @ApiOperation({ summary: 'Top countries and regions' })
   @ApiResponse({ status: 200, description: 'Geographic breakdown' })

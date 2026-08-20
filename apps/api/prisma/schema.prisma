@@ -164,6 +164,8 @@ enum ApiKeyPermission {
   CAMPAIGNS_WRITE
   QRCODES_READ
   QRCODES_WRITE
+  LINK_SOURCES_READ
+  LINK_SOURCES_WRITE
   ANALYTICS_READ
   DOMAINS_READ
   DOMAINS_WRITE
@@ -303,6 +305,7 @@ model User {
   passwordResetTokens     PasswordResetToken[]
   createdLinks            Link[]               @relation("LinkCreator")
   createdQrCodes          QrCode[]             @relation("QrCodeCreator")
+  createdLinkSources      LinkSource[]         @relation("LinkSourceCreator")
   createdCampaigns        Campaign[]           @relation("CampaignCreator")
   createdCustomDomains    CustomDomain[]       @relation("CustomDomainCreator")
   createdApiKeys          ApiKey[]             @relation("ApiKeyCreator")
@@ -342,6 +345,7 @@ model Workspace {
   auditLogs        AuditLog[]
   links            Link[]
   qrCodes          QrCode[]
+  linkSources      LinkSource[]
   campaigns        Campaign[]
   customDomains    CustomDomain[]
   subscription     Subscription?
@@ -593,6 +597,7 @@ model Link {
   clickEvents ClickEvent[]
   dailyStats  LinkDailyStat[]
   qrCodes     QrCode[]
+  linkSources LinkSource[]
 
   @@index([workspaceId])
   @@index([createdById])
@@ -651,6 +656,23 @@ model ClickEvent {
   /// arbitrary query strings, which could carry PII (emails, tokens, ...).
   queryParams Json?
 
+  /// Explicit Link Source / Campaign Attribution — resolved once, at
+  /// write time, through the priority cascade (explicit LinkSource >
+  /// UTM query params > the referrerCategory/Domain above > direct).
+  /// Deliberately a DENORMALIZED SNAPSHOT, not just linkSourceId: this
+  /// row must remain historically accurate even after its LinkSource is
+  /// later deactivated or (soft-)deleted — see LinkSource.deletedAt.
+  /// referrerUrl/referrerDomain/referrerCategory above are always
+  /// computed exactly as they were in Sprint 13, completely independent
+  /// of this resolution — this is an additive layer on top, not a
+  /// replacement.
+  linkSourceId       String?     @db.Uuid
+  linkSource         LinkSource? @relation(fields: [linkSourceId], references: [id], onDelete: SetNull)
+  attributedSource   String?
+  attributedMedium   String?
+  attributedCampaign String?
+  attributionType    String? // 'campaign' | 'utm' | 'referrer' | 'direct'
+
   isBot Boolean @default(false)
 
   createdAt DateTime @default(now())
@@ -660,6 +682,7 @@ model ClickEvent {
   @@index([occurredAt])
   @@index([workspaceId, occurredAt])
   @@index([linkId, occurredAt])
+  @@index([linkSourceId])
   @@map("click_events")
 }
 
@@ -757,6 +780,69 @@ model QrCode {
   @@index([linkId])
   @@index([createdById])
   @@map("qr_codes")
+}
+
+/// A named tracking variant of a Link — Explicit Link Source / Campaign
+/// Attribution. Generates a distinct tracking URL for the SAME
+/// shortCode/destination (?utm_source=<source>&utm_medium=<medium>&
+/// utm_campaign=<campaign>, reusing the existing UTM query-string
+/// convention rather than a new URL scheme). What makes this "explicit"
+/// rather than just another hand-typed UTM link is resolved at click
+/// time, not here: ClickEventProcessor looks up the incoming
+/// utm_source against this table (scoped to the link, isActive: true,
+/// deletedAt: null) — a match wins over a plain UTM value, which in
+/// turn wins over the HTTP Referer, which in turn wins over Direct.
+/// See docs/architecture/analytics.md's attribution-priority section.
+///
+/// Exists specifically because some originating platforms (WhatsApp's
+/// mobile app; Facebook's in-app browser for organic message shares)
+/// are well-documented to strip the Referer header entirely for links
+/// opened from a chat — no server-side header inspection can recover
+/// that signal after the fact, so this gives users an explicit,
+/// Referer-independent way to track those sources reliably.
+model LinkSource {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  linkId      String    @db.Uuid
+  link        Link      @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  /// Human label shown in the dashboard, e.g. "WhatsApp Campaign".
+  name String
+  /// Normalized (trimmed, lowercased) source key, e.g. "whatsapp" —
+  /// this is the value matched against the incoming utm_source at
+  /// click time, and the value actually placed in the generated URL.
+  source String
+  /// e.g. "messaging", "social" — defaulted client-side from the
+  /// predefined source list (see packages/utils/src/tracking-sources.ts),
+  /// always overridable.
+  medium String
+  /// Optional utm_campaign value for this variant.
+  campaign String?
+
+  /// Deactivating (not deleting) a variant stops it winning tier-1
+  /// attribution for NEW clicks — see ClickEventProcessor — without
+  /// losing the variant's configuration or its historical click data.
+  isActive Boolean @default(true)
+
+  createdById String? @db.Uuid
+  createdBy   User?   @relation("LinkSourceCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  /// Soft delete only, matching QrCode/Campaign — historical ClickEvent
+  /// rows already carry their own denormalized attributedSource/Medium/
+  /// Campaign snapshot (see ClickEvent), so they remain fully accurate
+  /// and queryable even after this row is deleted.
+  deletedAt DateTime?
+
+  clickEvents ClickEvent[]
+
+  @@index([workspaceId])
+  @@index([linkId])
+  @@index([createdById])
+  @@index([linkId, source])
+  @@map("link_sources")
 }
 
 // ---------------------------------------------------------------------------
@@ -1197,6 +1283,9 @@ enum WebhookEventType {
   QRCODE_CREATED
   QRCODE_UPDATED
   QRCODE_DELETED
+  LINK_SOURCE_CREATED
+  LINK_SOURCE_UPDATED
+  LINK_SOURCE_DELETED
   CAMPAIGN_CREATED
   CAMPAIGN_UPDATED
   CAMPAIGN_DELETED

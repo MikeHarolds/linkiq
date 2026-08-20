@@ -140,6 +140,17 @@ export interface ReferrerDto {
   clicks: number;
 }
 
+/** Explicit Link Source / Campaign Attribution breakdown —
+ * attributionType distinguishes an explicit LinkSource match
+ * ('campaign') from a plain UTM param ('utm'), the Sprint 13 referrer
+ * classifier ('referrer'), or no signal at all ('direct'). */
+export interface SourceBreakdownDto {
+  source: string;
+  medium: string | null;
+  attributionType: 'campaign' | 'utm' | 'referrer' | 'direct';
+  clicks: number;
+}
+
 export interface CountryStatDto {
   country: string;
   clicks: number;
@@ -497,6 +508,8 @@ export type ApiKeyPermission =
   | 'CAMPAIGNS_WRITE'
   | 'QRCODES_READ'
   | 'QRCODES_WRITE'
+  | 'LINK_SOURCES_READ'
+  | 'LINK_SOURCES_WRITE'
   | 'ANALYTICS_READ'
   | 'DOMAINS_READ'
   | 'DOMAINS_WRITE'
