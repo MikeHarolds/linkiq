@@ -8,10 +8,12 @@ import { ApiKeyAwareThrottlerGuard } from '../../common/guards/api-key-aware-thr
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
 import { BillingModule } from '../billing/billing.module';
+import { EmailModule } from '../email/email.module';
 import { RolesModule } from '../roles/roles.module';
 
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { EmailVerificationService } from './email-verification.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
 const disableRateLimitForTests =
@@ -22,6 +24,7 @@ const disableRateLimitForTests =
     PassportModule,
     BillingModule,
     RolesModule,
+    EmailModule,
     // JwtAuthGuard's API-key branch needs ApiKeysAuthService — see
     // common/guards/jwt-auth.guard.ts.
     ApiKeysModule,
@@ -39,6 +42,7 @@ const disableRateLimitForTests =
   controllers: [AuthController],
   providers: [
     AuthService,
+    EmailVerificationService,
     JwtStrategy,
     // Applied globally: every route requires authentication unless
     // decorated with @Public(). See common/guards/jwt-auth.guard.ts.

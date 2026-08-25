@@ -30,6 +30,8 @@ import { RoleResolutionService } from '../roles/role-resolution.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { SetCurrencyPreferenceDto } from './dto/set-currency-preference.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { UpdateReportPreferenceDto } from './dto/update-report-preference.dto';
+import { ReportPreferenceService } from './report-preference.service';
 import { UsersService } from './users.service';
 
 @ApiTags('users')
@@ -39,6 +41,7 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly roleResolution: RoleResolutionService,
+    private readonly reportPreferences: ReportPreferenceService,
   ) {}
 
   @Get('me/entitlement')
@@ -133,5 +136,24 @@ export class UsersController {
     @Ctx() ctx: RequestContext,
   ): Promise<void> {
     await this.usersService.changePassword(user.id, dto, ctx);
+  }
+
+  @Get('me/report-preferences')
+  @ApiOperation({
+    summary: "The authenticated user's analytics-report-email preferences",
+    description:
+      'Lazily created with defaults on first read. Reports run on a fixed UTC schedule — see reportHourUtc.',
+  })
+  getReportPreferences(@CurrentUser() user: AuthenticatedUser) {
+    return this.reportPreferences.get(user.id);
+  }
+
+  @Patch('me/report-preferences')
+  @ApiOperation({ summary: "Update the authenticated user's report-email preferences" })
+  updateReportPreferences(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateReportPreferenceDto,
+  ) {
+    return this.reportPreferences.update(user.id, dto);
   }
 }

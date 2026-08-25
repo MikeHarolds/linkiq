@@ -32,9 +32,12 @@
  * Run with: npm run prisma:seed --workspace=apps/api
  */
 
+import { createCipheriv, createHash, randomBytes } from 'crypto';
+
 import {
   BillingInterval,
   CampaignStatus,
+  EmailProviderKind,
   GlobalRole,
   LandingPageNavPlacement,
   LandingPageSectionKey,
@@ -2043,6 +2046,78 @@ async function backfillMissingSubscriptions(plans: Record<string, Plan>) {
   }
 }
 
+/** Same AES-256-GCM shape as EmailSecretCipherService (see
+ * modules/email/security/email-secret-cipher.service.ts) — duplicated
+ * here rather than imported because that service depends on Nest's
+ * ConfigService and this script runs outside the DI graph, the same
+ * reasoning every other seed function already follows. Key derivation
+ * (SHA-256 of the configured env string) must stay byte-for-byte
+ * identical to the runtime service so a key encrypted here is
+ * decryptable by the running app. */
+function encryptEmailSecret(plaintext: string): string {
+  const configured =
+    process.env.EMAIL_SECRET_ENCRYPTION_KEY ??
+    'linkiq-dev-email-secret-key-change-in-production';
+  const key = createHash('sha256').update(configured).digest();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([
+    cipher.update(plaintext, 'utf8'),
+    cipher.final(),
+  ]);
+  const authTag = cipher.getAuthTag();
+  return [iv, authTag, ciphertext].map((b) => b.toString('hex')).join(':');
+}
+
+/**
+ * Recommended zero-admin-setup demo path (§18/§19 of the Sprint 20
+ * spec): if RESEND_API_KEY/RESEND_FROM_EMAIL/RESEND_FROM_NAME are all
+ * present, pre-populate and ENABLE EmailConfiguration with them so a
+ * fresh Render deploy has working email with no admin-UI interaction.
+ * Idempotent (upsert on the fixed singleton id) and never overwrites an
+ * already-configured row on re-seed — an admin's own configuration via
+ * /admin/settings/email always wins over a later `npm run prisma:seed`.
+ */
+async function seedEmailConfiguration() {
+  const apiKey = process.env.RESEND_API_KEY;
+  const fromEmail = process.env.RESEND_FROM_EMAIL;
+  const fromName = process.env.RESEND_FROM_NAME;
+
+  if (!apiKey || !fromEmail || !fromName) {
+    console.log(
+      'Skipping EmailConfiguration seed — RESEND_API_KEY/RESEND_FROM_EMAIL/RESEND_FROM_NAME not all set',
+    );
+    return;
+  }
+
+  const SINGLETON_ID = '00000000-0000-0000-0000-000000000002';
+  const existing = await prisma.emailConfiguration.findUnique({
+    where: { id: SINGLETON_ID },
+  });
+  if (existing) {
+    console.log(
+      'EmailConfiguration already exists — leaving admin configuration untouched',
+    );
+    return;
+  }
+
+  await prisma.emailConfiguration.create({
+    data: {
+      id: SINGLETON_ID,
+      enabled: true,
+      provider: EmailProviderKind.RESEND,
+      fromName,
+      fromEmail,
+      resendApiKeyPrefix:
+        apiKey.length <= 8 ? apiKey : `${apiKey.slice(0, 8)}…`,
+      resendApiKeyCiphertext: encryptEmailSecret(apiKey),
+    },
+  });
+  console.log(
+    `Seeded EmailConfiguration — Resend enabled, sending as ${fromName} <${fromEmail}>`,
+  );
+}
+
 async function main() {
   console.log('Seeding LinkIQ database...\n');
 
@@ -2057,6 +2132,7 @@ async function main() {
   await seedAdminUser();
   await seedFeatureFlags();
   await seedLandingPageContent();
+  await seedEmailConfiguration();
   const links = await seedDemoLinks(workspace, user);
   await seedDemoClickEvents(workspace, links);
   await seedDemoQrCodes(workspace, user, links);

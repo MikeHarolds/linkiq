@@ -7,6 +7,7 @@ import appConfig from './config/app.config';
 import authConfig from './config/auth.config';
 import brandingConfig from './config/branding.config';
 import databaseConfig from './config/database.config';
+import emailConfig from './config/email.config';
 import paystackConfig from './config/paystack.config';
 import redisConfig from './config/redis.config';
 import webhooksConfig from './config/webhooks.config';
@@ -19,6 +20,7 @@ import { BillingModule } from './modules/billing/billing.module';
 import { BrandingModule } from './modules/branding/branding.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { DomainsModule } from './modules/domains/domains.module';
+import { EmailModule } from './modules/email/email.module';
 import { HealthModule } from './modules/health/health.module';
 import { LandingPageModule } from './modules/landing-page/landing-page.module';
 import { LinkSourcesModule } from './modules/link-sources/link-sources.module';
@@ -29,6 +31,7 @@ import { PublicModule } from './modules/public/public.module';
 import { QrCodesModule } from './modules/qr-codes/qr-codes.module';
 import { QueueModule } from './modules/queue/queue.module';
 import { RedisModule } from './modules/redis/redis.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { UsersModule } from './modules/users/users.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module';
@@ -46,6 +49,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
         webhooksConfig,
         paystackConfig,
         brandingConfig,
+        emailConfig,
       ],
       envFilePath: ['.env'],
     }),
@@ -82,6 +86,8 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
     WebhooksModule,
     LandingPageModule,
     BrandingModule,
+    EmailModule,
+    ReportsModule,
     PublicModule,
     AdminModule,
   ],

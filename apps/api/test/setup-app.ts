@@ -119,6 +119,11 @@ export async function resetDatabase(
   await prisma.landingPageNavItem.deleteMany();
   await prisma.landingPageSection.deleteMany();
   await prisma.siteBranding.deleteMany();
+  await prisma.emailReportRun.deleteMany();
+  await prisma.emailLog.deleteMany();
+  await prisma.emailVerificationToken.deleteMany();
+  await prisma.userReportPreference.deleteMany();
+  await prisma.emailConfiguration.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.passwordResetToken.deleteMany();
   await prisma.refreshToken.deleteMany();

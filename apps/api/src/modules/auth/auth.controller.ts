@@ -32,6 +32,8 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
+import { EmailVerificationService } from './email-verification.service';
 import type { AuthenticatedUser } from './types/authenticated-user.type';
 import { setRefreshCookie, clearRefreshCookie } from './utils/refresh-cookie';
 
@@ -41,6 +43,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly config: ConfigService,
+    private readonly emailVerification: EmailVerificationService,
   ) {}
 
   @Public()
@@ -274,6 +277,44 @@ export class AuthController {
   ): Promise<{ message: string }> {
     await this.authService.resetPassword(dto.token, dto.password, ctx);
     return { message: 'Password reset successfully. Please log in again.' };
+  }
+
+  @Public()
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verify an email address using a valid verification token',
+    description:
+      "Consumes the token (single use). Never authenticates the caller — this only flips the account's emailVerified flag.",
+  })
+  @ApiResponse({ status: 200, description: 'Email verified' })
+  @ApiResponse({ status: 401, description: 'Invalid or expired token' })
+  async verifyEmail(@Body() dto: VerifyEmailDto): Promise<{ message: string }> {
+    await this.emailVerification.verify(dto.token);
+    return { message: 'Email verified successfully.' };
+  }
+
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Resend the verification email to the authenticated account',
+    description:
+      'Requires an active session (a stronger anti-enumeration posture than an email-only public endpoint). Silently no-ops if the account is already verified. Rate-limited to 3 requests/minute.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Verification email resent (or already verified)',
+  })
+  async resendVerification(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<{ message: string }> {
+    await this.emailVerification.resendVerification(user.id);
+    return {
+      message:
+        'If your email is not yet verified, a new verification link has been sent.',
+    };
   }
 }
 

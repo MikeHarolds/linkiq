@@ -352,6 +352,22 @@ describe('Auth (e2e)', () => {
         .expect(200);
     });
 
+    it('queues a PASSWORD_RESET email (Sprint 20) without altering any existing reset behavior', async () => {
+      await request(server)
+        .post('/api/v1/auth/register')
+        .send(validRegistration);
+
+      await request(server)
+        .post('/api/v1/auth/forgot-password')
+        .send({ email: 'jane@example.com' })
+        .expect(200);
+
+      const log = await prisma.emailLog.findFirstOrThrow({
+        where: { recipientEmail: 'jane@example.com', type: 'PASSWORD_RESET' },
+      });
+      expect(log).toBeTruthy();
+    });
+
     it('rejects reset with an expired token', async () => {
       await request(server)
         .post('/api/v1/auth/register')

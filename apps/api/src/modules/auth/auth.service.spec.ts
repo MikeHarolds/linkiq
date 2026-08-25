@@ -10,11 +10,13 @@ import {
 } from '../../../test/mocks/prisma.mock';
 import type { AuditService } from '../audit/audit.service';
 import type { SubscriptionsService } from '../billing/subscriptions.service';
+import type { EmailService } from '../email/email.service';
 import type { RoleResolutionService } from '../roles/role-resolution.service';
 
 import { AuthService } from './auth.service';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
+import type { EmailVerificationService } from './email-verification.service';
 
 const OWNER = 'OWNER' as WorkspaceRole;
 const USER_ROLE = 'USER' as GlobalRole;
@@ -46,6 +48,8 @@ describe('AuthService', () => {
   let audit: { record: jest.Mock };
   let subscriptions: { createDefaultSubscription: jest.Mock };
   let roleResolution: { syncStoredRole: jest.Mock };
+  let emailService: { queueEmail: jest.Mock };
+  let emailVerification: { issueAndSend: jest.Mock };
   let service: AuthService;
 
   beforeEach(() => {
@@ -56,6 +60,12 @@ describe('AuthService', () => {
       createDefaultSubscription: jest.fn().mockResolvedValue(undefined),
     };
     roleResolution = { syncStoredRole: jest.fn().mockResolvedValue(undefined) };
+    emailService = { queueEmail: jest.fn().mockResolvedValue('email-log-1') };
+    emailVerification = {
+      issueAndSend: jest
+        .fn()
+        .mockResolvedValue('http://localhost:3000/verify-email?token=x'),
+    };
 
     const configValues: Record<string, unknown> = {
       'auth.bcryptSaltRounds': 4, // low rounds keep unit tests fast
@@ -73,6 +83,8 @@ describe('AuthService', () => {
       audit as unknown as AuditService,
       subscriptions as unknown as SubscriptionsService,
       roleResolution as unknown as RoleResolutionService,
+      emailService as unknown as EmailService,
+      emailVerification as unknown as EmailVerificationService,
     );
   });
 

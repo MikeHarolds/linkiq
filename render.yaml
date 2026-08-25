@@ -134,6 +134,24 @@ services:
         sync: false
       - key: PAYSTACK_PUBLIC_KEY
         sync: false
+      # Same value as APP_URL above — used to build the links inside
+      # outbound emails (verification, password reset, dashboard CTA).
+      # See docs/architecture/email.md.
+      - key: FRONTEND_URL
+        sync: false
+      # The only 3 vars required for the recommended demo email path —
+      # if all three are set, first boot pre-populates and enables email
+      # automatically (prisma/seed.ts's seedEmailConfiguration()). Get a
+      # key at https://resend.com — never commit it. See
+      # docs/deployment/render.md §10.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: RESEND_FROM_NAME
+        sync: false
+      - key: EMAIL_SECRET_ENCRYPTION_KEY
+        generateValue: true
 
   - type: web
     name: linkiq-web

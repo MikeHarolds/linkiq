@@ -157,7 +157,24 @@ exists or is needed. Remember to register the deployed webhook URL
 (`https://<linkiq-api-url>/api/v1/webhooks/paystack`) in the Paystack
 dashboard for whichever mode (test/live) you're using.
 
-## 10. What this guide does NOT do
+## 10. Email (Resend)
+
+See [docs/architecture/email.md](../architecture/email.md) for the full
+architecture. On Render, set exactly 3 vars on `linkiq-api` —
+`RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `RESEND_FROM_NAME` — and the app's
+first boot pre-populates and enables email automatically (no admin-UI
+step required for the demo path). Resend communicates over HTTPS only,
+so this works on Render Free without any outbound SMTP port. Also set
+`FRONTEND_URL` to `linkiq-web`'s URL (used to build the links inside
+verification/reset emails) and a real random
+`EMAIL_SECRET_ENCRYPTION_KEY`. SMTP remains available as an alternative,
+configured entirely from `/admin/settings/email` rather than env vars.
+
+Resend's sandbox mode only delivers to the account owner's own verified
+address until a sending domain is verified in the Resend dashboard —
+verify a domain there before expecting real recipients to receive mail.
+
+## 11. What this guide does NOT do
 
 Nothing in this document deploys anything. `render.yaml` is committed
 configuration, reviewed and ready — creating the actual Blueprint

@@ -7,7 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import type { User } from '@prisma/client';
-import { GlobalRole, WorkspaceRole } from '@prisma/client';
+import { EmailLogType, GlobalRole, WorkspaceRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 import type { RequestContext } from '../../common/decorators/request-context.decorator';
@@ -15,11 +15,13 @@ import { uniqueSlug } from '../../common/utils/slugify';
 import { generateOpaqueToken, hashToken } from '../../common/utils/token';
 import { AuditService } from '../audit/audit.service';
 import { SubscriptionsService } from '../billing/subscriptions.service';
+import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RoleResolutionService } from '../roles/role-resolution.service';
 
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
+import { EmailVerificationService } from './email-verification.service';
 import type {
   AccessTokenPayload,
   AuthenticatedUser,
@@ -53,6 +55,8 @@ export class AuthService {
     private readonly audit: AuditService,
     private readonly subscriptions: SubscriptionsService,
     private readonly roleResolution: RoleResolutionService,
+    private readonly emailService: EmailService,
+    private readonly emailVerification: EmailVerificationService,
   ) {}
 
   private get bcryptRounds(): number {
@@ -169,6 +173,32 @@ export class AuthService {
     await this.roleResolution.syncStoredRole(user.id, ctx);
 
     const session = await this.issueSession(user, ctx);
+
+    // Additive post-commit side effects (§6/§7 of the Sprint 20 spec) —
+    // never allowed to affect the response shape or fail registration.
+    // EmailService.queueEmail already never throws (see its own docs),
+    // but EmailVerificationService.issueAndSend does a real DB write
+    // first, so it's wrapped here too — a hiccup creating the
+    // verification token must never turn an otherwise-successful
+    // registration into a 500 for the caller.
+    try {
+      const appUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+      const verificationUrl = await this.emailVerification.issueAndSend(user);
+      await this.emailService.queueEmail({
+        to: user.email,
+        type: EmailLogType.WELCOME,
+        recipientUserId: user.id,
+        templateVars: {
+          firstName: user.firstName,
+          verificationUrl,
+          dashboardUrl: `${appUrl}/dashboard`,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to queue welcome/verification email for new user ${user.id}: ${String(error)}`,
+      );
+    }
 
     return {
       user,
@@ -494,25 +524,30 @@ export class AuthService {
   }
 
   /**
-   * Development-mode "email" delivery: logs a clearly marked message with
-   * the reset link instead of sending a real email. Swap this method's
-   * implementation for a real provider (SES, Postmark, Resend, ...) when
-   * the platform integrates one — no other code in this service changes.
+   * Queues a real password-reset email through the Sprint 20 email
+   * infrastructure. Nothing else in this service changes — forgotPassword's
+   * rate limiting, anti-enumeration response, token creation, and audit
+   * logging above are all untouched; this method's signature and its one
+   * call site are unchanged too. EmailService.queueEmail never throws, so
+   * a down/misconfigured email provider still lets forgotPassword resolve
+   * normally.
    */
   private sendPasswordResetEmail(email: string, rawToken: string): void {
     const appUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
     const resetLink = `${appUrl}/reset-password?token=${rawToken}`;
+    const expiresInMinutes =
+      this.config.get<number>('auth.passwordReset.tokenExpiresInMinutes') ?? 30;
 
-    if (process.env.NODE_ENV === 'production') {
-      this.logger.warn(
-        `No email provider configured — password reset link for ${email} was not delivered.`,
+    this.emailService
+      .queueEmail({
+        to: email,
+        type: EmailLogType.PASSWORD_RESET,
+        templateVars: { resetUrl: resetLink, expiresInMinutes },
+      })
+      .catch((error: unknown) =>
+        this.logger.warn(
+          `Failed to queue password reset email: ${String(error)}`,
+        ),
       );
-      return;
-    }
-
-    // eslint-disable-next-line no-console
-    console.log(
-      `\n[DEV EMAIL] Password reset requested for ${email}\n[DEV EMAIL] Reset link: ${resetLink}\n[DEV EMAIL] This link is only logged in non-production environments.\n`,
-    );
   }
 }

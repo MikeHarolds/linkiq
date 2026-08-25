@@ -11,6 +11,7 @@ import {
   ImageIcon,
   KeyRound,
   LayoutDashboard,
+  Mail,
   Menu,
   Newspaper,
   ReceiptText,
@@ -49,6 +50,7 @@ const NAV_ITEMS = [
   { label: 'Audit Logs', href: '/admin/audit-logs', icon: ScrollText },
   { label: 'Landing Page', href: '/admin/landing-page', icon: Newspaper },
   { label: 'Branding', href: '/admin/settings/branding', icon: ImageIcon },
+  { label: 'Email', href: '/admin/settings/email', icon: Mail },
   { label: 'Platform Settings', href: '/admin/settings', icon: Settings },
   { label: 'System Health', href: '/admin/system-health', icon: Activity },
 ] as const;

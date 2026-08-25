@@ -10,6 +10,7 @@ import { PAYSTACK_WEBHOOK_QUEUE } from '../billing/providers/paystack/queue/pays
 import { BrandingModule } from '../branding/branding.module';
 import { CurrencyModule } from '../currency/currency.module';
 import { DomainsModule } from '../domains/domains.module';
+import { EmailModule } from '../email/email.module';
 import { HealthModule } from '../health/health.module';
 import { LandingPageModule } from '../landing-page/landing-page.module';
 import { CLICK_EVENT_QUEUE } from '../links/queue/click-event.types';
@@ -22,6 +23,7 @@ import { AdminAuditLogsController } from './controllers/admin-audit-logs.control
 import { AdminBrandingController } from './controllers/admin-branding.controller';
 import { AdminCurrenciesController } from './controllers/admin-currencies.controller';
 import { AdminDomainsController } from './controllers/admin-domains.controller';
+import { AdminEmailController } from './controllers/admin-email.controller';
 import { AdminHealthController } from './controllers/admin-health.controller';
 import { AdminInvoicesController } from './controllers/admin-invoices.controller';
 import { AdminLandingPageController } from './controllers/admin-landing-page.controller';
@@ -36,6 +38,7 @@ import { AdminWebhooksController } from './controllers/admin-webhooks.controller
 import { AdminWorkspacesController } from './controllers/admin-workspaces.controller';
 import { QueueHealthIndicator } from './indicators/queue-health.indicator';
 import { AdminApiUsageService } from './services/admin-api-usage.service';
+import { AdminEmailService } from './services/admin-email.service';
 import { AdminOverviewService } from './services/admin-overview.service';
 import { AdminSettingsService } from './services/admin-settings.service';
 import { AdminUsersService } from './services/admin-users.service';
@@ -74,6 +77,7 @@ import { AdminWorkspacesService } from './services/admin-workspaces.service';
     BrandingModule,
     RolesModule,
     CurrencyModule,
+    EmailModule,
     BullModule.registerQueue(
       { name: CLICK_EVENT_QUEUE },
       { name: WEBHOOK_DELIVERY_QUEUE },
@@ -99,6 +103,7 @@ import { AdminWorkspacesService } from './services/admin-workspaces.service';
     AdminBrandingController,
     AdminRolesController,
     AdminCurrenciesController,
+    AdminEmailController,
   ],
   providers: [
     AdminUsersService,
@@ -107,6 +112,7 @@ import { AdminWorkspacesService } from './services/admin-workspaces.service';
     AdminWebhooksService,
     AdminSettingsService,
     AdminOverviewService,
+    AdminEmailService,
     QueueHealthIndicator,
   ],
 })

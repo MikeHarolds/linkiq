@@ -1390,3 +1390,123 @@ export interface DetectedCurrencyDto {
   source: CurrencyResolutionSource;
   detectedCountry: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// Email, Verification & Analytics Reporting (Sprint 20)
+// ---------------------------------------------------------------------------
+
+export type EmailProviderKind = 'RESEND' | 'SMTP';
+export type SmtpEncryptionMode = 'NONE' | 'TLS' | 'SSL';
+export type EmailLogType =
+  | 'VERIFICATION'
+  | 'WELCOME'
+  | 'PASSWORD_RESET'
+  | 'DAILY_REPORT'
+  | 'WEEKLY_REPORT'
+  | 'TEST';
+export type EmailLogStatus =
+  'QUEUED' | 'SENDING' | 'SENT' | 'FAILED' | 'SKIPPED';
+export type ReportFrequency = 'DAILY' | 'WEEKLY';
+export type ReportDay =
+  | 'MONDAY'
+  | 'TUESDAY'
+  | 'WEDNESDAY'
+  | 'THURSDAY'
+  | 'FRIDAY'
+  | 'SATURDAY'
+  | 'SUNDAY';
+
+/** GET/PATCH /admin/email/config's response shape — secrets are never
+ * included, only booleans/prefixes derived from them, the same masking
+ * discipline PaymentsSettingsDto already established for Paystack. */
+export interface EmailConfigDto {
+  enabled: boolean;
+  provider: EmailProviderKind;
+  fromName: string;
+  fromEmail: string;
+  resendApiKeyConfigured: boolean;
+  resendApiKeyPrefix: string | null;
+  smtpHost: string | null;
+  smtpPort: number | null;
+  smtpUsername: string | null;
+  smtpPasswordConfigured: boolean;
+  smtpEncryptionMode: SmtpEncryptionMode;
+  requireEmailVerification: boolean;
+  welcomeEmailsEnabled: boolean;
+  verificationEmailsEnabled: boolean;
+  passwordResetEmailsEnabled: boolean;
+  reportEmailsEnabled: boolean;
+  lastSuccessfulSendAt: string | null;
+  lastFailedSendAt: string | null;
+  lastConnectionTestAt: string | null;
+  lastConnectionTestOk: boolean | null;
+}
+
+/** Omit resendApiKey/smtpPassword to leave the currently-stored secret
+ * unchanged — provide a new value only to replace it. */
+export interface UpdateEmailConfigPayload {
+  enabled?: boolean;
+  provider?: EmailProviderKind;
+  fromName?: string;
+  fromEmail?: string;
+  resendApiKey?: string;
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpUsername?: string;
+  smtpPassword?: string;
+  smtpEncryptionMode?: SmtpEncryptionMode;
+  requireEmailVerification?: boolean;
+  welcomeEmailsEnabled?: boolean;
+  verificationEmailsEnabled?: boolean;
+  passwordResetEmailsEnabled?: boolean;
+  reportEmailsEnabled?: boolean;
+}
+
+export interface EmailConnectionTestDto {
+  ok: boolean;
+  message: string;
+}
+
+export interface EmailLogDto {
+  id: string;
+  recipientEmail: string;
+  recipientUserId: string | null;
+  type: EmailLogType;
+  provider: EmailProviderKind | null;
+  status: EmailLogStatus;
+  attemptCount: number;
+  lastAttemptAt: string | null;
+  sentAt: string | null;
+  failureReason: string | null;
+  referenceId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EmailStatsDto {
+  sent: number;
+  failed: number;
+  queued: number;
+  skipped: number;
+  successRate: number | null;
+}
+
+/** GET/PATCH /users/me/report-preferences — no timezone field: reports
+ * run on a fixed UTC schedule, see docs/architecture/email.md. */
+export interface ReportPreferenceDto {
+  id: string;
+  userId: string;
+  emailReportsEnabled: boolean;
+  frequency: ReportFrequency;
+  reportDay: ReportDay;
+  reportHourUtc: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateReportPreferencePayload {
+  emailReportsEnabled?: boolean;
+  frequency?: ReportFrequency;
+  reportDay?: ReportDay;
+  reportHourUtc?: number;
+}

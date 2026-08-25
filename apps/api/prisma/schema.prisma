@@ -299,17 +299,21 @@ model User {
   updatedAt DateTime @updatedAt
 
   memberships             WorkspaceMember[]
-  ownedOrgs               Organization[]       @relation("OrganizationOwner")
+  ownedOrgs               Organization[]            @relation("OrganizationOwner")
   auditLogs               AuditLog[]
   refreshTokens           RefreshToken[]
   passwordResetTokens     PasswordResetToken[]
-  createdLinks            Link[]               @relation("LinkCreator")
-  createdQrCodes          QrCode[]             @relation("QrCodeCreator")
-  createdLinkSources      LinkSource[]         @relation("LinkSourceCreator")
-  createdCampaigns        Campaign[]           @relation("CampaignCreator")
-  createdCustomDomains    CustomDomain[]       @relation("CustomDomainCreator")
-  createdApiKeys          ApiKey[]             @relation("ApiKeyCreator")
-  createdWebhookEndpoints WebhookEndpoint[]    @relation("WebhookEndpointCreator")
+  createdLinks            Link[]                    @relation("LinkCreator")
+  createdQrCodes          QrCode[]                  @relation("QrCodeCreator")
+  createdLinkSources      LinkSource[]              @relation("LinkSourceCreator")
+  createdCampaigns        Campaign[]                @relation("CampaignCreator")
+  createdCustomDomains    CustomDomain[]            @relation("CustomDomainCreator")
+  createdApiKeys          ApiKey[]                  @relation("ApiKeyCreator")
+  createdWebhookEndpoints WebhookEndpoint[]         @relation("WebhookEndpointCreator")
+  emailVerificationTokens EmailVerificationToken[]
+  emailLogs               EmailLog[]
+  reportPreference        UserReportPreference?
+  reportRuns              EmailReportRun[]
 
   @@index([email])
   @@map("users")
@@ -1712,4 +1716,227 @@ model PlanPrice {
   @@unique([planId, currencyId])
   @@index([currencyId])
   @@map("plan_prices")
+}
+
+// ---------------------------------------------------------------------------
+// Email, Verification & Analytics Reporting (Sprint 20)
+// ---------------------------------------------------------------------------
+// Transactional email infrastructure: provider config (admin-writable
+// singleton, mirrors SiteBranding + WebhookEndpoint's secret-column
+// convention), a delivery log (mirrors WebhookDelivery), email-verification
+// tokens (mirrors PasswordResetToken), and user-configurable daily/weekly
+// analytics report emails built entirely from the existing AnalyticsService
+// — no new aggregation logic anywhere in this section.
+
+enum EmailProviderKind {
+  RESEND
+  SMTP
+}
+
+enum SmtpEncryptionMode {
+  NONE
+  TLS
+  SSL
+}
+
+enum EmailLogType {
+  VERIFICATION
+  WELCOME
+  PASSWORD_RESET
+  DAILY_REPORT
+  WEEKLY_REPORT
+  TEST
+}
+
+enum EmailLogStatus {
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum ReportFrequency {
+  DAILY
+  WEEKLY
+}
+
+/// 1=Monday..7=Sunday (ISO convention) — never 0=Sunday, avoiding a second
+/// incompatible day-numbering convention elsewhere in the schema.
+enum ReportDay {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+/// One row per issued email-verification token. Same shape/rationale as
+/// PasswordResetToken above: only the SHA-256 hash is stored, `usedAt`
+/// prevents replay, `expiresAt` bounds validity. Never itself an
+/// authentication credential — verifying a token only flips
+/// User.emailVerified, it never issues a session (see EmailVerificationService).
+model EmailVerificationToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("email_verification_tokens")
+}
+
+/// Enforced singleton (fixed id '00000000-0000-0000-0000-000000000002' —
+/// SiteBranding already owns '...0001', same pattern) holding the
+/// platform's transactional-email configuration. Secrets use the same
+/// prefix/ciphertext column-pair convention WebhookEndpoint established
+/// for its signing secret (see webhook-secret-cipher.service.ts) — a
+/// dedicated EmailSecretCipherService (same AES-256-GCM shape, its own
+/// env-derived key) is the only thing that can decrypt them, and only
+/// ever does so inside the email provider factory at send time, never in
+/// any controller response.
+model EmailConfiguration {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Master ON/OFF — when false, EmailService.queueEmail writes a
+  /// SKIPPED EmailLog row and returns without enqueueing, regardless of
+  /// provider config.
+  enabled  Boolean           @default(false)
+  provider EmailProviderKind @default(RESEND)
+
+  fromName  String @default("LinkIQ")
+  fromEmail String @default("")
+
+  /// Non-secret display prefix (e.g. "re_ab12") — safe to show. Null
+  /// until a key has ever been set.
+  resendApiKeyPrefix     String?
+  resendApiKeyCiphertext String?
+
+  smtpHost               String?
+  smtpPort                Int?
+  smtpUsername            String?
+  /// Never returned/logged — same secret-column convention as above.
+  smtpPasswordCiphertext  String?
+  smtpEncryptionMode      SmtpEncryptionMode @default(TLS)
+
+  /// Admin-controlled — gates the presentational "verify your email"
+  /// dashboard banner only. Never blocks login; seeded demo/admin
+  /// accounts are already emailVerified:true regardless of this value.
+  requireEmailVerification Boolean @default(true)
+
+  /// Per-type kill switches (§17 of the Sprint 20 spec) — checked by
+  /// EmailService.queueEmail in addition to the master `enabled` flag
+  /// above. Disabling a type still writes a SKIPPED EmailLog row rather
+  /// than silently dropping the send.
+  welcomeEmailsEnabled       Boolean @default(true)
+  verificationEmailsEnabled  Boolean @default(true)
+  passwordResetEmailsEnabled Boolean @default(true)
+  reportEmailsEnabled        Boolean @default(true)
+
+  lastSuccessfulSendAt DateTime?
+  lastFailedSendAt     DateTime?
+  lastConnectionTestAt DateTime?
+  lastConnectionTestOk Boolean?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("email_configuration")
+}
+
+/// One row per attempted (or skipped) email send — the admin-visible
+/// delivery log. Created QUEUED/SKIPPED at enqueue time by EmailService
+/// (mirrors WebhookEventsService's "write the row, then enqueue {id}"
+/// shape), updated by the email processor on every attempt.
+/// `recipientUserId` is nullable because an admin "Send Test Email" has
+/// no underlying User. `metadata` holds template variables only — never
+/// secrets — so the processor can re-render on every retry attempt.
+model EmailLog {
+  id              String             @id @default(uuid()) @db.Uuid
+  recipientEmail  String
+  recipientUserId String?            @db.Uuid
+  recipientUser   User?              @relation(fields: [recipientUserId], references: [id], onDelete: SetNull)
+
+  type     EmailLogType
+  provider EmailProviderKind?
+  status   EmailLogStatus     @default(QUEUED)
+
+  attemptCount  Int       @default(0)
+  lastAttemptAt DateTime?
+  sentAt        DateTime?
+  failureReason String?
+  metadata      Json?
+
+  /// Freeform reference to the domain object this email is about (e.g.
+  /// an EmailReportRun id) — for admin support/debugging only, never
+  /// rendered as a link/action.
+  referenceId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reportRuns EmailReportRun[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([recipientEmail])
+  @@index([type])
+  @@map("email_logs")
+}
+
+/// A user's analytics-report-email preferences — one row per user,
+/// created lazily (upsert) the first time they touch Settings ->
+/// Notifications, the same lazy-singleton-row pattern SiteBranding uses
+/// but per-user instead of platform-wide. No timezone field — per this
+/// sprint's explicit instruction, reports run on a fixed UTC schedule
+/// (documented in docs/architecture/email.md and shown as visible copy
+/// on the settings page), since no timezone field exists anywhere else
+/// in this schema and the dashboard only ever computes one client-side.
+model UserReportPreference {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @unique @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  emailReportsEnabled Boolean         @default(false)
+  frequency           ReportFrequency @default(WEEKLY)
+  /// Only meaningful when frequency = WEEKLY; ignored otherwise.
+  reportDay           ReportDay       @default(MONDAY)
+  /// Hour of day, UTC, 0-23 — the dispatch tick itself runs hourly, so
+  /// "preferred report time" collapses to an hour rather than a minute.
+  reportHourUtc       Int             @default(9)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user_report_preferences")
+}
+
+/// Idempotency ledger for report-email dispatch. Unique on (userId,
+/// frequency, periodStart) — the hourly tick job's create() hits this
+/// constraint on any duplicate attempt (restart, double-fire, manual
+/// re-run), which is what actually prevents a double-send, not
+/// application-level "have I seen this" logic — the same principle
+/// WebhookDelivery's own unique constraint already establishes above.
+/// `periodStart` is always midnight UTC of the report's first day
+/// (yesterday for DAILY, the prior Monday for WEEKLY) — see
+/// ReportGenerationService.
+model EmailReportRun {
+  id          String          @id @default(uuid()) @db.Uuid
+  userId      String          @db.Uuid
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  frequency   ReportFrequency
+  periodStart DateTime
+  periodEnd   DateTime
+  emailLogId  String?         @db.Uuid
+  emailLog    EmailLog?       @relation(fields: [emailLogId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, frequency, periodStart])
+  @@map("email_report_runs")
 }

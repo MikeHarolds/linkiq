@@ -19,6 +19,12 @@ import type {
   CurrencyDto,
   CurrencySettingsDto,
   DomainStatus,
+  EmailConfigDto,
+  EmailConnectionTestDto,
+  EmailLogDto,
+  EmailLogStatus,
+  EmailLogType,
+  EmailStatsDto,
   GlobalRole,
   InvoiceStatus,
   LandingPageFaqDto,
@@ -44,6 +50,7 @@ import type {
   UpdateCountryMappingPayload,
   UpdateCurrencyPayload,
   UpdateCurrencySettingsPayload,
+  UpdateEmailConfigPayload,
   UpdateLandingPageSectionPayload,
   UpdatePlanPayload,
   UpdateRolePayload,
@@ -521,4 +528,37 @@ export function uploadFavicon(file: File): Promise<SiteBrandingDto> {
 }
 export function removeFavicon(): Promise<SiteBrandingDto> {
   return api.delete(`${BASE}/branding/favicon`);
+}
+
+// --- Email (Sprint 20) ---
+export function getEmailConfig(): Promise<EmailConfigDto> {
+  return api.get(`${BASE}/email/config`);
+}
+export function updateEmailConfig(
+  payload: UpdateEmailConfigPayload,
+): Promise<EmailConfigDto> {
+  return api.patch(`${BASE}/email/config`, payload);
+}
+export function testEmailConnection(): Promise<EmailConnectionTestDto> {
+  return api.post(`${BASE}/email/test-connection`);
+}
+export function sendTestEmail(to: string): Promise<{ message: string }> {
+  return api.post(`${BASE}/email/send-test`, { to });
+}
+export interface ListEmailLogsParams {
+  page: number;
+  pageSize: number;
+  status?: EmailLogStatus;
+  type?: EmailLogType;
+  recipientEmail?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+export function listEmailLogs(
+  params: ListEmailLogsParams,
+): Promise<Paginated<EmailLogDto>> {
+  return api.get(`${BASE}/email/logs${qs({ ...params })}`);
+}
+export function getEmailStats(range: TimeRangeValue): Promise<EmailStatsDto> {
+  return api.get(`${BASE}/email/stats${qs({ range })}`);
 }

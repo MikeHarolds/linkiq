@@ -20,5 +20,11 @@ export default registerAs('auth', () => ({
       10,
     ),
   },
+  emailVerification: {
+    tokenExpiresInHours: parseInt(
+      process.env.EMAIL_VERIFICATION_EXPIRES_IN_HOURS ?? '24',
+      10,
+    ),
+  },
   bcryptSaltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS ?? '12', 10),
 }));

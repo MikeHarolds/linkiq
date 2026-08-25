@@ -151,7 +151,9 @@ is the authoritative source, not a duplicate list here:
 
 - [`.env.example`](.env.example) — Docker Compose project-level vars
 - [`apps/api/.env.example`](apps/api/.env.example) — API, Prisma,
-  Redis, JWT/auth, Paystack, webhooks, rate limiting, demo credentials
+  Redis, JWT/auth, Paystack, webhooks, email (Resend/SMTP — see
+  [`docs/architecture/email.md`](docs/architecture/email.md)), rate
+  limiting, demo credentials
 - [`apps/web/.env.example`](apps/web/.env.example) — API URL, app URL,
   refresh-cookie name
 - [`apps/api/.env.production.example`](apps/api/.env.production.example) /
