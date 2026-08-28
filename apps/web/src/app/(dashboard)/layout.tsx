@@ -36,6 +36,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
 import * as React from 'react';
 
+import { InstallMenuItem } from '@/components/pwa/install-menu-item';
 import { BrandMark } from '@/components/shared/brand-mark';
 import { useAuth } from '@/providers/auth-provider';
 
@@ -411,6 +412,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                     Settings
                   </Link>
                 </DropdownMenuItem>
+                <InstallMenuItem />
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={handleLogout}

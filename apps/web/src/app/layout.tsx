@@ -1,8 +1,11 @@
 import { ThemeProvider, Toaster } from '@linkiq/ui';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import type { ReactNode } from 'react';
 
+import { InstallPrompt } from '@/components/pwa/install-prompt';
+import { OfflineBanner } from '@/components/pwa/offline-banner';
+import { RegisterServiceWorker } from '@/components/pwa/register-service-worker';
 import { AuthProvider } from '@/providers/auth-provider';
 import { CurrencyProvider } from '@/providers/currency-provider';
 import { QueryProvider } from '@/providers/query-provider';
@@ -29,9 +32,16 @@ export const metadata: Metadata = {
   },
   description:
     'Shorten, brand, track, and optimize every link from one platform built for modern teams — custom domains, real-time analytics, and a developer-ready API.',
+  manifest: '/manifest.webmanifest',
   icons: {
     icon: '/favicon.svg',
     shortcut: '/favicon.svg',
+    apple: '/icons/apple-touch-icon.png',
+  },
+  appleWebApp: {
+    capable: true,
+    title: 'LinkIQ',
+    statusBarStyle: 'default',
   },
   openGraph: {
     type: 'website',
@@ -48,6 +58,15 @@ export const metadata: Metadata = {
   },
 };
 
+// themeColor/colorScheme live in a separate `viewport` export (not
+// `metadata`) as of Next.js 14+ — matches manifest.ts's theme_color
+// (#F97316, packages/ui/src/styles/globals.css's --primary) so the
+// browser UI (address bar on Android, title bar on installed desktop
+// PWAs) and the manifest agree.
+export const viewport: Viewport = {
+  themeColor: '#F97316',
+};
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning className={inter.variable}>
@@ -58,6 +77,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <CurrencyProvider>
                 {children}
                 <Toaster position="top-right" />
+                <RegisterServiceWorker />
+                <OfflineBanner />
+                <InstallPrompt />
               </CurrencyProvider>
             </AuthProvider>
           </QueryProvider>
